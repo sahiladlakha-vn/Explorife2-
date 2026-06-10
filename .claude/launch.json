@@ -1,0 +1,31 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "Explorife Web Preview",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["serve.py"],
+      "port": 8080,
+      "autoPort": true
+    },
+    {
+      "name": "Flutter Web (Built)",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["-m", "http.server", "--directory", "build/web"],
+      "port": 8080,
+      "autoPort": true
+    },
+    {
+      "name": "Flutter Dev (iOS Simulator)",
+      "runtimeExecutable": "/Users/toan/development/flutter/bin/flutter",
+      "runtimeArgs": ["run", "-d", "iphone"],
+      "port": 0
+    },
+    {
+      "name": "Flutter Dev (Android Emulator)",
+      "runtimeExecutable": "/Users/toan/development/flutter/bin/flutter",
+      "runtimeArgs": ["run", "-d", "android"],
+      "port": 0
+    }
+  ]
+}
