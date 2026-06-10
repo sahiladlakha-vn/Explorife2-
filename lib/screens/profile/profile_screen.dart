@@ -177,9 +177,10 @@ class ProfileScreen extends StatelessWidget {
               ),
               child: Column(
                 children: [
-                  _MenuItem(icon: '🗺️', label: 'My Trips', onTap: () {}),
-                  _MenuItem(icon: '💎', label: 'My Gems', onTap: () {}),
-                  _MenuItem(icon: '📖', label: 'My Stories', onTap: () {}),
+                  _MenuItem(icon: '🗺️', label: 'My Trips', onTap: () => context.go('/hikes')),
+                  _MenuItem(icon: '💎', label: 'My Gems', onTap: () => context.go('/explore')),
+                  _MenuItem(icon: '📖', label: 'My Stories', onTap: () => context.go('/stories')),
+                  _MenuItem(icon: '💸', label: 'Expense Splits', onTap: () => context.go('/splits')),
                   _MenuItem(icon: '🔔', label: 'Notifications', onTap: () {}),
                   _MenuItem(icon: '⚙️', label: 'Settings', onTap: () {}),
                   _MenuItem(

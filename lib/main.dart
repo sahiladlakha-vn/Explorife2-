@@ -8,6 +8,7 @@ import 'providers/auth_provider.dart';
 import 'providers/destination_provider.dart';
 import 'providers/gem_provider.dart';
 import 'providers/story_provider.dart';
+import 'providers/hike_provider.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -36,6 +37,7 @@ class ExplorIfeApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => DestinationProvider()),
         ChangeNotifierProvider(create: (_) => GemProvider()),
         ChangeNotifierProvider(create: (_) => StoryProvider()),
+        ChangeNotifierProvider(create: (_) => HikeProvider()),
       ],
       child: MaterialApp.router(
         title: 'ExplorIfe',

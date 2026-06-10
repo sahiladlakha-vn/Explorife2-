@@ -15,19 +15,26 @@ import '../../screens/gems/add_gem_screen.dart';
 import '../../screens/stories/stories_screen.dart';
 import '../../screens/stories/story_detail_screen.dart';
 import '../../screens/stories/submit_story_screen.dart';
+import '../../screens/hikes/hikes_screen.dart';
+import '../../screens/hikes/log_hike_screen.dart';
+import '../../screens/splits/splits_screen.dart';
+import '../../screens/splits/split_detail_screen.dart';
+import '../../screens/onboarding/onboarding_screen.dart';
 import '../../widgets/common/app_shell.dart';
 
-const _protectedRoutes = {'/profile', '/drop-gem', '/submit-story'};
+const _protectedRoutes = {'/profile', '/drop-gem', '/submit-story', '/log-hike', '/splits'};
 
 class AppRouter {
   static final router = GoRouter(
-    initialLocation: '/home',
+    initialLocation: '/onboarding',
     redirect: (context, state) {
       final auth = context.read<AuthProvider>();
       final path = state.uri.path;
       final isProtected = _protectedRoutes.any((r) => path.startsWith(r));
 
       if (auth.loading) return null;
+      // Skip onboarding if already authenticated
+      if (path == '/onboarding' && auth.isAuthenticated) return '/home';
       if (isProtected && !auth.isAuthenticated) {
         return '/auth?redirect=${Uri.encodeComponent(path)}';
       }
@@ -79,6 +86,15 @@ class AppRouter {
       ),
       GoRoute(path: '/drop-gem', builder: (_, __) => const AddGemScreen()),
       GoRoute(path: '/submit-story', builder: (_, __) => const SubmitStoryScreen()),
+      GoRoute(path: '/hikes', builder: (_, __) => const HikesScreen()),
+      GoRoute(path: '/log-hike', builder: (_, __) => const LogHikeScreen()),
+      GoRoute(path: '/splits', builder: (_, __) => const SplitsScreen()),
+      GoRoute(
+        path: '/splits/:id',
+        builder: (context, state) =>
+            SplitDetailScreen(groupId: state.pathParameters['id']!),
+      ),
+      GoRoute(path: '/onboarding', builder: (_, __) => const OnboardingScreen()),
     ],
   );
 }
