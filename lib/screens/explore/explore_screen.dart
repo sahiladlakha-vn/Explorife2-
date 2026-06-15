@@ -1,8 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:latlong2/latlong.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
@@ -10,6 +8,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import '../../core/theme/app_theme.dart';
 import '../../providers/gem_provider.dart';
 import '../../models/gem.dart';
+import 'map_engine.dart';
 
 class ExploreScreen extends StatefulWidget {
   const ExploreScreen({super.key});
@@ -21,10 +20,9 @@ class ExploreScreen extends StatefulWidget {
 enum _MapStyle { outdoors, dark, satellite }
 
 class _ExploreScreenState extends State<ExploreScreen> {
-  final MapController _mapController = MapController();
+  MapEngineController? _engine;
   Gem? _selected;
-  _MapStyle _style = _MapStyle.outdoors;
-  bool _mapReady = false;
+  _MapStyle _style = _MapStyle.dark;
 
   static final String _token = dotenv.env['MAPBOX_TOKEN'] ?? '';
 
@@ -53,15 +51,15 @@ class _ExploreScreenState extends State<ExploreScreen> {
     }
   }
 
-  String get _tileUrl {
-    if (_token.isEmpty) {
-      // Fallback to free CARTO basemaps when no Mapbox token is configured.
-      return _style == _MapStyle.dark
-          ? 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
-          : 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png';
-    }
-    return 'https://api.mapbox.com/styles/v1/mapbox/$_styleId/tiles/256/{z}/{x}/{y}@2x?access_token=$_token';
-  }
+  List<MapMarkerData> _markersFor(List<Gem> gems) => gems
+      .map((g) => MapMarkerData(
+            id: g.id,
+            lat: g.latitude!,
+            lng: g.longitude!,
+            emoji: g.emoji,
+            icon: _iconFor(g.category),
+          ))
+      .toList();
 
   @override
   Widget build(BuildContext context) {
@@ -71,29 +69,20 @@ class _ExploreScreenState extends State<ExploreScreen> {
     return Scaffold(
       body: Stack(
         children: [
-          // ── MAP ──
-          FlutterMap(
-            mapController: _mapController,
-            options: MapOptions(
-              initialCenter: const LatLng(10.776, 106.700), // Ho Chi Minh City
-              initialZoom: 11,
-              minZoom: 3,
-              maxZoom: 18,
-              onTap: (_, __) => setState(() => _selected = null),
-              onMapReady: () {
-                _mapReady = true;
-                _fitToGems(gems);
-              },
-            ),
-            children: [
-              TileLayer(
-                urlTemplate: _tileUrl,
-                subdomains: const ['a', 'b', 'c', 'd'],
-                userAgentPackageName: 'com.explorife.app',
-                tileSize: 256,
-              ),
-              MarkerLayer(markers: gems.map(_buildMarker).toList()),
-            ],
+          // ── MAP (Mapbox GL globe on web; flutter_map fallback on native) ──
+          MapEngineView(
+            markers: _markersFor(gems),
+            styleId: _styleId,
+            token: _token,
+            onMarkerTap: (id) {
+              final g = gems.where((g) => g.id == id);
+              if (g.isEmpty) return;
+              setState(() => _selected = g.first);
+            },
+            onReady: (c) {
+              _engine = c;
+              if (gems.isNotEmpty) c.fitMarkers(_markersFor(gems));
+            },
           ),
 
           // ── TOP: menu + search ──
@@ -235,8 +224,8 @@ class _ExploreScreenState extends State<ExploreScreen> {
             iconFor: _iconFor,
             onGemTap: (g) {
               setState(() => _selected = g);
-              if (g.hasCoords && _mapReady) {
-                _mapController.move(LatLng(g.latitude!, g.longitude!), 13);
+              if (g.hasCoords) {
+                _engine?.flyTo(g.latitude!, g.longitude!, 6);
               }
               context.go('/gems/${g.id}');
             },
@@ -259,25 +248,7 @@ class _ExploreScreenState extends State<ExploreScreen> {
 
   // ───────── helpers ─────────
 
-  void _zoom(double delta) {
-    final cam = _mapController.camera;
-    _mapController.move(cam.center, (cam.zoom + delta).clamp(3, 18));
-  }
-
-  void _fitToGems(List<Gem> gems) {
-    if (gems.isEmpty || !_mapReady) return;
-    final pts = gems.map((g) => LatLng(g.latitude!, g.longitude!)).toList();
-    if (pts.length == 1) {
-      _mapController.move(pts.first, 13);
-      return;
-    }
-    _mapController.fitCamera(
-      CameraFit.bounds(
-        bounds: LatLngBounds.fromPoints(pts),
-        padding: const EdgeInsets.fromLTRB(60, 120, 60, 280),
-      ),
-    );
-  }
+  void _zoom(double delta) => _engine?.zoomBy(delta);
 
   Future<void> _locateMe() async {
     try {
@@ -287,13 +258,17 @@ class _ExploreScreenState extends State<ExploreScreen> {
       }
       if (perm == LocationPermission.denied ||
           perm == LocationPermission.deniedForever) {
-        _fitToGems(context.read<GemProvider>().mappableGems);
+        _engine?.fitMarkers(
+            _markersFor(context.read<GemProvider>().mappableGems));
         return;
       }
       final pos = await Geolocator.getCurrentPosition();
-      if (_mapReady) _mapController.move(LatLng(pos.latitude, pos.longitude), 13);
+      _engine?.flyTo(pos.latitude, pos.longitude, 11);
     } catch (_) {
-      if (mounted) _fitToGems(context.read<GemProvider>().mappableGems);
+      if (mounted) {
+        _engine?.fitMarkers(
+            _markersFor(context.read<GemProvider>().mappableGems));
+      }
     }
   }
 
@@ -398,45 +373,6 @@ class _ExploreScreenState extends State<ExploreScreen> {
     );
   }
 
-  Marker _buildMarker(Gem g) {
-    final isSelected = _selected?.id == g.id;
-    return Marker(
-      point: LatLng(g.latitude!, g.longitude!),
-      width: 46,
-      height: 46,
-      child: GestureDetector(
-        onTap: () {
-          setState(() => _selected = g);
-          if (_mapReady) {
-            _mapController.move(LatLng(g.latitude!, g.longitude!), _mapController.camera.zoom);
-          }
-        },
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 200),
-          decoration: BoxDecoration(
-            color: isSelected ? AppTheme.primary : Colors.white,
-            shape: BoxShape.circle,
-            border: Border.all(
-              color: isSelected ? Colors.white : AppTheme.primary,
-              width: isSelected ? 3 : 2,
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: (isSelected ? AppTheme.primary : Colors.black).withOpacity(0.4),
-                blurRadius: isSelected ? 14 : 6,
-                offset: const Offset(0, 3),
-              ),
-            ],
-          ),
-          child: Icon(
-            _iconFor(g.category),
-            size: 20,
-            color: isSelected ? Colors.white : AppTheme.primary,
-          ),
-        ),
-      ),
-    );
-  }
 }
 
 // ─────────────────────────────────────────
