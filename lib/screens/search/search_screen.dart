@@ -16,19 +16,24 @@ class SearchScreen extends StatefulWidget {
 class _SearchScreenState extends State<SearchScreen> {
   final TextEditingController _controller = TextEditingController();
   bool _hasQuery = false;
+  late final DestinationProvider _destinations;
 
   @override
   void initState() {
     super.initState();
+    _destinations = context.read<DestinationProvider>();
     _controller.addListener(() {
       final q = _controller.text;
-      context.read<DestinationProvider>().setSearchQuery(q);
+      _destinations.setSearchQuery(q);
       setState(() => _hasQuery = q.isNotEmpty);
     });
   }
 
   @override
   void dispose() {
+    // Search text is screen-local; don't leave it filtering other screens
+    // (e.g. Home) that share this provider.
+    _destinations.setSearchQuery('');
     _controller.dispose();
     super.dispose();
   }
@@ -102,8 +107,8 @@ class _SearchSuggestions extends StatelessWidget {
                         borderRadius: BorderRadius.circular(16),
                       ),
                       child: Center(
-                        child: Text(AppConstants.categoryIcons[i],
-                            style: const TextStyle(fontSize: 24)),
+                        child: Icon(AppConstants.categoryIcons[i],
+                            size: 26, color: AppTheme.primary),
                       ),
                     ),
                     const SizedBox(height: 4),

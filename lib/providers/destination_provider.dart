@@ -94,7 +94,8 @@ class DestinationProvider extends ChangeNotifier {
     }).toList();
   }
 
-  List<Destination> get featured => _all.where((d) => d.rating >= 4.8).toList();
+  List<Destination> get featured =>
+      destinations.where((d) => d.rating >= 4.8).toList();
   List<Destination> get saved => _all.where((d) => d.isSaved).toList();
 
   Destination? findById(String id) {

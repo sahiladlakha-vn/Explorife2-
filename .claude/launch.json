@@ -2,6 +2,12 @@
   "version": "0.0.1",
   "configurations": [
     {
+      "name": "Flutter Web (Live Dev)",
+      "runtimeExecutable": "/Users/toan/development/flutter/bin/flutter",
+      "runtimeArgs": ["run", "-d", "web-server", "--web-port=8088", "--web-hostname=127.0.0.1"],
+      "port": 8088
+    },
+    {
       "name": "Explorife Web Preview",
       "runtimeExecutable": "python3",
       "runtimeArgs": ["serve.py"],
@@ -14,18 +20,6 @@
       "runtimeArgs": ["-m", "http.server", "--directory", "build/web"],
       "port": 8080,
       "autoPort": true
-    },
-    {
-      "name": "Flutter Dev (iOS Simulator)",
-      "runtimeExecutable": "/Users/toan/development/flutter/bin/flutter",
-      "runtimeArgs": ["run", "-d", "iphone"],
-      "port": 0
-    },
-    {
-      "name": "Flutter Dev (Android Emulator)",
-      "runtimeExecutable": "/Users/toan/development/flutter/bin/flutter",
-      "runtimeArgs": ["run", "-d", "android"],
-      "port": 0
     }
   ]
 }

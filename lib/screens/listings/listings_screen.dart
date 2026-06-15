@@ -90,7 +90,12 @@ class _CategoryBar extends StatelessWidget {
           return Padding(
             padding: const EdgeInsets.only(right: 8),
             child: FilterChip(
-              label: Text('${AppConstants.categoryIcons[i]} $cat'),
+              avatar: Icon(
+                AppConstants.categoryIcons[i],
+                size: 18,
+                color: isSelected ? Colors.white : AppTheme.textPrimary,
+              ),
+              label: Text(cat),
               selected: isSelected,
               onSelected: (_) => provider.selectCategory(cat),
               selectedColor: AppTheme.primary,

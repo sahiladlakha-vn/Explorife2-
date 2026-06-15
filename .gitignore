@@ -47,3 +47,7 @@ app.*.map.json
 # Environment variables (never commit secrets)
 .env
 .env.*
+
+# Vercel deploy state
+.vercel/
+.vercel-link/

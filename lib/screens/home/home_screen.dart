@@ -14,14 +14,26 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  int _selectedCat = 0;
-  final List<String> _cats = ['🌍 All', '🏔️ Hiking', '🏖️ Beach', '🧗 Climbing', '🌿 Jungle', '🏜️ Desert', '❄️ Arctic'];
+  // Labels are paired with the category values used by DestinationProvider so
+  // selecting a pill actually filters the lists.
+  static const List<({String value, String label, IconData icon})> _cats = [
+    (value: 'All', label: 'All', icon: Icons.public),
+    (value: 'Beach', label: 'Beach', icon: Icons.beach_access),
+    (value: 'Mountains', label: 'Mountains', icon: Icons.terrain),
+    (value: 'City', label: 'City', icon: Icons.location_city),
+    (value: 'Jungle', label: 'Jungle', icon: Icons.forest),
+    (value: 'Desert', label: 'Desert', icon: Icons.wb_sunny),
+    (value: 'Cultural', label: 'Cultural', icon: Icons.account_balance),
+    (value: 'Adventure', label: 'Adventure', icon: Icons.hiking),
+  ];
 
   @override
   Widget build(BuildContext context) {
     final provider = context.watch<DestinationProvider>();
     final featured = provider.featured;
     final all = provider.destinations;
+    final selectedIndex =
+        _cats.indexWhere((c) => c.value == provider.selectedCategory);
 
     return Scaffold(
       backgroundColor: AppTheme.bg,
@@ -46,9 +58,10 @@ class _HomeScreenState extends State<HomeScreen> {
 
                 // Categories
                 _CategoryPills(
-                  cats: _cats,
-                  selected: _selectedCat,
-                  onSelect: (i) => setState(() => _selectedCat = i),
+                  cats: _cats.map((c) => (label: c.label, icon: c.icon)).toList(),
+                  selected: selectedIndex < 0 ? 0 : selectedIndex,
+                  onSelect: (i) =>
+                      provider.selectCategory(_cats[i].value),
                 ),
                 const SizedBox(height: 20),
 
@@ -63,17 +76,23 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
 
           // Featured horizontal scroll (edge-to-edge)
-          SliverToBoxAdapter(
-            child: SizedBox(
-              height: 290,
-              child: ListView.builder(
-                scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.symmetric(horizontal: 20),
-                itemCount: featured.length,
-                itemBuilder: (ctx, i) => _FeaturedCard(destination: featured[i]),
+          if (featured.isNotEmpty)
+            SliverToBoxAdapter(
+              child: SizedBox(
+                height: 290,
+                child: ListView.builder(
+                  scrollDirection: Axis.horizontal,
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                  itemCount: featured.length,
+                  itemBuilder: (ctx, i) =>
+                      _FeaturedCard(destination: featured[i]),
+                ),
               ),
+            )
+          else
+            const SliverToBoxAdapter(
+              child: _EmptyHint(text: 'No featured spots in this category yet.'),
             ),
-          ),
 
           SliverPadding(
             padding: const EdgeInsets.symmetric(horizontal: 20),
@@ -90,7 +109,10 @@ class _HomeScreenState extends State<HomeScreen> {
                 const SizedBox(height: 12),
 
                 // Trail cards
-                ...all.take(3).map((d) => _TrailCard(destination: d)),
+                if (all.isEmpty)
+                  const _EmptyHint(text: 'No trails match this category.')
+                else
+                  ...all.take(3).map((d) => _TrailCard(destination: d)),
                 const SizedBox(height: 20),
 
                 // Banner
@@ -100,6 +122,28 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────
+// EMPTY HINT
+// ─────────────────────────────────────────
+class _EmptyHint extends StatelessWidget {
+  final String text;
+  const _EmptyHint({required this.text});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 28),
+      child: Center(
+        child: Text(
+          text,
+          textAlign: TextAlign.center,
+          style: GoogleFonts.dmSans(fontSize: 13, color: AppTheme.textSecondary),
+        ),
       ),
     );
   }
@@ -146,73 +190,91 @@ class _Hero extends StatelessWidget {
               ),
             ),
           ),
-          // Top nav
+          // Foreground — nav pinned to top, hero copy anchored to the bottom.
+          // Both live in one Column separated by a Spacer so the headline can
+          // never grow up into (and overlap) the brand / profile row.
           SafeArea(
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20),
-              child: Row(
+              padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    'Explor',
-                    style: GoogleFonts.audiowide(
-                      fontSize: 20, color: Colors.white, letterSpacing: 1,
-                    ),
+                  // Top nav
+                  Row(
+                    children: [
+                      Text(
+                        'Explor',
+                        style: GoogleFonts.audiowide(
+                          fontSize: 20, color: Colors.white, letterSpacing: 1,
+                        ),
+                      ),
+                      Text(
+                        'ife',
+                        style: GoogleFonts.audiowide(
+                          fontSize: 20, color: AppTheme.primary, letterSpacing: 1,
+                        ),
+                      ),
+                      const Spacer(),
+                      _CircleIconBtn(
+                        icon: Icons.notifications_outlined,
+                        onTap: () => ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('No new notifications')),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      GestureDetector(
+                        onTap: () => context.go('/profile'),
+                        child: Container(
+                          width: 38, height: 38,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            border: Border.all(color: Colors.white.withOpacity(0.25), width: 1.5),
+                          ),
+                          child: ClipOval(
+                            child: Image.network(
+                              'https://picsum.photos/seed/user1/80/80',
+                              fit: BoxFit.cover,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
-                  Text(
-                    'ife',
-                    style: GoogleFonts.audiowide(
-                      fontSize: 20, color: AppTheme.primary, letterSpacing: 1,
-                    ),
-                  ),
+
                   const Spacer(),
-                  _CircleIconBtn(icon: Icons.notifications_outlined),
-                  const SizedBox(width: 10),
-                  ClipOval(
-                    child: Image.network(
-                      'https://picsum.photos/seed/user1/80/80',
-                      width: 38, height: 38, fit: BoxFit.cover,
+
+                  // Hero copy
+                  _LiveBadge(),
+                  const SizedBox(height: 10),
+                  RichText(
+                    text: TextSpan(
+                      style: GoogleFonts.bebasNeue(fontSize: 48, height: 0.95, letterSpacing: 1),
+                      children: [
+                        const TextSpan(text: 'THE LIFE\nYOU WERE\nMEANT TO\n', style: TextStyle(color: Colors.white)),
+                        TextSpan(text: 'EXPLORE', style: TextStyle(color: AppTheme.primary)),
+                      ],
                     ),
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    'Discover hidden trails, connect with fellow adventurers',
+                    style: GoogleFonts.dmSans(fontSize: 13, color: Colors.white.withOpacity(0.75), height: 1.5),
+                  ),
+                  const SizedBox(height: 20),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: ElevatedButton(
+                          onPressed: () => context.go('/listings'),
+                          child: const Text('Start Exploring'),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      _GhostIconBtn(icon: Icons.explore_outlined, onTap: () => context.go('/explore')),
+                    ],
                   ),
                 ],
               ),
-            ),
-          ),
-          // Hero text
-          Positioned(
-            bottom: 24, left: 20, right: 20,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _LiveBadge(),
-                const SizedBox(height: 10),
-                RichText(
-                  text: TextSpan(
-                    style: GoogleFonts.bebasNeue(fontSize: 52, height: 0.95, letterSpacing: 1),
-                    children: [
-                      const TextSpan(text: 'THE LIFE\nYOU WERE\nMEANT TO\n', style: TextStyle(color: Colors.white)),
-                      TextSpan(text: 'EXPLORE', style: TextStyle(color: AppTheme.primary)),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 12),
-                Text(
-                  'Discover hidden trails, connect with fellow adventurers',
-                  style: GoogleFonts.dmSans(fontSize: 13, color: Colors.white.withOpacity(0.75), height: 1.5),
-                ),
-                const SizedBox(height: 20),
-                Row(
-                  children: [
-                    Expanded(
-                      child: ElevatedButton(
-                        onPressed: () => context.go('/listings'),
-                        child: const Text('Start Exploring'),
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    _GhostIconBtn(icon: Icons.explore_outlined, onTap: () => context.go('/explore')),
-                  ],
-                ),
-              ],
             ),
           ),
         ],
@@ -253,18 +315,22 @@ class _LiveBadge extends StatelessWidget {
 
 class _CircleIconBtn extends StatelessWidget {
   final IconData icon;
-  const _CircleIconBtn({required this.icon});
+  final VoidCallback? onTap;
+  const _CircleIconBtn({required this.icon, this.onTap});
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      width: 38, height: 38,
-      decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.12),
-        shape: BoxShape.circle,
-        border: Border.all(color: Colors.white.withOpacity(0.15)),
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: 38, height: 38,
+        decoration: BoxDecoration(
+          color: Colors.white.withOpacity(0.12),
+          shape: BoxShape.circle,
+          border: Border.all(color: Colors.white.withOpacity(0.15)),
+        ),
+        child: Icon(icon, size: 18, color: Colors.white),
       ),
-      child: Icon(icon, size: 18, color: Colors.white),
     );
   }
 }
@@ -375,7 +441,7 @@ class _SearchBar extends StatelessWidget {
 // CATEGORY PILLS
 // ─────────────────────────────────────────
 class _CategoryPills extends StatelessWidget {
-  final List<String> cats;
+  final List<({String label, IconData icon})> cats;
   final int selected;
   final ValueChanged<int> onSelect;
   const _CategoryPills({required this.cats, required this.selected, required this.onSelect});
@@ -390,6 +456,7 @@ class _CategoryPills extends StatelessWidget {
         separatorBuilder: (_, __) => const SizedBox(width: 8),
         itemBuilder: (ctx, i) {
           final isSelected = i == selected;
+          final color = isSelected ? Colors.white : AppTheme.textSecondary;
           return GestureDetector(
             onTap: () => onSelect(i),
             child: AnimatedContainer(
@@ -402,13 +469,20 @@ class _CategoryPills extends StatelessWidget {
                   color: isSelected ? AppTheme.primary : AppTheme.divider,
                 ),
               ),
-              child: Text(
-                cats[i],
-                style: GoogleFonts.dmSans(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  color: isSelected ? Colors.white : AppTheme.textSecondary,
-                ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(cats[i].icon, size: 14, color: color),
+                  const SizedBox(width: 6),
+                  Text(
+                    cats[i].label,
+                    style: GoogleFonts.dmSans(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: color,
+                    ),
+                  ),
+                ],
               ),
             ),
           );
@@ -485,20 +559,42 @@ class _FeaturedCard extends StatelessWidget {
                       color: AppTheme.primary,
                       borderRadius: BorderRadius.circular(6),
                     ),
-                    child: Text('🔥 TRENDING',
-                        style: GoogleFonts.jetBrainsMono(fontSize: 9, color: Colors.white, fontWeight: FontWeight.w700)),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.local_fire_department,
+                            size: 11, color: Colors.white),
+                        const SizedBox(width: 4),
+                        Text('TRENDING',
+                            style: GoogleFonts.jetBrainsMono(
+                                fontSize: 9, color: Colors.white, fontWeight: FontWeight.w700)),
+                      ],
+                    ),
                   ),
                 ),
               // Save btn
               Positioned(
                 top: 12, right: 12,
-                child: Container(
-                  width: 32, height: 32,
-                  decoration: BoxDecoration(
-                    color: Colors.black.withOpacity(0.4),
-                    shape: BoxShape.circle,
+                child: GestureDetector(
+                  onTap: () => context
+                      .read<DestinationProvider>()
+                      .toggleSave(destination.id),
+                  child: Container(
+                    width: 32, height: 32,
+                    decoration: BoxDecoration(
+                      color: Colors.black.withOpacity(0.4),
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(
+                      destination.isSaved
+                          ? Icons.bookmark
+                          : Icons.bookmark_outline,
+                      color: destination.isSaved
+                          ? AppTheme.primary
+                          : Colors.white,
+                      size: 16,
+                    ),
                   ),
-                  child: const Icon(Icons.bookmark_outline, color: Colors.white, size: 16),
                 ),
               ),
               // Info
@@ -555,32 +651,46 @@ class _CommunityRow extends StatelessWidget {
     final avatars = ['av1', 'av2', 'av3'];
     return Row(
       children: [
+        // Avatar cluster — the "+84K" badge is the 4th overlapping member of
+        // the stack, not a detached circle floating beside it.
         SizedBox(
-          width: 80, height: 36,
+          width: 36.0 + avatars.length * 22.0, // last avatar at 3*22, +84K at 3*22+22
+          height: 36,
           child: Stack(
-            children: avatars.asMap().entries.map((e) => Positioned(
-              left: e.key * 22.0,
-              child: Container(
-                width: 36, height: 36,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  border: Border.all(color: AppTheme.bg, width: 2),
+            children: [
+              ...avatars.asMap().entries.map((e) => Positioned(
+                left: e.key * 22.0,
+                child: Container(
+                  width: 36, height: 36,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    border: Border.all(color: AppTheme.bg, width: 2),
+                  ),
+                  child: ClipOval(
+                    child: Image.network(
+                      'https://picsum.photos/seed/${e.value}/80/80',
+                      fit: BoxFit.cover,
+                    ),
+                  ),
                 ),
-                child: ClipOval(
-                  child: Image.network(
-                    'https://picsum.photos/seed/${e.value}/80/80',
-                    fit: BoxFit.cover,
+              )),
+              Positioned(
+                left: avatars.length * 22.0,
+                child: Container(
+                  width: 36, height: 36,
+                  decoration: BoxDecoration(
+                    color: AppTheme.primary,
+                    shape: BoxShape.circle,
+                    border: Border.all(color: AppTheme.bg, width: 2),
+                  ),
+                  child: Center(
+                    child: Text('+84K',
+                        style: GoogleFonts.dmSans(
+                            color: Colors.white, fontSize: 9, fontWeight: FontWeight.w700)),
                   ),
                 ),
               ),
-            )).toList(),
-          ),
-        ),
-        Container(
-          width: 36, height: 36,
-          decoration: const BoxDecoration(color: AppTheme.primary, shape: BoxShape.circle),
-          child: Center(
-            child: Text('+84K', style: GoogleFonts.dmSans(color: Colors.white, fontSize: 9, fontWeight: FontWeight.w700)),
+            ],
           ),
         ),
         const SizedBox(width: 12),
@@ -704,7 +814,7 @@ class _BannerCard extends StatelessWidget {
     return ClipRRect(
       borderRadius: BorderRadius.circular(20),
       child: SizedBox(
-        height: 140,
+        height: 152,
         child: Stack(
           fit: StackFit.expand,
           children: [
@@ -727,20 +837,31 @@ class _BannerCard extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Text('🎒 COMMUNITY',
-                      style: GoogleFonts.jetBrainsMono(fontSize: 9, color: AppTheme.primary, letterSpacing: 2)),
-                  const SizedBox(height: 4),
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.backpack, size: 12, color: AppTheme.primary),
+                      const SizedBox(width: 5),
+                      Text('COMMUNITY',
+                          style: GoogleFonts.jetBrainsMono(
+                              fontSize: 9, color: AppTheme.primary, letterSpacing: 2)),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
                   Text('JOIN THE\nTRIBE',
                       style: GoogleFonts.bebasNeue(fontSize: 24, color: Colors.white, height: 1)),
                   const SizedBox(height: 8),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-                    decoration: BoxDecoration(
-                      color: AppTheme.primary,
-                      borderRadius: BorderRadius.circular(8),
+                  GestureDetector(
+                    onTap: () => context.go('/stories'),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: AppTheme.primary,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text('Connect Now',
+                          style: GoogleFonts.dmSans(fontSize: 11, color: Colors.white, fontWeight: FontWeight.w600)),
                     ),
-                    child: Text('Connect Now',
-                        style: GoogleFonts.dmSans(fontSize: 11, color: Colors.white, fontWeight: FontWeight.w600)),
                   ),
                 ],
               ),
