@@ -5,6 +5,8 @@ import 'package:provider/provider.dart';
 import '../../core/theme/app_theme.dart';
 import '../../providers/destination_provider.dart';
 import '../../models/destination.dart';
+import '../../widgets/app_network_image.dart';
+import '../../widgets/state_views.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -28,121 +30,139 @@ class _HomeScreenState extends State<HomeScreen> {
   ];
 
   @override
+  void initState() {
+    super.initState();
+    // Kick off the first load after the frame so notifyListeners() never
+    // fires mid-build. No-ops if a load already ran.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      context.read<DestinationProvider>().loadIfNeeded();
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
     final provider = context.watch<DestinationProvider>();
     final featured = provider.featured;
     final all = provider.destinations;
+    final loading = provider.isLoading;
+    final error = provider.hasError;
     final selectedIndex =
         _cats.indexWhere((c) => c.value == provider.selectedCategory);
 
     return Scaffold(
       backgroundColor: AppTheme.bg,
-      body: CustomScrollView(
-        slivers: [
-          // ── HERO ──
-          SliverToBoxAdapter(child: _Hero()),
+      body: RefreshIndicator(
+        color: AppTheme.primary,
+        backgroundColor: AppTheme.surface,
+        onRefresh: provider.load,
+        child: CustomScrollView(
+          // alwaysScrollable so pull-to-refresh works even when content is short
+          physics: const AlwaysScrollableScrollPhysics(),
+          slivers: [
+            // ── HERO ──
+            SliverToBoxAdapter(child: _Hero()),
 
-          // ── STATS BAR ──
-          SliverToBoxAdapter(child: _StatsBar()),
+            // ── STATS BAR ──
+            SliverToBoxAdapter(child: _StatsBar()),
 
-          // ── BODY ──
-          SliverPadding(
-            padding: const EdgeInsets.symmetric(horizontal: 20),
-            sliver: SliverList(
-              delegate: SliverChildListDelegate([
-                const SizedBox(height: 16),
-
-                // Search bar
-                _SearchBar(),
-                const SizedBox(height: 16),
-
-                // Categories
-                _CategoryPills(
-                  cats: _cats.map((c) => (label: c.label, icon: c.icon)).toList(),
-                  selected: selectedIndex < 0 ? 0 : selectedIndex,
-                  onSelect: (i) =>
-                      provider.selectCategory(_cats[i].value),
-                ),
-                const SizedBox(height: 20),
-
-                // Featured heading
-                _SectionHead(
-                  title: 'FEATURED',
-                  onSeeAll: () => context.go('/listings'),
-                ),
-                const SizedBox(height: 12),
-              ]),
+            // ── SEARCH + FILTERS (always visible chrome) ──
+            SliverPadding(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              sliver: SliverList(
+                delegate: SliverChildListDelegate([
+                  const SizedBox(height: 16),
+                  _SearchBar(),
+                  const SizedBox(height: 16),
+                  _CategoryPills(
+                    cats: _cats.map((c) => (label: c.label, icon: c.icon)).toList(),
+                    selected: selectedIndex < 0 ? 0 : selectedIndex,
+                    onSelect: (i) => provider.selectCategory(_cats[i].value),
+                  ),
+                  const SizedBox(height: 20),
+                ]),
+              ),
             ),
-          ),
 
-          // Featured horizontal scroll (edge-to-edge)
-          if (featured.isNotEmpty)
-            SliverToBoxAdapter(
-              child: SizedBox(
-                height: 290,
-                child: ListView.builder(
-                  scrollDirection: Axis.horizontal,
-                  padding: const EdgeInsets.symmetric(horizontal: 20),
-                  itemCount: featured.length,
-                  itemBuilder: (ctx, i) =>
-                      _FeaturedCard(destination: featured[i]),
+            // ── CONTENT REGION ──
+            if (error)
+              SliverToBoxAdapter(
+                child: ErrorStateView(
+                  onRetry: provider.retry,
+                  message: provider.error,
+                ),
+              )
+            else ...[
+              // Featured heading
+              SliverPadding(
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                sliver: SliverList(
+                  delegate: SliverChildListDelegate([
+                    _SectionHead(
+                      title: 'FEATURED',
+                      onSeeAll: () => context.go('/listings'),
+                    ),
+                    const SizedBox(height: 12),
+                  ]),
                 ),
               ),
-            )
-          else
-            const SliverToBoxAdapter(
-              child: _EmptyHint(text: 'No featured spots in this category yet.'),
-            ),
 
-          SliverPadding(
-            padding: const EdgeInsets.symmetric(horizontal: 20),
-            sliver: SliverList(
-              delegate: SliverChildListDelegate([
-                const SizedBox(height: 20),
+              // Featured: skeleton → list → empty
+              if (loading)
+                const SliverToBoxAdapter(child: FeaturedRowSkeleton())
+              else if (featured.isNotEmpty)
+                SliverToBoxAdapter(
+                  child: SizedBox(
+                    height: 290,
+                    child: ListView.builder(
+                      scrollDirection: Axis.horizontal,
+                      padding: const EdgeInsets.symmetric(horizontal: 20),
+                      itemCount: featured.length,
+                      itemBuilder: (ctx, i) => _FeaturedCard(destination: featured[i]),
+                    ),
+                  ),
+                )
+              else
+                const SliverToBoxAdapter(
+                  child: EmptyStateView(
+                    text: 'No featured spots in this category yet.',
+                  ),
+                ),
 
-                // Community row
-                _CommunityRow(),
-                const SizedBox(height: 20),
+              SliverPadding(
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                sliver: SliverList(
+                  delegate: SliverChildListDelegate([
+                    const SizedBox(height: 20),
 
-                // Trails heading
-                _SectionHead(title: 'TRAILS NEAR YOU', onSeeAll: () => context.go('/listings')),
-                const SizedBox(height: 12),
+                    // Community row (static marketing)
+                    _CommunityRow(),
+                    const SizedBox(height: 20),
 
-                // Trail cards
-                if (all.isEmpty)
-                  const _EmptyHint(text: 'No trails match this category.')
-                else
-                  ...all.take(3).map((d) => _TrailCard(destination: d)),
-                const SizedBox(height: 20),
+                    // Trails heading
+                    _SectionHead(
+                      title: 'TRAILS NEAR YOU',
+                      onSeeAll: () => context.go('/listings'),
+                    ),
+                    const SizedBox(height: 12),
 
-                // Banner
-                _BannerCard(),
-                const SizedBox(height: 100),
-              ]),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
+                    // Trails: skeleton → list → empty
+                    if (loading)
+                      const TrailListSkeleton()
+                    else if (all.isEmpty)
+                      const EmptyStateView(text: 'No trails match this category.')
+                    else
+                      ...all.take(3).map((d) => _TrailCard(destination: d)),
 
-// ─────────────────────────────────────────
-// EMPTY HINT
-// ─────────────────────────────────────────
-class _EmptyHint extends StatelessWidget {
-  final String text;
-  const _EmptyHint({required this.text});
+                    const SizedBox(height: 20),
 
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 28),
-      child: Center(
-        child: Text(
-          text,
-          textAlign: TextAlign.center,
-          style: GoogleFonts.dmSans(fontSize: 13, color: AppTheme.textSecondary),
+                    // Banner
+                    _BannerCard(),
+                    const SizedBox(height: 100),
+                  ]),
+                ),
+              ),
+            ],
+          ],
         ),
       ),
     );
@@ -160,9 +180,9 @@ class _Hero extends StatelessWidget {
       child: Stack(
         fit: StackFit.expand,
         children: [
-          // Background image
-          Image.network(
-            'https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=800&q=80',
+          // Background image (decorative)
+          const AppNetworkImage(
+            url: 'https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=800&q=80',
             fit: BoxFit.cover,
           ),
           // Gradient overlay
@@ -173,7 +193,7 @@ class _Hero extends StatelessWidget {
                 end: Alignment.bottomCenter,
                 colors: [
                   Colors.transparent,
-                  AppTheme.bg.withOpacity(0.7),
+                  AppTheme.bg.withValues(alpha:0.7),
                   AppTheme.bg,
                 ],
                 stops: const [0.3, 0.75, 1.0],
@@ -186,13 +206,11 @@ class _Hero extends StatelessWidget {
               gradient: LinearGradient(
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
-                colors: [AppTheme.primary.withOpacity(0.15), Colors.transparent],
+                colors: [AppTheme.primary.withValues(alpha:0.15), Colors.transparent],
               ),
             ),
           ),
           // Foreground — nav pinned to top, hero copy anchored to the bottom.
-          // Both live in one Column separated by a Spacer so the headline can
-          // never grow up into (and overlap) the brand / profile row.
           SafeArea(
             child: Padding(
               padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
@@ -217,23 +235,29 @@ class _Hero extends StatelessWidget {
                       const Spacer(),
                       _CircleIconBtn(
                         icon: Icons.notifications_outlined,
+                        semanticLabel: 'Notifications',
                         onTap: () => ScaffoldMessenger.of(context).showSnackBar(
                           const SnackBar(content: Text('No new notifications')),
                         ),
                       ),
                       const SizedBox(width: 10),
-                      GestureDetector(
-                        onTap: () => context.go('/profile'),
-                        child: Container(
-                          width: 38, height: 38,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            border: Border.all(color: Colors.white.withOpacity(0.25), width: 1.5),
-                          ),
-                          child: ClipOval(
-                            child: Image.network(
-                              'https://picsum.photos/seed/user1/80/80',
-                              fit: BoxFit.cover,
+                      Semantics(
+                        button: true,
+                        label: 'Your profile',
+                        child: GestureDetector(
+                          onTap: () => context.go('/profile'),
+                          child: Container(
+                            width: 44, height: 44,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              border: Border.all(
+                                  color: Colors.white.withValues(alpha:0.25), width: 1.5),
+                            ),
+                            child: const ClipOval(
+                              child: AppNetworkImage(
+                                url: 'https://picsum.photos/seed/user1/80/80',
+                                fit: BoxFit.cover,
+                              ),
                             ),
                           ),
                         ),
@@ -249,8 +273,8 @@ class _Hero extends StatelessWidget {
                   RichText(
                     text: TextSpan(
                       style: GoogleFonts.bebasNeue(fontSize: 48, height: 0.95, letterSpacing: 1),
-                      children: [
-                        const TextSpan(text: 'THE LIFE\nYOU WERE\nMEANT TO\n', style: TextStyle(color: Colors.white)),
+                      children: const [
+                        TextSpan(text: 'THE LIFE\nYOU WERE\nMEANT TO\n', style: TextStyle(color: Colors.white)),
                         TextSpan(text: 'EXPLORE', style: TextStyle(color: AppTheme.primary)),
                       ],
                     ),
@@ -258,7 +282,7 @@ class _Hero extends StatelessWidget {
                   const SizedBox(height: 12),
                   Text(
                     'Discover hidden trails, connect with fellow adventurers',
-                    style: GoogleFonts.dmSans(fontSize: 13, color: Colors.white.withOpacity(0.75), height: 1.5),
+                    style: GoogleFonts.dmSans(fontSize: 13, color: Colors.white.withValues(alpha:0.75), height: 1.5),
                   ),
                   const SizedBox(height: 20),
                   Row(
@@ -270,7 +294,11 @@ class _Hero extends StatelessWidget {
                         ),
                       ),
                       const SizedBox(width: 10),
-                      _GhostIconBtn(icon: Icons.explore_outlined, onTap: () => context.go('/explore')),
+                      _GhostIconBtn(
+                        icon: Icons.explore_outlined,
+                        semanticLabel: 'Open map',
+                        onTap: () => context.go('/explore'),
+                      ),
                     ],
                   ),
                 ],
@@ -289,8 +317,8 @@ class _LiveBadge extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       decoration: BoxDecoration(
-        color: AppTheme.primary.withOpacity(0.2),
-        border: Border.all(color: AppTheme.primary.withOpacity(0.4)),
+        color: AppTheme.primary.withValues(alpha:0.2),
+        border: Border.all(color: AppTheme.primary.withValues(alpha:0.4)),
         borderRadius: BorderRadius.circular(20),
       ),
       child: Row(
@@ -298,7 +326,7 @@ class _LiveBadge extends StatelessWidget {
         children: [
           Container(
             width: 6, height: 6,
-            decoration: BoxDecoration(color: AppTheme.primary, shape: BoxShape.circle),
+            decoration: const BoxDecoration(color: AppTheme.primary, shape: BoxShape.circle),
           ),
           const SizedBox(width: 6),
           Text(
@@ -316,20 +344,25 @@ class _LiveBadge extends StatelessWidget {
 class _CircleIconBtn extends StatelessWidget {
   final IconData icon;
   final VoidCallback? onTap;
-  const _CircleIconBtn({required this.icon, this.onTap});
+  final String semanticLabel;
+  const _CircleIconBtn({required this.icon, required this.semanticLabel, this.onTap});
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        width: 38, height: 38,
-        decoration: BoxDecoration(
-          color: Colors.white.withOpacity(0.12),
-          shape: BoxShape.circle,
-          border: Border.all(color: Colors.white.withOpacity(0.15)),
+    return Semantics(
+      button: true,
+      label: semanticLabel,
+      child: GestureDetector(
+        onTap: onTap,
+        child: Container(
+          width: 44, height: 44, // min 44dp tap target
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha:0.12),
+            shape: BoxShape.circle,
+            border: Border.all(color: Colors.white.withValues(alpha:0.15)),
+          ),
+          child: Icon(icon, size: 18, color: Colors.white),
         ),
-        child: Icon(icon, size: 18, color: Colors.white),
       ),
     );
   }
@@ -338,20 +371,25 @@ class _CircleIconBtn extends StatelessWidget {
 class _GhostIconBtn extends StatelessWidget {
   final IconData icon;
   final VoidCallback onTap;
-  const _GhostIconBtn({required this.icon, required this.onTap});
+  final String semanticLabel;
+  const _GhostIconBtn({required this.icon, required this.onTap, required this.semanticLabel});
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        width: 46, height: 46,
-        decoration: BoxDecoration(
-          color: Colors.white.withOpacity(0.1),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: Colors.white.withOpacity(0.2)),
+    return Semantics(
+      button: true,
+      label: semanticLabel,
+      child: GestureDetector(
+        onTap: onTap,
+        child: Container(
+          width: 46, height: 46,
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha:0.1),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: Colors.white.withValues(alpha:0.2)),
+          ),
+          child: Icon(icon, color: Colors.white, size: 20),
         ),
-        child: Icon(icon, color: Colors.white, size: 20),
       ),
     );
   }
@@ -368,7 +406,7 @@ class _StatsBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      decoration: BoxDecoration(
+      decoration: const BoxDecoration(
         border: Border.symmetric(horizontal: BorderSide(color: AppTheme.divider)),
       ),
       child: Row(
@@ -378,9 +416,9 @@ class _StatsBar extends StatelessWidget {
             child: Container(
               padding: const EdgeInsets.symmetric(vertical: 12),
               decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.04),
+                color: Colors.white.withValues(alpha:0.04),
                 border: i < _stats.length - 1
-                    ? Border(right: BorderSide(color: AppTheme.divider))
+                    ? const Border(right: BorderSide(color: AppTheme.divider))
                     : null,
               ),
               child: Column(
@@ -403,34 +441,38 @@ class _StatsBar extends StatelessWidget {
 class _SearchBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: () => context.go('/search'),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-        decoration: BoxDecoration(
-          color: AppTheme.surface2,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: AppTheme.divider),
-        ),
-        child: Row(
-          children: [
-            const Icon(Icons.search, color: AppTheme.textSecondary, size: 18),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Text(
-                'Search destinations, trails...',
-                style: GoogleFonts.dmSans(color: AppTheme.textSecondary, fontSize: 14),
+    return Semantics(
+      button: true,
+      label: 'Search destinations and trails',
+      child: GestureDetector(
+        onTap: () => context.go('/search'),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          decoration: BoxDecoration(
+            color: AppTheme.surface2,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: AppTheme.divider),
+          ),
+          child: Row(
+            children: [
+              const Icon(Icons.search, color: AppTheme.textSecondary, size: 18),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  'Search destinations, trails...',
+                  style: GoogleFonts.dmSans(color: AppTheme.textSecondary, fontSize: 14),
+                ),
               ),
-            ),
-            Container(
-              width: 34, height: 34,
-              decoration: BoxDecoration(
-                color: AppTheme.primary,
-                borderRadius: BorderRadius.circular(10),
+              Container(
+                width: 34, height: 34,
+                decoration: BoxDecoration(
+                  color: AppTheme.primary,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Icon(Icons.tune, color: Colors.white, size: 16),
               ),
-              child: const Icon(Icons.tune, color: Colors.white, size: 16),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -457,32 +499,37 @@ class _CategoryPills extends StatelessWidget {
         itemBuilder: (ctx, i) {
           final isSelected = i == selected;
           final color = isSelected ? Colors.white : AppTheme.textSecondary;
-          return GestureDetector(
-            onTap: () => onSelect(i),
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 200),
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              decoration: BoxDecoration(
-                color: isSelected ? AppTheme.primary : AppTheme.surface2,
-                borderRadius: BorderRadius.circular(20),
-                border: Border.all(
-                  color: isSelected ? AppTheme.primary : AppTheme.divider,
-                ),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(cats[i].icon, size: 14, color: color),
-                  const SizedBox(width: 6),
-                  Text(
-                    cats[i].label,
-                    style: GoogleFonts.dmSans(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                      color: color,
-                    ),
+          return Semantics(
+            button: true,
+            selected: isSelected,
+            label: '${cats[i].label} category',
+            child: GestureDetector(
+              onTap: () => onSelect(i),
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 200),
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                decoration: BoxDecoration(
+                  color: isSelected ? AppTheme.primary : AppTheme.surface2,
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(
+                    color: isSelected ? AppTheme.primary : AppTheme.divider,
                   ),
-                ],
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(cats[i].icon, size: 14, color: color),
+                    const SizedBox(width: 6),
+                    Text(
+                      cats[i].label,
+                      style: GoogleFonts.dmSans(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: color,
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
           );
@@ -507,11 +554,18 @@ class _SectionHead extends StatelessWidget {
         Text(title, style: GoogleFonts.bebasNeue(fontSize: 28, letterSpacing: 0.5, color: AppTheme.textPrimary)),
         const Spacer(),
         if (onSeeAll != null)
-          GestureDetector(
-            onTap: onSeeAll,
-            child: Text(
-              'SEE ALL →',
-              style: GoogleFonts.jetBrainsMono(fontSize: 11, color: AppTheme.primary),
+          Semantics(
+            button: true,
+            label: 'See all ${title.toLowerCase()}',
+            child: GestureDetector(
+              onTap: onSeeAll,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                child: Text(
+                  'SEE ALL →',
+                  style: GoogleFonts.jetBrainsMono(fontSize: 11, color: AppTheme.primary),
+                ),
+              ),
             ),
           ),
       ],
@@ -528,113 +582,121 @@ class _FeaturedCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: () => context.go('/listings/${destination.id}'),
-      child: Container(
-        width: 225,
-        margin: const EdgeInsets.only(right: 14),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(20),
-          child: Stack(
-            fit: StackFit.expand,
-            children: [
-              Image.network(destination.imageUrl, fit: BoxFit.cover),
-              // Gradient
-              Container(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topCenter, end: Alignment.bottomCenter,
-                    colors: [Colors.transparent, Colors.black.withOpacity(0.85)],
-                    stops: const [0.4, 1.0],
+    return Semantics(
+      button: true,
+      label: '${destination.name}, ${destination.country}',
+      explicitChildNodes: true,
+      child: GestureDetector(
+        onTap: () => context.go('/listings/${destination.id}'),
+        child: Container(
+          width: 225,
+          margin: const EdgeInsets.only(right: 14),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(20),
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                AppNetworkImage(url: destination.imageUrl, fit: BoxFit.cover),
+                // Gradient
+                Container(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter, end: Alignment.bottomCenter,
+                      colors: [Colors.transparent, Colors.black.withValues(alpha:0.85)],
+                      stops: const [0.4, 1.0],
+                    ),
                   ),
                 ),
-              ),
-              // Trending badge
-              if (destination.rating >= 4.9)
-                Positioned(
-                  top: 12, left: 12,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: AppTheme.primary,
-                      borderRadius: BorderRadius.circular(6),
+                // Trending badge
+                if (destination.rating >= 4.9)
+                  Positioned(
+                    top: 12, left: 12,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: AppTheme.primary,
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(Icons.local_fire_department, size: 11, color: Colors.white),
+                          const SizedBox(width: 4),
+                          Text('TRENDING',
+                              style: GoogleFonts.jetBrainsMono(
+                                  fontSize: 9, color: Colors.white, fontWeight: FontWeight.w700)),
+                        ],
+                      ),
                     ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
+                  ),
+                // Save btn
+                Positioned(
+                  top: 8, right: 8,
+                  child: Semantics(
+                    button: true,
+                    toggled: destination.isSaved,
+                    label: 'Save ${destination.name}',
+                    child: GestureDetector(
+                      onTap: () =>
+                          context.read<DestinationProvider>().toggleSave(destination.id),
+                      child: Container(
+                        width: 44, height: 44, // min tap target
+                        alignment: Alignment.center,
+                        child: Container(
+                          width: 32, height: 32,
+                          decoration: BoxDecoration(
+                            color: Colors.black.withValues(alpha:0.4),
+                            shape: BoxShape.circle,
+                          ),
+                          child: Icon(
+                            destination.isSaved ? Icons.bookmark : Icons.bookmark_outline,
+                            color: destination.isSaved ? AppTheme.primary : Colors.white,
+                            size: 18,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+                // Info
+                Positioned(
+                  bottom: 0, left: 0, right: 0,
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Icon(Icons.local_fire_department,
-                            size: 11, color: Colors.white),
-                        const SizedBox(width: 4),
-                        Text('TRENDING',
-                            style: GoogleFonts.jetBrainsMono(
-                                fontSize: 9, color: Colors.white, fontWeight: FontWeight.w700)),
+                        Text(
+                          destination.category.toUpperCase(),
+                          style: GoogleFonts.jetBrainsMono(fontSize: 9, color: AppTheme.primary, letterSpacing: 1.5),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(destination.name.toUpperCase(),
+                            style: GoogleFonts.bebasNeue(fontSize: 22, color: Colors.white, height: 1)),
+                        Text(destination.country,
+                            style: GoogleFonts.dmSans(fontSize: 11, color: Colors.white.withValues(alpha:0.65))),
+                        const SizedBox(height: 8),
+                        Row(
+                          children: [
+                            Row(children: [
+                              const Icon(Icons.star, size: 12, color: Colors.amber),
+                              const SizedBox(width: 3),
+                              Text('${destination.rating}',
+                                  style: GoogleFonts.dmSans(fontSize: 12, color: Colors.white, fontWeight: FontWeight.w600)),
+                              Text(' (${destination.reviewCount})',
+                                  style: GoogleFonts.dmSans(fontSize: 11, color: Colors.white.withValues(alpha:0.5))),
+                            ]),
+                            const Spacer(),
+                            Text('\$${destination.pricePerNight.toInt()}/n',
+                                style: GoogleFonts.jetBrainsMono(fontSize: 12, color: AppTheme.primary)),
+                          ],
+                        ),
                       ],
                     ),
                   ),
                 ),
-              // Save btn
-              Positioned(
-                top: 12, right: 12,
-                child: GestureDetector(
-                  onTap: () => context
-                      .read<DestinationProvider>()
-                      .toggleSave(destination.id),
-                  child: Container(
-                    width: 32, height: 32,
-                    decoration: BoxDecoration(
-                      color: Colors.black.withOpacity(0.4),
-                      shape: BoxShape.circle,
-                    ),
-                    child: Icon(
-                      destination.isSaved
-                          ? Icons.bookmark
-                          : Icons.bookmark_outline,
-                      color: destination.isSaved
-                          ? AppTheme.primary
-                          : Colors.white,
-                      size: 16,
-                    ),
-                  ),
-                ),
-              ),
-              // Info
-              Positioned(
-                bottom: 0, left: 0, right: 0,
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        destination.category.toUpperCase(),
-                        style: GoogleFonts.jetBrainsMono(fontSize: 9, color: AppTheme.primary, letterSpacing: 1.5),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(destination.name.toUpperCase(),
-                          style: GoogleFonts.bebasNeue(fontSize: 22, color: Colors.white, height: 1)),
-                      Text(destination.country,
-                          style: GoogleFonts.dmSans(fontSize: 11, color: Colors.white.withOpacity(0.65))),
-                      const SizedBox(height: 8),
-                      Row(
-                        children: [
-                          Row(children: [
-                            const Icon(Icons.star, size: 12, color: Colors.amber),
-                            const SizedBox(width: 3),
-                            Text('${destination.rating}',
-                                style: GoogleFonts.dmSans(fontSize: 12, color: Colors.white, fontWeight: FontWeight.w600)),
-                            Text(' (${destination.reviewCount})',
-                                style: GoogleFonts.dmSans(fontSize: 11, color: Colors.white.withOpacity(0.5))),
-                          ]),
-                          const Spacer(),
-                          Text('\$${destination.pricePerNight.toInt()}/n',
-                              style: GoogleFonts.jetBrainsMono(fontSize: 12, color: AppTheme.primary)),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
@@ -651,10 +713,9 @@ class _CommunityRow extends StatelessWidget {
     final avatars = ['av1', 'av2', 'av3'];
     return Row(
       children: [
-        // Avatar cluster — the "+84K" badge is the 4th overlapping member of
-        // the stack, not a detached circle floating beside it.
+        // Avatar cluster — the "+84K" badge is the 4th overlapping member.
         SizedBox(
-          width: 36.0 + avatars.length * 22.0, // last avatar at 3*22, +84K at 3*22+22
+          width: 36.0 + avatars.length * 22.0,
           height: 36,
           child: Stack(
             children: [
@@ -667,8 +728,8 @@ class _CommunityRow extends StatelessWidget {
                     border: Border.all(color: AppTheme.bg, width: 2),
                   ),
                   child: ClipOval(
-                    child: Image.network(
-                      'https://picsum.photos/seed/${e.value}/80/80',
+                    child: AppNetworkImage(
+                      url: 'https://picsum.photos/seed/${e.value}/80/80',
                       fit: BoxFit.cover,
                     ),
                   ),
@@ -731,74 +792,77 @@ class _TrailCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: () => context.go('/listings/${destination.id}'),
-      child: Container(
-        margin: const EdgeInsets.only(bottom: 10),
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: AppTheme.surface,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: AppTheme.divider),
-        ),
-        child: Row(
-          children: [
-            ClipRRect(
-              borderRadius: BorderRadius.circular(12),
-              child: Image.network(
-                destination.imageUrl,
+    return Semantics(
+      button: true,
+      label: '${destination.name}, ${destination.country}',
+      explicitChildNodes: true,
+      child: GestureDetector(
+        onTap: () => context.go('/listings/${destination.id}'),
+        child: Container(
+          margin: const EdgeInsets.only(bottom: 10),
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: AppTheme.surface,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: AppTheme.divider),
+          ),
+          child: Row(
+            children: [
+              AppNetworkImage(
+                url: destination.imageUrl,
                 width: 72, height: 72, fit: BoxFit.cover,
+                borderRadius: BorderRadius.circular(12),
               ),
-            ),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(destination.name,
+                        style: GoogleFonts.dmSans(fontSize: 14, fontWeight: FontWeight.w600, color: AppTheme.textPrimary)),
+                    const SizedBox(height: 2),
+                    Row(children: [
+                      const Icon(Icons.location_on, size: 12, color: AppTheme.textSecondary),
+                      Text(destination.country,
+                          style: GoogleFonts.dmSans(fontSize: 11, color: AppTheme.textSecondary)),
+                    ]),
+                    const SizedBox(height: 6),
+                    Wrap(
+                      spacing: 5,
+                      children: destination.tags.take(2).map((t) => Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: AppTheme.primary.withValues(alpha:0.12),
+                          border: Border.all(color: AppTheme.primary.withValues(alpha:0.2)),
+                          borderRadius: BorderRadius.circular(5),
+                        ),
+                        child: Text(t.toUpperCase(),
+                            style: GoogleFonts.jetBrainsMono(fontSize: 9, color: AppTheme.primary, letterSpacing: 0.5)),
+                      )).toList(),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
-                  Text(destination.name,
-                      style: GoogleFonts.dmSans(fontSize: 14, fontWeight: FontWeight.w600, color: AppTheme.textPrimary)),
-                  const SizedBox(height: 2),
-                  Row(children: [
-                    const Icon(Icons.location_on, size: 12, color: AppTheme.textSecondary),
-                    Text(destination.country,
-                        style: GoogleFonts.dmSans(fontSize: 11, color: AppTheme.textSecondary)),
-                  ]),
-                  const SizedBox(height: 6),
-                  Wrap(
-                    spacing: 5,
-                    children: destination.tags.take(2).map((t) => Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-                      decoration: BoxDecoration(
-                        color: AppTheme.primary.withOpacity(0.12),
-                        border: Border.all(color: AppTheme.primary.withOpacity(0.2)),
-                        borderRadius: BorderRadius.circular(5),
-                      ),
-                      child: Text(t.toUpperCase(),
-                          style: GoogleFonts.jetBrainsMono(fontSize: 9, color: AppTheme.primary, letterSpacing: 0.5)),
-                    )).toList(),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: _diffColor.withValues(alpha:0.15),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Text(_diffLabel,
+                        style: GoogleFonts.jetBrainsMono(fontSize: 10, color: _diffColor, letterSpacing: 0.5)),
                   ),
+                  const SizedBox(height: 6),
+                  Text('\$${destination.pricePerNight.toInt()}/n',
+                      style: GoogleFonts.jetBrainsMono(fontSize: 12, color: AppTheme.primary, fontWeight: FontWeight.w700)),
                 ],
               ),
-            ),
-            const SizedBox(width: 8),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                  decoration: BoxDecoration(
-                    color: _diffColor.withOpacity(0.15),
-                    borderRadius: BorderRadius.circular(6),
-                  ),
-                  child: Text(_diffLabel,
-                      style: GoogleFonts.jetBrainsMono(fontSize: 10, color: _diffColor, letterSpacing: 0.5)),
-                ),
-                const SizedBox(height: 6),
-                Text('\$${destination.pricePerNight.toInt()}/n',
-                    style: GoogleFonts.jetBrainsMono(fontSize: 12, color: AppTheme.primary, fontWeight: FontWeight.w700)),
-              ],
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -818,8 +882,8 @@ class _BannerCard extends StatelessWidget {
         child: Stack(
           fit: StackFit.expand,
           children: [
-            Image.network(
-              'https://images.unsplash.com/photo-1501854140801-50d01698950b?w=800&q=80',
+            const AppNetworkImage(
+              url: 'https://images.unsplash.com/photo-1501854140801-50d01698950b?w=800&q=80',
               fit: BoxFit.cover,
             ),
             Container(
@@ -827,7 +891,7 @@ class _BannerCard extends StatelessWidget {
                 gradient: LinearGradient(
                   begin: Alignment.centerLeft,
                   end: Alignment.centerRight,
-                  colors: [Colors.black.withOpacity(0.75), Colors.transparent],
+                  colors: [Colors.black.withValues(alpha:0.75), Colors.transparent],
                 ),
               ),
             ),
@@ -851,16 +915,20 @@ class _BannerCard extends StatelessWidget {
                   Text('JOIN THE\nTRIBE',
                       style: GoogleFonts.bebasNeue(fontSize: 24, color: Colors.white, height: 1)),
                   const SizedBox(height: 8),
-                  GestureDetector(
-                    onTap: () => context.go('/stories'),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-                      decoration: BoxDecoration(
-                        color: AppTheme.primary,
-                        borderRadius: BorderRadius.circular(8),
+                  Semantics(
+                    button: true,
+                    label: 'Connect now',
+                    child: GestureDetector(
+                      onTap: () => context.go('/stories'),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: AppTheme.primary,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Text('Connect Now',
+                            style: GoogleFonts.dmSans(fontSize: 11, color: Colors.white, fontWeight: FontWeight.w600)),
                       ),
-                      child: Text('Connect Now',
-                          style: GoogleFonts.dmSans(fontSize: 11, color: Colors.white, fontWeight: FontWeight.w600)),
                     ),
                   ),
                 ],
