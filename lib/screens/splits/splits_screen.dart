@@ -5,7 +5,7 @@ import 'package:provider/provider.dart';
 import '../../core/theme/app_theme.dart';
 import '../../models/hike.dart';
 import '../../providers/auth_provider.dart';
-import '../../providers/hike_provider.dart';
+import '../../providers/splits_provider.dart';
 
 class SplitsScreen extends StatefulWidget {
   const SplitsScreen({super.key});
@@ -20,7 +20,7 @@ class _SplitsScreenState extends State<SplitsScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final auth = context.read<AuthProvider>();
       if (auth.isAuthenticated) {
-        context.read<HikeProvider>().fetchGroups(auth.user!.id);
+        context.read<SplitsProvider>().fetchGroups(auth.user!.id);
       }
     });
   }
@@ -52,7 +52,7 @@ class _SplitsScreenState extends State<SplitsScreen> {
             decoration: InputDecoration(
               hintText: 'e.g. Vietnam Road Trip 2025',
               hintStyle: GoogleFonts.dmSans(
-                  color: AppTheme.textSecondary.withOpacity(0.5)),
+                  color: AppTheme.textSecondary.withValues(alpha: 0.5)),
               filled: true,
               fillColor: AppTheme.surface2,
               border: OutlineInputBorder(
@@ -74,7 +74,7 @@ class _SplitsScreenState extends State<SplitsScreen> {
                 if (ctrl.text.trim().isEmpty) return;
                 final auth = context.read<AuthProvider>();
                 Navigator.pop(ctx);
-                await context.read<HikeProvider>().createGroup(
+                await context.read<SplitsProvider>().createGroup(
                     userId: auth.user!.id, name: ctrl.text.trim());
               },
               style: ElevatedButton.styleFrom(
@@ -92,7 +92,7 @@ class _SplitsScreenState extends State<SplitsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final prov = context.watch<HikeProvider>();
+    final prov = context.watch<SplitsProvider>();
     final auth = context.watch<AuthProvider>();
     final groups = prov.groups;
 
@@ -198,7 +198,7 @@ class _GroupCard extends StatelessWidget {
           Container(
             width: 48, height: 48,
             decoration: BoxDecoration(
-              color: AppTheme.primary.withOpacity(0.12),
+              color: AppTheme.primary.withValues(alpha: 0.12),
               borderRadius: BorderRadius.circular(14),
             ),
             child: const Center(

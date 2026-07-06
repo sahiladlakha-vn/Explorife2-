@@ -5,7 +5,7 @@ import 'package:provider/provider.dart';
 import '../../core/theme/app_theme.dart';
 import '../../models/hike.dart';
 import '../../providers/auth_provider.dart';
-import '../../providers/hike_provider.dart';
+import '../../providers/splits_provider.dart';
 
 class SplitDetailScreen extends StatefulWidget {
   final String groupId;
@@ -26,7 +26,7 @@ class _SplitDetailScreenState extends State<SplitDetailScreen> {
   }
 
   Future<void> _load() async {
-    final prov = context.read<HikeProvider>();
+    final prov = context.read<SplitsProvider>();
     final cached = prov.groups.where((g) => g.id == widget.groupId).firstOrNull;
     final expenses = await prov.fetchExpenses(widget.groupId);
     if (mounted) setState(() {
@@ -81,7 +81,7 @@ class _SplitDetailScreenState extends State<SplitDetailScreen> {
                 if (descCtrl.text.trim().isEmpty || amt == null) return;
                 final auth = context.read<AuthProvider>();
                 Navigator.pop(ctx);
-                final ok = await context.read<HikeProvider>().addExpense(
+                final ok = await context.read<SplitsProvider>().addExpense(
                   groupId: widget.groupId,
                   paidBy: auth.user?.id ?? '',
                   description: descCtrl.text.trim(),
@@ -105,7 +105,7 @@ class _SplitDetailScreenState extends State<SplitDetailScreen> {
   InputDecoration _inputDeco(String hint) => InputDecoration(
         hintText: hint,
         hintStyle: GoogleFonts.dmSans(
-            color: AppTheme.textSecondary.withOpacity(0.5), fontSize: 14),
+            color: AppTheme.textSecondary.withValues(alpha: 0.5), fontSize: 14),
         filled: true,
         fillColor: AppTheme.surface2,
         border: OutlineInputBorder(
@@ -127,7 +127,9 @@ class _SplitDetailScreenState extends State<SplitDetailScreen> {
       appBar: AppBar(
         backgroundColor: AppTheme.bg,
         leading: IconButton(
-            icon: const Icon(Icons.arrow_back), onPressed: () => context.pop()),
+            icon: const Icon(Icons.arrow_back),
+            onPressed: () =>
+                context.canPop() ? context.pop() : context.go('/splits')),
         title: Text(_group?.name ?? 'Trip',
             style: GoogleFonts.bebasNeue(fontSize: 22, letterSpacing: 0.5)),
         actions: [
@@ -145,9 +147,9 @@ class _SplitDetailScreenState extends State<SplitDetailScreen> {
                 margin: const EdgeInsets.all(16),
                 padding: const EdgeInsets.all(20),
                 decoration: BoxDecoration(
-                  color: AppTheme.primary.withOpacity(0.1),
+                  color: AppTheme.primary.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: AppTheme.primary.withOpacity(0.3)),
+                  border: Border.all(color: AppTheme.primary.withValues(alpha: 0.3)),
                 ),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
