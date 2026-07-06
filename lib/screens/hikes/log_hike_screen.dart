@@ -74,7 +74,9 @@ class _LogHikeScreenState extends State<LogHikeScreen> {
       appBar: AppBar(
         backgroundColor: AppTheme.bg,
         leading: IconButton(
-            icon: const Icon(Icons.arrow_back), onPressed: () => context.pop()),
+            icon: const Icon(Icons.arrow_back),
+            onPressed: () =>
+                context.canPop() ? context.pop() : context.go('/hikes')),
         title: Text('LOG HIKE',
             style: GoogleFonts.bebasNeue(fontSize: 22, letterSpacing: 0.5)),
       ),
@@ -210,7 +212,7 @@ class _LogHikeScreenState extends State<LogHikeScreen> {
         hintText: hint,
         hintStyle: GoogleFonts.dmSans(
             fontSize: 14,
-            color: AppTheme.textSecondary.withOpacity(0.5)),
+            color: AppTheme.textSecondary.withValues(alpha: 0.5)),
         filled: true,
         fillColor: AppTheme.surface,
         border: OutlineInputBorder(

@@ -71,19 +71,20 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
               icon: Container(
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
-                  color: Colors.black.withOpacity(0.5),
+                  color: Colors.black.withValues(alpha: 0.5),
                   shape: BoxShape.circle,
                 ),
                 child: const Icon(Icons.arrow_back, size: 18),
               ),
-              onPressed: () => context.pop(),
+              onPressed: () =>
+                  context.canPop() ? context.pop() : context.go('/stories'),
             ),
             actions: [
               IconButton(
                 icon: Container(
                   padding: const EdgeInsets.all(8),
                   decoration: BoxDecoration(
-                    color: Colors.black.withOpacity(0.5),
+                    color: Colors.black.withValues(alpha: 0.5),
                     shape: BoxShape.circle,
                   ),
                   child: const Icon(Icons.share_outlined, size: 18),
@@ -127,9 +128,9 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                       decoration: BoxDecoration(
-                        color: AppTheme.primary.withOpacity(0.12),
+                        color: AppTheme.primary.withValues(alpha: 0.12),
                         borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: AppTheme.primary.withOpacity(0.3)),
+                        border: Border.all(color: AppTheme.primary.withValues(alpha: 0.3)),
                       ),
                       child: Text(s.adventureType!,
                           style: GoogleFonts.jetBrainsMono(
@@ -141,7 +142,7 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                       decoration: BoxDecoration(
-                        color: Colors.amber.withOpacity(0.15),
+                        color: Colors.amber.withValues(alpha: 0.15),
                         borderRadius: BorderRadius.circular(10),
                       ),
                       child: Text('⭐ FEATURED',
@@ -244,7 +245,7 @@ class _RealityBox extends StatelessWidget {
       decoration: BoxDecoration(
         color: AppTheme.surface,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppTheme.primary.withOpacity(0.3)),
+        border: Border.all(color: AppTheme.primary.withValues(alpha: 0.3)),
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Text('REALITY CHECK',

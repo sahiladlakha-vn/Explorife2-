@@ -107,7 +107,7 @@ class DestinationDetailScreen extends StatelessWidget {
             children: d.tags.map((tag) => Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
               decoration: BoxDecoration(
-                color: AppTheme.primary.withOpacity(0.1),
+                color: AppTheme.primary.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(20),
               ),
               child: Text(tag,
@@ -145,7 +145,7 @@ class DestinationDetailScreen extends StatelessWidget {
           Container(
             width: 40, height: 40,
             decoration: BoxDecoration(
-              color: AppTheme.primary.withOpacity(0.1),
+              color: AppTheme.primary.withValues(alpha: 0.1),
               borderRadius: BorderRadius.circular(10),
             ),
             child: Icon(icon, color: AppTheme.primary, size: 20),

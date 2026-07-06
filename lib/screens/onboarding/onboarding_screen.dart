@@ -1,9 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:provider/provider.dart';
 import '../../core/theme/app_theme.dart';
-import '../../providers/auth_provider.dart';
 
 class OnboardingScreen extends StatefulWidget {
   const OnboardingScreen({super.key});
@@ -44,12 +42,10 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // Skip onboarding if already authenticated
-    final auth = context.read<AuthProvider>();
-    if (auth.isAuthenticated) {
-      WidgetsBinding.instance.addPostFrameCallback((_) => context.go('/home'));
-    }
-
+    // Authenticated users are sent to /home by the router redirect (which now
+    // re-runs on auth resolution via refreshListenable) — no build-time
+    // navigation side effect here, which previously fired stale go() calls
+    // during the cold-boot auth race.
     return Scaffold(
       backgroundColor: AppTheme.bg,
       body: Stack(
@@ -70,7 +66,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                 gradient: LinearGradient(
                   begin: Alignment.topCenter,
                   end: Alignment.bottomCenter,
-                  colors: [Colors.transparent, AppTheme.bg.withOpacity(0.98)],
+                  colors: [Colors.transparent, AppTheme.bg.withValues(alpha: 0.98)],
                 ),
               ),
               child: Column(children: [

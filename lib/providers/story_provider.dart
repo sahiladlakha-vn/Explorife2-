@@ -52,15 +52,58 @@ class StoryProvider extends ChangeNotifier {
   }
 
   void _subscribeRealtime() {
+    // Apply each change as a local delta instead of re-fetching the whole
+    // table on every insert/update/delete. A burst of writes used to trigger a
+    // burst of full-table reloads; now each event mutates the in-memory list.
     _channel = _db
         .channel('public-stories')
         .onPostgresChanges(
-          event: PostgresChangeEvent.all,
+          event: PostgresChangeEvent.insert,
           schema: 'public',
           table: 'stories',
-          callback: (_) => _fetch(),
+          callback: (payload) => _applyUpsert(payload.newRecord),
+        )
+        .onPostgresChanges(
+          event: PostgresChangeEvent.update,
+          schema: 'public',
+          table: 'stories',
+          callback: (payload) => _applyUpsert(payload.newRecord),
+        )
+        .onPostgresChanges(
+          event: PostgresChangeEvent.delete,
+          schema: 'public',
+          table: 'stories',
+          callback: (payload) {
+            final id = payload.oldRecord['id'] as String?;
+            if (id == null) return;
+            _stories = _stories.where((s) => s.id != id).toList();
+            notifyListeners();
+          },
         )
         .subscribe();
+  }
+
+  /// Insert or update one story in the cache, honouring the same rules the
+  /// initial fetch applies: only `approved` stories are kept, and the list
+  /// stays sorted (featured first, then newest) to mirror the server ordering.
+  /// A story that becomes non-approved is dropped; an approved one is
+  /// added/replaced in place.
+  void _applyUpsert(Map<String, dynamic> record) {
+    final story = Story.fromJson(record);
+    final without = _stories.where((s) => s.id != story.id).toList();
+    if (story.status != 'approved') {
+      _stories = without;
+    } else {
+      _stories = [...without, story]..sort(_compareStories);
+    }
+    notifyListeners();
+  }
+
+  // Featured stories first, then most-recently created — matches the
+  // `order('featured', desc).order('created_at', desc)` server query.
+  int _compareStories(Story a, Story b) {
+    if (a.featured != b.featured) return a.featured ? -1 : 1;
+    return b.createdAt.compareTo(a.createdAt);
   }
 
   void setFilter(String filter) {

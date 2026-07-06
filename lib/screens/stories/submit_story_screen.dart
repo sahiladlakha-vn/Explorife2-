@@ -99,7 +99,8 @@ class _SubmitStoryScreenState extends State<SubmitStoryScreen> {
         backgroundColor: AppTheme.bg,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
-          onPressed: () => context.pop(),
+          onPressed: () =>
+              context.canPop() ? context.pop() : context.go('/stories'),
         ),
         title: Text('SUBMIT STORY',
             style: GoogleFonts.bebasNeue(fontSize: 22, letterSpacing: 0.5)),
@@ -113,9 +114,9 @@ class _SubmitStoryScreenState extends State<SubmitStoryScreen> {
             Container(
               padding: const EdgeInsets.all(14),
               decoration: BoxDecoration(
-                color: AppTheme.primary.withOpacity(0.08),
+                color: AppTheme.primary.withValues(alpha: 0.08),
                 borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: AppTheme.primary.withOpacity(0.2)),
+                border: Border.all(color: AppTheme.primary.withValues(alpha: 0.2)),
               ),
               child: Text(
                 'Share your adventure with 84,000+ explorers. All stories are reviewed before publishing.',
@@ -322,7 +323,7 @@ class _SubmitStoryScreenState extends State<SubmitStoryScreen> {
 
   InputDecoration _deco(String hint) => InputDecoration(
         hintText: hint,
-        hintStyle: GoogleFonts.dmSans(fontSize: 14, color: AppTheme.textSecondary.withOpacity(0.5)),
+        hintStyle: GoogleFonts.dmSans(fontSize: 14, color: AppTheme.textSecondary.withValues(alpha: 0.5)),
         filled: true,
         fillColor: AppTheme.surface,
         border: OutlineInputBorder(

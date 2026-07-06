@@ -173,7 +173,7 @@ class _HikeCard extends StatelessWidget {
         Container(
           width: 48, height: 48,
           decoration: BoxDecoration(
-            color: AppTheme.primary.withOpacity(0.12),
+            color: AppTheme.primary.withValues(alpha: 0.12),
             borderRadius: BorderRadius.circular(14),
           ),
           child: Center(child: Text(hike.emoji, style: const TextStyle(fontSize: 22))),
