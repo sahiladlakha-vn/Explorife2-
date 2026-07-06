@@ -5,12 +5,18 @@ class Gem {
   final String? category;
   final double? latitude;
   final double? longitude;
+  final String? tagline;
   final String? description;
   final String? photoUrl;
   final String? difficulty;
   final String? bestTimeToVisit;
   final DateTime savedAt;
   final String? userId;
+
+  /// Display name of the user who dropped this gem, from a `profiles`
+  /// embed (LEFT join on `display_name`). Null when there is no matching
+  /// profile or the join was omitted. Read-only — never written back.
+  final String? dropperHandle;
 
   const Gem({
     required this.id,
@@ -19,12 +25,14 @@ class Gem {
     this.category,
     this.latitude,
     this.longitude,
+    this.tagline,
     this.description,
     this.photoUrl,
     this.difficulty,
     this.bestTimeToVisit,
     required this.savedAt,
     this.userId,
+    this.dropperHandle,
   });
 
   factory Gem.fromJson(Map<String, dynamic> json) {
@@ -39,6 +47,16 @@ class Gem {
         lat = (coords['lat'] ?? coords['latitude'] as num?)?.toDouble();
       }
     }
+    // The profiles embed may arrive as a map (to-one), a list (to-many), or be
+    // absent entirely if the join was dropped — tolerate all three.
+    String? dropperHandle;
+    final profiles = json['profiles'];
+    if (profiles is Map) {
+      dropperHandle = profiles['display_name'] as String?;
+    } else if (profiles is List && profiles.isNotEmpty) {
+      final first = profiles.first;
+      if (first is Map) dropperHandle = first['display_name'] as String?;
+    }
     return Gem(
       id: json['id'] as String,
       gemName: json['gem_name'] as String? ?? 'Unnamed Gem',
@@ -46,12 +64,14 @@ class Gem {
       category: json['category'] as String?,
       latitude: lat,
       longitude: lng,
+      tagline: json['tagline'] as String?,
       description: json['description'] as String?,
       photoUrl: json['photo_url'] as String?,
       difficulty: json['difficulty'] as String?,
       bestTimeToVisit: json['best_time_to_visit'] as String?,
       savedAt: DateTime.tryParse(json['saved_at'] as String? ?? '') ?? DateTime.now(),
       userId: json['user_id'] as String?,
+      dropperHandle: dropperHandle,
     );
   }
 
@@ -65,6 +85,7 @@ class Gem {
         'gem_location': gemLocation,
         'category': category,
         'gem_coords': {'lat': lat, 'lng': lng},
+        'tagline': tagline,
         'description': description,
         'photo_url': photoUrl,
         'difficulty': difficulty,
