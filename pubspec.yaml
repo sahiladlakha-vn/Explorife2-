@@ -25,7 +25,9 @@ dependencies:
   flutter_secure_storage: ^9.2.2
   flutter_dotenv: ^5.2.1
   url_launcher: ^6.3.0
+  image_picker: ^1.1.2    # photo selection for the Drop a Gem flow (web + native)
   web: ^1.1.0              # DOM access for the web-only Mapbox GL globe view
+  pointer_interceptor: ^0.10.1  # stops sheet/controls gestures bleeding into the web Mapbox platform view
 
 dev_dependencies:
   flutter_test:

@@ -17,7 +17,7 @@
     {
       "name": "Flutter Web (Built)",
       "runtimeExecutable": "python3",
-      "runtimeArgs": ["-m", "http.server", "--directory", "build/web"],
+      "runtimeArgs": ["-m", "http.server", "8080", "--directory", "build/web"],
       "port": 8080,
       "autoPort": true
     }

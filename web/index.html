@@ -46,10 +46,16 @@
       transition: transform 0.15s ease;
     }
     .ex-gem:hover { transform: scale(1.12); }
+    /* Selected pin: scale up + brand glow so the active gem reads at a glance. */
     .ex-gem.selected {
       background: #ff6a2b; border-color: #ffffff;
       box-shadow: 0 0 18px 6px rgba(255, 106, 43, 0.6);
+      transform: scale(1.22);
+      z-index: 2;
     }
+    /* Non-selected pins dim back while a selection is active, so the deck's
+       current card and its pin stand out from the rest. */
+    .ex-gem.dimmed { opacity: 0.45; }
     .mapboxgl-ctrl-logo, .mapboxgl-ctrl-attrib { opacity: 0.35; }
   </style>
 </head>
