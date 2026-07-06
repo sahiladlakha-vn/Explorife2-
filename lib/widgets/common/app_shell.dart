@@ -1,18 +1,44 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
-import 'package:google_fonts/google_fonts.dart';
-import '../../core/theme/app_theme.dart';
+import 'bottom_nav.dart';
+import 'side_drawer.dart';
 
-class AppShell extends StatelessWidget {
+/// Exposes the app-shell drawer to descendant screens so the Home avatar,
+/// the map menu button, etc. can open the same panel without owning a Scaffold.
+class AppShellScope extends InheritedWidget {
+  final VoidCallback openDrawer;
+  const AppShellScope({
+    super.key,
+    required this.openDrawer,
+    required super.child,
+  });
+
+  static AppShellScope of(BuildContext context) =>
+      context.dependOnInheritedWidgetOfExactType<AppShellScope>()!;
+
+  @override
+  bool updateShouldNotify(AppShellScope oldWidget) => false;
+}
+
+class AppShell extends StatefulWidget {
   final Widget child;
   const AppShell({super.key, required this.child});
 
+  @override
+  State<AppShell> createState() => _AppShellState();
+}
+
+class _AppShellState extends State<AppShell> {
+  final _scaffoldKey = GlobalKey<ScaffoldState>();
+
+  // (route, icon) — index order is the contract with BottomNav and the
+  // route↔index mapping below. Label-less, so a single icon per item.
   static const _tabs = [
-    ('/home',     Icons.home_outlined,         Icons.home,           'Home'),
-    ('/explore',  Icons.map_outlined,           Icons.map,            'Map'),
-    ('/stories',  Icons.menu_book_outlined,     Icons.menu_book,      'Stories'),
-    ('/listings', Icons.explore_outlined,       Icons.explore,        'Discover'),
-    ('/profile',  Icons.person_outline_rounded, Icons.person_rounded, 'Profile'),
+    ('/home',     Icons.home_outlined),
+    ('/explore',  Icons.map_outlined),
+    ('/stories',  Icons.menu_book_outlined),
+    ('/listings', Icons.explore_outlined),
+    ('/profile',  Icons.person_outline_rounded),
   ];
 
   int _indexFromLocation(String location) {
@@ -23,36 +49,26 @@ class AppShell extends StatelessWidget {
     return 0;
   }
 
+  void _openDrawer() => _scaffoldKey.currentState?.openDrawer();
+
+  // Every tab is a real peer route now (Profile included). The hamburger menu —
+  // not the nav bar — owns the drawer.
+  void _onTap(int i) => context.go(_tabs[i].$1);
+
   @override
   Widget build(BuildContext context) {
     final location = GoRouterState.of(context).uri.path;
     final currentIndex = _indexFromLocation(location);
 
     return Scaffold(
-      body: child,
-      bottomNavigationBar: Container(
-        decoration: BoxDecoration(
-          color: AppTheme.bg,
-          border: Border(top: BorderSide(color: AppTheme.divider)),
-        ),
-        child: NavigationBar(
-          selectedIndex: currentIndex,
-          backgroundColor: AppTheme.bg,
-          surfaceTintColor: Colors.transparent,
-          shadowColor: Colors.transparent,
-          indicatorColor: AppTheme.primary.withOpacity(0.15),
-          labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
-          onDestinationSelected: (i) => context.go(_tabs[i].$1),
-          destinations: _tabs.asMap().entries.map((e) {
-            final isSelected = e.key == currentIndex;
-            final tab = e.value;
-            return NavigationDestination(
-              icon: Icon(tab.$2, color: AppTheme.textSecondary),
-              selectedIcon: Icon(tab.$3, color: AppTheme.primary),
-              label: tab.$4,
-            );
-          }).toList(),
-        ),
+      key: _scaffoldKey,
+      drawer: const SideDrawer(),
+      drawerEnableOpenDragGesture: false,
+      body: AppShellScope(openDrawer: _openDrawer, child: widget.child),
+      bottomNavigationBar: BottomNav(
+        icons: [for (final tab in _tabs) tab.$2],
+        currentIndex: currentIndex,
+        onTap: _onTap,
       ),
     );
   }

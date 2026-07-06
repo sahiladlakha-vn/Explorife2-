@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import '../../core/theme/app_theme.dart';
 import '../../providers/destination_provider.dart';
-import '../../models/destination.dart';
+import '../../providers/gem_provider.dart';
+import '../../models/gem.dart';
 import '../../widgets/app_network_image.dart';
 import '../../widgets/state_views.dart';
 
@@ -39,12 +41,17 @@ class _HomeScreenState extends State<HomeScreen> {
     });
   }
 
+  // Saving gems isn't persisted yet (needs a gem_saves table) — surface that
+  // honestly instead of faking a local toggle that vanishes on reload.
+  void _comingSoonSave(BuildContext context) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Saving gems is coming soon')),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final provider = context.watch<DestinationProvider>();
-    final featured = provider.featured;
-    final all = provider.destinations;
-    final loading = provider.isLoading;
     final error = provider.hasError;
     final selectedIndex =
         _cats.indexWhere((c) => c.value == provider.selectedCategory);
@@ -92,41 +99,50 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               )
             else ...[
-              // Featured heading
-              SliverPadding(
-                padding: const EdgeInsets.symmetric(horizontal: 20),
-                sliver: SliverList(
-                  delegate: SliverChildListDelegate([
-                    _SectionHead(
-                      title: 'FEATURED',
-                      onSeeAll: () => context.go('/listings'),
-                    ),
-                    const SizedBox(height: 12),
-                  ]),
+              // ── FEATURED (real gems via GemProvider; the rest of this region
+              // still rides DestinationProvider) ──
+              SliverToBoxAdapter(
+                child: Consumer<GemProvider>(
+                  builder: (context, gem, _) {
+                    final featuredGems = gem.featured;
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 20),
+                          child: _SectionHead(
+                            title: 'FEATURED',
+                            onSeeAll: () => context.go('/listings'),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        if (gem.loading)
+                          const FeaturedRowSkeleton()
+                        else if (gem.hasError)
+                          ErrorStateView(
+                              onRetry: gem.refresh, message: gem.error)
+                        else if (featuredGems.isEmpty)
+                          const EmptyStateView(text: 'No featured gems yet.')
+                        else
+                          SizedBox(
+                            height: 290,
+                            child: ListView.builder(
+                              scrollDirection: Axis.horizontal,
+                              padding:
+                                  const EdgeInsets.symmetric(horizontal: 20),
+                              itemCount: featuredGems.length,
+                              itemBuilder: (ctx, i) => _FeaturedGemCard(
+                                gem: featuredGems[i],
+                                isTrending: gem.isTrending(featuredGems[i]),
+                                onSave: () => _comingSoonSave(ctx),
+                              ),
+                            ),
+                          ),
+                      ],
+                    );
+                  },
                 ),
               ),
-
-              // Featured: skeleton → list → empty
-              if (loading)
-                const SliverToBoxAdapter(child: FeaturedRowSkeleton())
-              else if (featured.isNotEmpty)
-                SliverToBoxAdapter(
-                  child: SizedBox(
-                    height: 290,
-                    child: ListView.builder(
-                      scrollDirection: Axis.horizontal,
-                      padding: const EdgeInsets.symmetric(horizontal: 20),
-                      itemCount: featured.length,
-                      itemBuilder: (ctx, i) => _FeaturedCard(destination: featured[i]),
-                    ),
-                  ),
-                )
-              else
-                const SliverToBoxAdapter(
-                  child: EmptyStateView(
-                    text: 'No featured spots in this category yet.',
-                  ),
-                ),
 
               SliverPadding(
                 padding: const EdgeInsets.symmetric(horizontal: 20),
@@ -138,20 +154,15 @@ class _HomeScreenState extends State<HomeScreen> {
                     _CommunityRow(),
                     const SizedBox(height: 20),
 
-                    // Trails heading
+                    // Nearby gems heading
                     _SectionHead(
-                      title: 'TRAILS NEAR YOU',
+                      title: 'GEMS NEAR YOU',
                       onSeeAll: () => context.go('/listings'),
                     ),
                     const SizedBox(height: 12),
 
-                    // Trails: skeleton → list → empty
-                    if (loading)
-                      const TrailListSkeleton()
-                    else if (all.isEmpty)
-                      const EmptyStateView(text: 'No trails match this category.')
-                    else
-                      ...all.take(3).map((d) => _TrailCard(destination: d)),
+                    // Real, distance-sorted gems (best-effort location, own states)
+                    const _NearbyGems(),
 
                     const SizedBox(height: 20),
 
@@ -574,20 +585,45 @@ class _SectionHead extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────
-// FEATURED CARD
+// FEATURED GEM CARD (real Explorife gems)
 // ─────────────────────────────────────────
-class _FeaturedCard extends StatelessWidget {
-  final Destination destination;
-  const _FeaturedCard({required this.destination});
+class _FeaturedGemCard extends StatelessWidget {
+  final Gem gem;
+  final bool isTrending;
+  final VoidCallback? onSave;
+  const _FeaturedGemCard(
+      {required this.gem, required this.isTrending, this.onSave});
+
+  // Difficulty → colour + label, matched case-insensitively because stored
+  // casing isn't guaranteed (e.g. 'Hard' vs 'hard'). Null when unset.
+  ({Color color, String label})? get _difficulty {
+    final d = gem.difficulty;
+    if (d == null || d.trim().isEmpty) return null;
+    switch (d.toLowerCase()) {
+      case 'easy':
+        return (color: const Color(0xFF2ECC71), label: 'EASY');
+      case 'moderate':
+      case 'mod':
+        return (color: const Color(0xFFFFC107), label: 'MODERATE');
+      case 'hard':
+        return (color: AppTheme.primary, label: 'HARD');
+      default:
+        return (color: AppTheme.textSecondary, label: d.toUpperCase());
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
+    final diff = _difficulty;
+    final loc = gem.gemLocation;
+    final hasLoc = loc != null && loc.isNotEmpty;
+    final bestTime = gem.bestTimeToVisit;
     return Semantics(
       button: true,
-      label: '${destination.name}, ${destination.country}',
+      label: hasLoc ? '${gem.gemName}, $loc' : gem.gemName,
       explicitChildNodes: true,
       child: GestureDetector(
-        onTap: () => context.go('/listings/${destination.id}'),
+        onTap: () => context.go('/gems/${gem.id}'),
         child: Container(
           width: 225,
           margin: const EdgeInsets.only(right: 14),
@@ -596,7 +632,9 @@ class _FeaturedCard extends StatelessWidget {
             child: Stack(
               fit: StackFit.expand,
               children: [
-                AppNetworkImage(url: destination.imageUrl, fit: BoxFit.cover),
+                // Empty url → AppNetworkImage renders ImageFallback; the photo-
+                // biased ranking keeps these rare.
+                AppNetworkImage(url: gem.photoUrl ?? '', fit: BoxFit.cover),
                 // Gradient
                 Container(
                   decoration: BoxDecoration(
@@ -608,7 +646,7 @@ class _FeaturedCard extends StatelessWidget {
                   ),
                 ),
                 // Trending badge
-                if (destination.rating >= 4.9)
+                if (isTrending)
                   Positioned(
                     top: 12, left: 12,
                     child: Container(
@@ -629,16 +667,14 @@ class _FeaturedCard extends StatelessWidget {
                       ),
                     ),
                   ),
-                // Save btn
+                // Save btn (not persisted yet → onSave shows a coming-soon hint)
                 Positioned(
                   top: 8, right: 8,
                   child: Semantics(
                     button: true,
-                    toggled: destination.isSaved,
-                    label: 'Save ${destination.name}',
+                    label: 'Save ${gem.gemName}',
                     child: GestureDetector(
-                      onTap: () =>
-                          context.read<DestinationProvider>().toggleSave(destination.id),
+                      onTap: onSave,
                       child: Container(
                         width: 44, height: 44, // min tap target
                         alignment: Alignment.center,
@@ -648,11 +684,8 @@ class _FeaturedCard extends StatelessWidget {
                             color: Colors.black.withValues(alpha:0.4),
                             shape: BoxShape.circle,
                           ),
-                          child: Icon(
-                            destination.isSaved ? Icons.bookmark : Icons.bookmark_outline,
-                            color: destination.isSaved ? AppTheme.primary : Colors.white,
-                            size: 18,
-                          ),
+                          child: const Icon(Icons.bookmark_outline,
+                              color: Colors.white, size: 18),
                         ),
                       ),
                     ),
@@ -667,28 +700,47 @@ class _FeaturedCard extends StatelessWidget {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          destination.category.toUpperCase(),
+                          '${gem.emoji}  ${gem.displayCategory.toUpperCase()}',
                           style: GoogleFonts.jetBrainsMono(fontSize: 9, color: AppTheme.primary, letterSpacing: 1.5),
                         ),
                         const SizedBox(height: 4),
-                        Text(destination.name.toUpperCase(),
+                        Text(gem.gemName.toUpperCase(),
+                            maxLines: 1, overflow: TextOverflow.ellipsis,
                             style: GoogleFonts.bebasNeue(fontSize: 22, color: Colors.white, height: 1)),
-                        Text(destination.country,
-                            style: GoogleFonts.dmSans(fontSize: 11, color: Colors.white.withValues(alpha:0.65))),
+                        if (hasLoc)
+                          Text(loc,
+                              maxLines: 1, overflow: TextOverflow.ellipsis,
+                              style: GoogleFonts.dmSans(fontSize: 11, color: Colors.white.withValues(alpha:0.65))),
                         const SizedBox(height: 8),
                         Row(
                           children: [
-                            Row(children: [
-                              const Icon(Icons.star, size: 12, color: Colors.amber),
-                              const SizedBox(width: 3),
-                              Text('${destination.rating}',
-                                  style: GoogleFonts.dmSans(fontSize: 12, color: Colors.white, fontWeight: FontWeight.w600)),
-                              Text(' (${destination.reviewCount})',
-                                  style: GoogleFonts.dmSans(fontSize: 11, color: Colors.white.withValues(alpha:0.5))),
-                            ]),
-                            const Spacer(),
-                            Text('\$${destination.pricePerNight.toInt()}/n',
-                                style: GoogleFonts.jetBrainsMono(fontSize: 12, color: AppTheme.primary)),
+                            if (diff != null) ...[
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                decoration: BoxDecoration(
+                                  color: diff.color.withValues(alpha:0.15),
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                                child: Text(diff.label,
+                                    style: GoogleFonts.jetBrainsMono(fontSize: 10, color: diff.color, letterSpacing: 0.5)),
+                              ),
+                              const SizedBox(width: 8),
+                            ],
+                            if (bestTime != null && bestTime.isNotEmpty)
+                              Expanded(
+                                child: Row(
+                                  children: [
+                                    Icon(Icons.schedule,
+                                        size: 12, color: Colors.white.withValues(alpha:0.7)),
+                                    const SizedBox(width: 4),
+                                    Expanded(
+                                      child: Text(bestTime,
+                                          maxLines: 1, overflow: TextOverflow.ellipsis,
+                                          style: GoogleFonts.dmSans(fontSize: 11, color: Colors.white.withValues(alpha:0.7))),
+                                    ),
+                                  ],
+                                ),
+                              ),
                           ],
                         ),
                       ],
@@ -772,32 +824,105 @@ class _CommunityRow extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────
-// TRAIL CARD
+// GEMS NEAR YOU  (real, distance-sorted gems via GemProvider)
 // ─────────────────────────────────────────
-class _TrailCard extends StatelessWidget {
-  final Destination destination;
-  const _TrailCard({required this.destination});
+class _NearbyGems extends StatefulWidget {
+  const _NearbyGems();
 
-  Color get _diffColor {
-    if (destination.rating >= 4.9) return AppTheme.primary;
-    if (destination.rating >= 4.7) return const Color(0xFFFFC107);
-    return const Color(0xFF2ECC71);
+  @override
+  State<_NearbyGems> createState() => _NearbyGemsState();
+}
+
+class _NearbyGemsState extends State<_NearbyGems> {
+  // Best-effort device location. Null until (and unless) it resolves — the
+  // list then falls back to newest gems, so the section never waits on a prompt.
+  double? _lat, _lng;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _resolveLocation());
   }
 
-  String get _diffLabel {
-    if (destination.rating >= 4.9) return 'HARD';
-    if (destination.rating >= 4.7) return 'MOD';
-    return 'EASY';
+  Future<void> _resolveLocation() async {
+    // Best-effort only: never block first paint, and on ANY failure/denial stay
+    // on the newest-gems fallback. Note: the browser Geolocation API only works
+    // in a secure context (HTTPS or localhost); on a plain-HTTP preview it's
+    // silently denied — expected, not a bug.
+    try {
+      if (!await Geolocator.isLocationServiceEnabled()) return;
+      var perm = await Geolocator.checkPermission();
+      if (perm == LocationPermission.denied) {
+        perm = await Geolocator.requestPermission();
+      }
+      if (perm == LocationPermission.denied ||
+          perm == LocationPermission.deniedForever) {
+        return;
+      }
+      final pos = await Geolocator.getCurrentPosition();
+      if (!mounted) return;
+      setState(() {
+        _lat = pos.latitude;
+        _lng = pos.longitude;
+      });
+    } catch (_) {
+      // Stay silent — the fallback list already covers this.
+    }
   }
 
   @override
   Widget build(BuildContext context) {
+    final gem = context.watch<GemProvider>();
+    if (gem.loading) return const TrailListSkeleton();
+    if (gem.error != null) {
+      return ErrorStateView(onRetry: gem.refresh, message: gem.error);
+    }
+    final list = gem.nearbyGems(_lat, _lng).take(3).toList();
+    if (list.isEmpty) {
+      return const EmptyStateView(text: 'No gems nearby yet.');
+    }
+    return Column(
+      children: list
+          .map((g) => _GemTrailRow(
+                gem: g,
+                distanceKm: gem.distanceKmFrom(_lat, _lng, g),
+              ))
+          .toList(),
+    );
+  }
+}
+
+class _GemTrailRow extends StatelessWidget {
+  final Gem gem;
+  final double? distanceKm;
+  const _GemTrailRow({required this.gem, this.distanceKm});
+
+  /// Difficulty pill colour + label by level; null hides the pill entirely.
+  ({Color color, String label})? get _difficulty {
+    final d = gem.difficulty;
+    if (d == null || d.trim().isEmpty) return null;
+    switch (d.toLowerCase()) {
+      case 'easy':
+        return (color: const Color(0xFF2ECC71), label: 'EASY');
+      case 'moderate':
+      case 'mod':
+        return (color: const Color(0xFFFFC107), label: 'MODERATE');
+      case 'hard':
+        return (color: AppTheme.primary, label: 'HARD');
+      default:
+        return (color: AppTheme.textSecondary, label: d.toUpperCase());
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final diff = _difficulty;
     return Semantics(
       button: true,
-      label: '${destination.name}, ${destination.country}',
+      label: gem.gemName,
       explicitChildNodes: true,
       child: GestureDetector(
-        onTap: () => context.go('/listings/${destination.id}'),
+        onTap: () => context.go('/gems/${gem.id}'),
         child: Container(
           margin: const EdgeInsets.only(bottom: 10),
           padding: const EdgeInsets.all(12),
@@ -809,7 +934,7 @@ class _TrailCard extends StatelessWidget {
           child: Row(
             children: [
               AppNetworkImage(
-                url: destination.imageUrl,
+                url: gem.photoUrl ?? '',
                 width: 72, height: 72, fit: BoxFit.cover,
                 borderRadius: BorderRadius.circular(12),
               ),
@@ -818,27 +943,30 @@ class _TrailCard extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(destination.name,
+                    Text(gem.gemName,
+                        maxLines: 1, overflow: TextOverflow.ellipsis,
                         style: GoogleFonts.dmSans(fontSize: 14, fontWeight: FontWeight.w600, color: AppTheme.textPrimary)),
-                    const SizedBox(height: 2),
-                    Row(children: [
-                      const Icon(Icons.location_on, size: 12, color: AppTheme.textSecondary),
-                      Text(destination.country,
-                          style: GoogleFonts.dmSans(fontSize: 11, color: AppTheme.textSecondary)),
-                    ]),
-                    const SizedBox(height: 6),
-                    Wrap(
-                      spacing: 5,
-                      children: destination.tags.take(2).map((t) => Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-                        decoration: BoxDecoration(
-                          color: AppTheme.primary.withValues(alpha:0.12),
-                          border: Border.all(color: AppTheme.primary.withValues(alpha:0.2)),
-                          borderRadius: BorderRadius.circular(5),
+                    if (gem.gemLocation != null && gem.gemLocation!.isNotEmpty) ...[
+                      const SizedBox(height: 2),
+                      Row(children: [
+                        const Icon(Icons.location_on, size: 12, color: AppTheme.textSecondary),
+                        Expanded(
+                          child: Text(gem.gemLocation!,
+                              maxLines: 1, overflow: TextOverflow.ellipsis,
+                              style: GoogleFonts.dmSans(fontSize: 11, color: AppTheme.textSecondary)),
                         ),
-                        child: Text(t.toUpperCase(),
-                            style: GoogleFonts.jetBrainsMono(fontSize: 9, color: AppTheme.primary, letterSpacing: 0.5)),
-                      )).toList(),
+                      ]),
+                    ],
+                    const SizedBox(height: 6),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: AppTheme.primary.withValues(alpha:0.12),
+                        border: Border.all(color: AppTheme.primary.withValues(alpha:0.2)),
+                        borderRadius: BorderRadius.circular(5),
+                      ),
+                      child: Text(gem.displayCategory.toUpperCase(),
+                          style: GoogleFonts.jetBrainsMono(fontSize: 9, color: AppTheme.primary, letterSpacing: 0.5)),
                     ),
                   ],
                 ),
@@ -847,18 +975,21 @@ class _TrailCard extends StatelessWidget {
               Column(
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                    decoration: BoxDecoration(
-                      color: _diffColor.withValues(alpha:0.15),
-                      borderRadius: BorderRadius.circular(6),
+                  if (diff != null)
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: diff.color.withValues(alpha:0.15),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Text(diff.label,
+                          style: GoogleFonts.jetBrainsMono(fontSize: 10, color: diff.color, letterSpacing: 0.5)),
                     ),
-                    child: Text(_diffLabel,
-                        style: GoogleFonts.jetBrainsMono(fontSize: 10, color: _diffColor, letterSpacing: 0.5)),
-                  ),
-                  const SizedBox(height: 6),
-                  Text('\$${destination.pricePerNight.toInt()}/n',
-                      style: GoogleFonts.jetBrainsMono(fontSize: 12, color: AppTheme.primary, fontWeight: FontWeight.w700)),
+                  if (distanceKm != null) ...[
+                    const SizedBox(height: 6),
+                    Text('${distanceKm!.toStringAsFixed(1)} km',
+                        style: GoogleFonts.jetBrainsMono(fontSize: 12, color: AppTheme.primary, fontWeight: FontWeight.w700)),
+                  ],
                 ],
               ),
             ],
