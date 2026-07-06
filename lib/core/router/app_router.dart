@@ -11,7 +11,7 @@ import '../../screens/listings/destination_detail_screen.dart';
 import '../../screens/search/search_screen.dart';
 import '../../screens/profile/profile_screen.dart';
 import '../../screens/gems/gem_detail_screen.dart';
-import '../../screens/gems/add_gem_screen.dart';
+import '../../screens/gems/placement_screen.dart';
 import '../../screens/stories/stories_screen.dart';
 import '../../screens/stories/story_detail_screen.dart';
 import '../../screens/stories/submit_story_screen.dart';
@@ -21,11 +21,24 @@ import '../../screens/splits/splits_screen.dart';
 import '../../screens/splits/split_detail_screen.dart';
 import '../../screens/onboarding/onboarding_screen.dart';
 import '../../widgets/common/app_shell.dart';
+import '../../routes/trip_routes.dart';
 
-const _protectedRoutes = {'/profile', '/drop-gem', '/submit-story', '/log-hike', '/splits'};
+// TODO(routing): routes currently overlay the shell by tree placement (siblings
+// of ShellRoute) rather than an explicit rootNavigatorKey. Revisit if deep
+// linking or navigator-key-based tests are needed — see also trip_routes.dart.
+
+// Matched by startsWith, so '/trips' covers '/trips/new' and '/trips/:id/builder'.
+const _protectedRoutes = {'/profile', '/drop-gem', '/submit-story', '/log-hike', '/splits', '/trips'};
 
 class AppRouter {
-  static final router = GoRouter(
+  /// Build the router with [authRefresh] wired to `refreshListenable` so that
+  /// `redirect` re-runs when auth resolves (loading → resolved). Without this,
+  /// a cold-boot deep link is evaluated once while `auth.loading` is still true
+  /// (every guard returns null), and the router never re-evaluates — leaving the
+  /// user stranded on the initial route (e.g. stuck on /onboarding) and firing
+  /// stale imperative navigation as auth churns.
+  static GoRouter create(Listenable authRefresh) => GoRouter(
+    refreshListenable: authRefresh,
     initialLocation: '/onboarding',
     redirect: (context, state) {
       final auth = context.read<AuthProvider>();
@@ -84,8 +97,19 @@ class AppRouter {
           ),
         ],
       ),
-      GoRoute(path: '/drop-gem', builder: (_, __) => const AddGemScreen()),
+      GoRoute(
+        path: '/drop-gem',
+        builder: (_, state) {
+          final extra = state.extra as Map?;
+          return PlacementScreen(
+            initialLat: (extra?['lat'] as num?)?.toDouble(),
+            initialLng: (extra?['lng'] as num?)?.toDouble(),
+          );
+        },
+      ),
       GoRoute(path: '/submit-story', builder: (_, __) => const SubmitStoryScreen()),
+      // Trip Builder feature routes (overlay the shell, like the siblings above).
+      ...tripRoutes(),
       GoRoute(path: '/hikes', builder: (_, __) => const HikesScreen()),
       GoRoute(path: '/log-hike', builder: (_, __) => const LogHikeScreen()),
       GoRoute(path: '/splits', builder: (_, __) => const SplitsScreen()),
