@@ -32,11 +32,37 @@ external void _mapSetStyle(web.HTMLElement el, JSString style);
 external void _mapFlyTo(
     web.HTMLElement el, JSNumber lat, JSNumber lng, JSNumber zoom);
 
+@JS('explorifeMapFocusGem')
+external void _mapFocusGem(web.HTMLElement el, JSNumber lat, JSNumber lng,
+    JSNumber zoom, JSNumber sheetPx);
+
 @JS('explorifeMapFitGems')
 external void _mapFitGems(web.HTMLElement el, JSString gemsJson);
 
 @JS('explorifeMapLocate')
 external void _mapLocate(web.HTMLElement el);
+
+@JS('explorifeMapOnIdle')
+external void _mapOnIdle(web.HTMLElement el, JSFunction onIdle);
+
+@JS('explorifeMapSetCenterPin')
+external void _mapSetCenterPin(web.HTMLElement el, JSBoolean show);
+
+@JS('explorifeMapSetShield')
+external void _mapSetShield(web.HTMLElement el, JSNumber coverPx);
+
+@JS('explorifeMapSetOverlayShields')
+external void _mapSetOverlayShields(web.HTMLElement el, JSString rectsJson);
+
+@JS('explorifeMapSetUserLocation')
+external void _mapSetUserLocation(
+    web.HTMLElement el, JSNumber lat, JSNumber lng);
+
+@JS('explorifeMapResetNorth')
+external void _mapResetNorth(web.HTMLElement el);
+
+@JS('explorifeMapOnRotate')
+external void _mapOnRotate(web.HTMLElement el, JSFunction onRotate);
 
 int _viewSeq = 0;
 
@@ -47,6 +73,7 @@ String _markersJson(List<MapMarkerData> markers) {
             'lat': m.lat,
             'lng': m.lng,
             'emoji': m.emoji,
+            'photo': m.photoUrl,
           })
       .toList());
 }
@@ -63,6 +90,10 @@ class _WebController implements MapEngineController {
       _mapFlyTo(el, lat.toJS, lng.toJS, zoom.toJS);
 
   @override
+  void focusGem(double lat, double lng, double zoom, double sheetExtentPx) =>
+      _mapFocusGem(el, lat.toJS, lng.toJS, zoom.toJS, sheetExtentPx.toJS);
+
+  @override
   void fitMarkers(List<MapMarkerData> markers) =>
       _mapFitGems(el, _markersJson(markers).toJS);
 
@@ -74,6 +105,28 @@ class _WebController implements MapEngineController {
 
   @override
   void select(String id) => _mapSelect(el, id.toJS);
+
+  @override
+  void setCenterPin(bool show) => _mapSetCenterPin(el, show.toJS);
+
+  @override
+  void setSheetCoverage(double coverPx) => _mapSetShield(el, coverPx.toJS);
+
+  @override
+  void setOverlayShields(List<MapShieldRect> rects) {
+    final json = jsonEncode(rects
+        .map((r) => {
+              'top': r.top,
+              'left': r.left,
+              'width': r.width,
+              'height': r.height,
+            })
+        .toList());
+    _mapSetOverlayShields(el, json.toJS);
+  }
+
+  @override
+  void resetNorth() => _mapResetNorth(el);
 }
 
 class MapEngineView extends StatefulWidget {
@@ -83,6 +136,22 @@ class MapEngineView extends StatefulWidget {
   final ValueChanged<String> onMarkerTap;
   final ValueChanged<MapEngineController> onReady;
 
+  /// Called whenever the camera comes to rest, with the centre coordinate AND
+  /// the current viewport bounds (west/south/east/north). The centre tracks the
+  /// point under the fixed pin (placement mode); the bounds scope the floating
+  /// deck to gems on screen. Bounds assume non-wrapping (W ≤ E).
+  final void Function(double lat, double lng, double west, double south,
+      double east, double north)? onCameraIdle;
+
+  /// Called whenever the map rotates, with the current bearing in degrees.
+  /// Drives the rotation-gated compass control.
+  final ValueChanged<double>? onBearingChanged;
+
+  /// Optional "you are here" location. When set, a blue dot is rendered at
+  /// this coordinate.
+  final double? userLat;
+  final double? userLng;
+
   const MapEngineView({
     super.key,
     required this.markers,
@@ -90,6 +159,10 @@ class MapEngineView extends StatefulWidget {
     required this.token,
     required this.onMarkerTap,
     required this.onReady,
+    this.onCameraIdle,
+    this.onBearingChanged,
+    this.userLat,
+    this.userLng,
   });
 
   @override
@@ -120,11 +193,32 @@ class _MapEngineViewState extends State<MapEngineView> {
         ((JSString id) => widget.onMarkerTap(id.toDart)).toJS;
     _mapInit(_host, widget.token.toJS, widget.styleId.toJS, onTap);
     _pushMarkers();
+    if (widget.onCameraIdle != null) {
+      final onIdle = ((JSNumber lat, JSNumber lng, JSNumber west, JSNumber south,
+              JSNumber east, JSNumber north) =>
+          widget.onCameraIdle!(lat.toDartDouble, lng.toDartDouble,
+              west.toDartDouble, south.toDartDouble, east.toDartDouble,
+              north.toDartDouble)).toJS;
+      _mapOnIdle(_host, onIdle);
+    }
+    if (widget.onBearingChanged != null) {
+      final onRotate =
+          ((JSNumber bearing) => widget.onBearingChanged!(bearing.toDartDouble))
+              .toJS;
+      _mapOnRotate(_host, onRotate);
+    }
     widget.onReady(_WebController(_host));
+    _pushUserLocation();
   }
 
   void _pushMarkers() {
     _mapSetGems(_host, _markersJson(widget.markers).toJS);
+  }
+
+  void _pushUserLocation() {
+    if (widget.userLat != null && widget.userLng != null) {
+      _mapSetUserLocation(_host, widget.userLat!.toJS, widget.userLng!.toJS);
+    }
   }
 
   @override
@@ -136,6 +230,10 @@ class _MapEngineViewState extends State<MapEngineView> {
     }
     if (!_sameMarkers(oldWidget.markers, widget.markers)) {
       _pushMarkers();
+    }
+    if (oldWidget.userLat != widget.userLat ||
+        oldWidget.userLng != widget.userLng) {
+      _pushUserLocation();
     }
   }
 

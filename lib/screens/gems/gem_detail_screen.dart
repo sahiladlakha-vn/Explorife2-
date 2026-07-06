@@ -74,12 +74,13 @@ class _GemDetailScreenState extends State<GemDetailScreen> {
               icon: Container(
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
-                  color: Colors.black.withOpacity(0.5),
+                  color: Colors.black.withValues(alpha: 0.5),
                   shape: BoxShape.circle,
                 ),
                 child: const Icon(Icons.arrow_back, size: 18),
               ),
-              onPressed: () => context.pop(),
+              onPressed: () =>
+                  context.canPop() ? context.pop() : context.go('/explore'),
             ),
             flexibleSpace: FlexibleSpaceBar(
               background: gem.photoUrl != null
@@ -114,9 +115,9 @@ class _GemDetailScreenState extends State<GemDetailScreen> {
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                     decoration: BoxDecoration(
-                      color: AppTheme.primary.withOpacity(0.12),
+                      color: AppTheme.primary.withValues(alpha: 0.12),
                       borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: AppTheme.primary.withOpacity(0.3)),
+                      border: Border.all(color: AppTheme.primary.withValues(alpha: 0.3)),
                     ),
                     child: Text('${gem.emoji}  ${gem.displayCategory}',
                         style: GoogleFonts.jetBrainsMono(fontSize: 11, color: AppTheme.primary)),
