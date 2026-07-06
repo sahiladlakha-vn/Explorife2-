@@ -46,8 +46,8 @@ class _AuthScreenState extends State<AuthScreen> {
                 begin: Alignment.topCenter,
                 end: Alignment.bottomCenter,
                 colors: [
-                  Colors.black.withOpacity(0.3),
-                  AppTheme.bg.withOpacity(0.95),
+                  Colors.black.withValues(alpha: 0.3),
+                  AppTheme.bg.withValues(alpha: 0.95),
                   AppTheme.bg,
                 ],
                 stops: const [0.0, 0.5, 1.0],
@@ -87,9 +87,9 @@ class _AuthScreenState extends State<AuthScreen> {
                     Container(
                       padding: const EdgeInsets.all(12),
                       decoration: BoxDecoration(
-                        color: Colors.red.withOpacity(0.1),
+                        color: Colors.red.withValues(alpha: 0.1),
                         borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: Colors.red.withOpacity(0.3)),
+                        border: Border.all(color: Colors.red.withValues(alpha: 0.3)),
                       ),
                       child: Text(_error!, style: GoogleFonts.dmSans(color: Colors.red, fontSize: 13)),
                     ),
@@ -127,7 +127,7 @@ class _AuthScreenState extends State<AuthScreen> {
           ),
           if (_loading)
             Container(
-              color: Colors.black.withOpacity(0.4),
+              color: Colors.black.withValues(alpha: 0.4),
               child: const Center(
                 child: CircularProgressIndicator(color: AppTheme.primary),
               ),
