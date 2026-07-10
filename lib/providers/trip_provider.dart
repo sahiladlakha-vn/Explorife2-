@@ -3,6 +3,9 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/trip.dart';
 import '../models/trip_stop.dart';
 import '../models/trip_blueprint.dart';
+import '../models/trip_checklist_item.dart';
+import '../models/trip_checklist_template.dart';
+import '../models/trip_budget_template.dart';
 import '../models/trip_vibe.dart';
 
 /// Slot ordering for itinerary reads. Module-level const, used by stopsForDay.
@@ -31,6 +34,9 @@ class TripProvider extends ChangeNotifier {
   // --- State: keyed caches + status channel. No computed values cached. ---
   final Map<String, Trip> _trips = {}; // by trip id
   final Map<String, List<TripStop>> _stopsByTrip = {}; // by trip id
+  final Map<String, List<TripChecklistItem>> _checklistByTrip = {}; // by trip id
+  final Map<String, Map<String, int>> _plannedByTrip =
+      {}; // trip id -> {category: planned vnd}
   final List<TripBlueprint> _blueprints = []; // small; filter on read
   bool _isLoading = false;
   String? _lastError;
@@ -108,6 +114,69 @@ class TripProvider extends ChangeNotifier {
     return totals;
   }
 
+  /// Planned spend per budget bucket — the "planned" line for the Summary
+  /// Planned-vs-Actual chart. Always returns all four keys (zero-filled) so the
+  /// chart pairs cleanly with [categoryTotals].
+  ///
+  /// Prefers the seeded/customized rows in [_plannedByTrip]; falls back to a
+  /// freshly-computed vibe default for trips with no budget rows yet (legacy
+  /// trips created before this feature, or before the seed lands). The fallback
+  /// is NOT persisted here — it's a read-time default only.
+  Map<String, int> plannedByCategory(String tripId) {
+    final cached = _plannedByTrip[tripId];
+    if (cached != null && cached.isNotEmpty) {
+      return {for (final c in budgetCategories) c: cached[c] ?? 0};
+    }
+    final trip = _trips[tripId];
+    if (trip == null) return {for (final c in budgetCategories) c: 0};
+    return plannedBudgetFor(trip.vibe, trip.budgetVnd);
+  }
+
+  /// Sets the planned amount for one bucket. Optimistic upsert with rollback,
+  /// mirroring [toggleChecklistItem]. Reserved for the deferred editing UI — no
+  /// caller today, but the write path is here so the seed isn't the only way a
+  /// row is ever created.
+  Future<void> updatePlannedForCategory(
+      String tripId, String category, int plannedVnd) async {
+    final before = _plannedByTrip[tripId] == null
+        ? null
+        : Map<String, int>.from(_plannedByTrip[tripId]!);
+
+    (_plannedByTrip[tripId] ??= {})[category] = plannedVnd; // optimistic
+    notifyListeners();
+
+    try {
+      await _supabase.from('trip_category_budgets').upsert(
+        {'trip_id': tripId, 'category': category, 'planned_vnd': plannedVnd},
+        onConflict: 'trip_id,category',
+      );
+    } catch (e) {
+      if (before == null) {
+        _plannedByTrip.remove(tripId);
+      } else {
+        _plannedByTrip[tripId] = before; // rollback by snapshot
+      }
+      _lastError = e.toString();
+      notifyListeners();
+      rethrow;
+    }
+  }
+
+  /// Checklist items for a trip, sorted by section render order then sortOrder.
+  /// Returns an unmodifiable view: callers (Summary screen) render it directly
+  /// and must route mutations through [toggleChecklistItem], never the list.
+  List<TripChecklistItem> checklistFor(String tripId) {
+    final list = List<TripChecklistItem>.from(
+        _checklistByTrip[tripId] ?? const <TripChecklistItem>[]);
+    list.sort((a, b) {
+      final s = TripChecklistItem.sectionOrder
+          .indexOf(a.section)
+          .compareTo(TripChecklistItem.sectionOrder.indexOf(b.section));
+      return s != 0 ? s : a.sortOrder.compareTo(b.sortOrder);
+    });
+    return List.unmodifiable(list);
+  }
+
   // --- Lifecycle ---
 
   /// One-shot load. Never rethrows — failures surface via [error] so the UI can
@@ -129,6 +198,8 @@ class TripProvider extends ChangeNotifier {
           .eq('owner_id', _currentUserId);
       _trips.clear();
       _stopsByTrip.clear();
+      _checklistByTrip.clear();
+      _plannedByTrip.clear();
       for (final r in tripRows) {
         final t = Trip.fromJson(r);
         _trips[t.id] = t;
@@ -144,6 +215,26 @@ class TripProvider extends ChangeNotifier {
         for (final r in stopRows) {
           final s = TripStop.fromJson(r);
           (_stopsByTrip[s.tripId] ??= []).add(s);
+        }
+
+        final checklistRows = await _supabase
+            .from('trip_checklist_items')
+            .select()
+            .inFilter('trip_id', tripIds);
+        for (final r in checklistRows) {
+          final c = TripChecklistItem.fromJson(r);
+          (_checklistByTrip[c.tripId] ??= []).add(c);
+        }
+
+        final budgetRows = await _supabase
+            .from('trip_category_budgets')
+            .select()
+            .inFilter('trip_id', tripIds);
+        for (final r in budgetRows) {
+          final tripId = r['trip_id'] as String;
+          final category = r['category'] as String;
+          (_plannedByTrip[tripId] ??= {})[category] =
+              (r['planned_vnd'] as num).toInt();
         }
       }
 
@@ -167,6 +258,11 @@ class TripProvider extends ChangeNotifier {
   ///
   /// Blocks navigation (caller routes to the returned id), so this awaits the
   /// insert then commits — no optimistic state to show. Rethrows on failure.
+  ///
+  /// After the trip (and any blueprint stops) commit, it seeds the pre-trip
+  /// checklist. That seed is NON-fatal: the trip row already exists, so a
+  /// checklist failure is logged to [error] and swallowed rather than rethrown —
+  /// createTrip only rethrows for failures that mean "no trip was created".
   Future<Trip> createTrip(TripDraft draft) async {
     final row = await _supabase
         .from('trips')
@@ -196,6 +292,26 @@ class TripProvider extends ChangeNotifier {
     if (draft.templateChoice == 'blueprint' && draft.blueprintId != null) {
       await seedFromBlueprint(trip.id, draft.blueprintId!);
     }
+
+    // Non-fatal: the trip is already committed. seedChecklistForTrip rethrows on
+    // a genuine seed (insert) failure — caught here so it can't abort creation —
+    // but does NOT rethrow on a post-insert fetch failure (rows are safe; the
+    // next checklistFor/init read repopulates). Either way the trip returns.
+    try {
+      await seedChecklistForTrip(trip.id);
+    } catch (e) {
+      _lastError = 'Trip created, checklist seed failed: $e';
+    }
+
+    // Also non-fatal, same reasoning as the checklist seed above: the trip is
+    // already committed, so a failed budget seed just leaves plannedByCategory
+    // to fall back on its read-time vibe default.
+    try {
+      await seedCategoryBudgetsForTrip(trip.id);
+    } catch (e) {
+      _lastError = 'Trip created, budget seed failed: $e';
+    }
+
     notifyListeners();
     return trip;
   }
@@ -230,6 +346,137 @@ class TripProvider extends ChangeNotifier {
     _stopsByTrip[tripId] =
         rows.map((r) => TripStop.fromJson(r)).toList();
     notifyListeners();
+  }
+
+  /// Seeds the pre-trip checklist from the domestic/international template for
+  /// the trip's location. Path B: seed and fetch are separate concerns.
+  ///
+  /// The insert MUST succeed — a failure there means no checklist exists, so it
+  /// rethrows (createTrip catches it as non-fatal). The follow-up fetch is a
+  /// nice-to-have: the rows are already committed to the DB, so a fetch failure
+  /// leaves the cache empty and just surfaces via [error]; the next init/read
+  /// repopulates it. No rethrow, no rollback on the fetch leg.
+  Future<void> seedChecklistForTrip(String tripId) async {
+    final trip = _trips[tripId];
+    if (trip == null) return;
+
+    final seeds = checklistTemplateFor(trip.location);
+    if (seeds.isEmpty) {
+      _checklistByTrip[tripId] = [];
+      notifyListeners();
+      return;
+    }
+
+    final insertPayload = seeds
+        .map((s) => {
+              'trip_id': tripId,
+              'section': s.section,
+              'title': s.title,
+              'sort_order': s.sortOrder,
+              'due_date_offset_days': s.dueDateOffsetDays,
+            })
+        .toList();
+
+    // Seeding must succeed — rethrow on failure.
+    try {
+      await _supabase.from('trip_checklist_items').insert(insertPayload);
+    } catch (e) {
+      _lastError = 'Failed to seed checklist: $e';
+      notifyListeners();
+      rethrow;
+    }
+
+    // Fetch is a nice-to-have — rows are already committed to the DB. If the
+    // fetch fails, the cache stays empty and the next read repopulates it. No
+    // rethrow, no rollback.
+    try {
+      final rows = await _supabase
+          .from('trip_checklist_items')
+          .select()
+          .eq('trip_id', tripId)
+          .order('section')
+          .order('sort_order');
+      _checklistByTrip[tripId] =
+          rows.map((r) => TripChecklistItem.fromJson(r)).toList();
+    } catch (e) {
+      _lastError = 'Checklist seeded but not loaded: $e';
+    }
+
+    notifyListeners();
+  }
+
+  /// Seeds the per-category planned budget from the trip's vibe-based default
+  /// split ([plannedBudgetFor]) — the "planned" source for the Summary chart.
+  ///
+  /// Like [seedChecklistForTrip], the insert MUST succeed — a failure means no
+  /// planned rows exist, so it rethrows (createTrip catches it as non-fatal).
+  /// Unlike the checklist there's no follow-up fetch: planned_vnd is client-
+  /// computed (not trigger-set), so the cache is populated straight from the
+  /// same map that was inserted.
+  Future<void> seedCategoryBudgetsForTrip(String tripId) async {
+    final trip = _trips[tripId];
+    if (trip == null) return;
+
+    final planned = plannedBudgetFor(trip.vibe, trip.budgetVnd);
+
+    final insertPayload = planned.entries
+        .map((e) => {
+              'trip_id': tripId,
+              'category': e.key,
+              'planned_vnd': e.value,
+            })
+        .toList();
+
+    try {
+      await _supabase.from('trip_category_budgets').insert(insertPayload);
+    } catch (e) {
+      _lastError = 'Failed to seed category budgets: $e';
+      notifyListeners();
+      rethrow;
+    }
+
+    _plannedByTrip[tripId] = Map<String, int>.from(planned);
+    notifyListeners();
+  }
+
+  /// Toggles an item's checked state. Optimistic write, then a reconciliation
+  /// read of the row the DB actually holds (updated_at is trigger-set server-
+  /// side — we read it back rather than predicting a timestamp locally). Both
+  /// the optimistic and reconciliation writes go through
+  /// [_updateLocalChecklistItem]; the rollback stays inline because it restores
+  /// the original snapshot at a known index rather than matching by id.
+  Future<void> toggleChecklistItem(String itemId) async {
+    final loc = _locateChecklistItem(itemId);
+    if (loc == null) return;
+    final (tripId, index) = loc;
+    final old = _checklistByTrip[tripId]![index];
+    final next = !old.isChecked;
+
+    // Optimistic write path.
+    _updateLocalChecklistItem(tripId, old.copyWith(isChecked: next));
+
+    try {
+      await _supabase
+          .from('trip_checklist_items')
+          .update({'is_checked': next}).eq('id', itemId);
+
+      // Reconciliation write path: adopt the DB's own row (with its trigger-set
+      // updated_at) instead of trusting the optimistic guess.
+      final rows = await _supabase
+          .from('trip_checklist_items')
+          .select()
+          .eq('id', itemId)
+          .limit(1);
+      if (rows.isNotEmpty) {
+        _updateLocalChecklistItem(
+            tripId, TripChecklistItem.fromJson(rows.first));
+      }
+    } catch (e) {
+      _checklistByTrip[tripId]![index] = old; // rollback (inline, by snapshot)
+      _lastError = e.toString();
+      notifyListeners();
+      rethrow;
+    }
   }
 
   Future<TripStop> addStop({
@@ -353,6 +600,27 @@ class TripProvider extends ChangeNotifier {
       if (i != -1) return (entry.key, i);
     }
     return null;
+  }
+
+  /// Finds (tripId, index) for a checklist item across the cache, or null.
+  (String, int)? _locateChecklistItem(String itemId) {
+    for (final entry in _checklistByTrip.entries) {
+      final i = entry.value.indexWhere((c) => c.id == itemId);
+      if (i != -1) return (entry.key, i);
+    }
+    return null;
+  }
+
+  /// Replaces a checklist item in the cache by id and notifies. No-op if the
+  /// trip or item isn't cached. Used by both the optimistic and reconciliation
+  /// write paths in [toggleChecklistItem].
+  void _updateLocalChecklistItem(String tripId, TripChecklistItem updated) {
+    final list = _checklistByTrip[tripId];
+    if (list == null) return;
+    final idx = list.indexWhere((i) => i.id == updated.id);
+    if (idx < 0) return;
+    list[idx] = updated;
+    notifyListeners();
   }
 
   String _categoryFor(TripStop s) {
