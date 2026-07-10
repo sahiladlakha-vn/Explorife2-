@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import '../screens/trip_setup/trip_setup_sheet.dart';
 import '../screens/trip_builder/trip_builder_screen.dart';
+import '../screens/trip_summary/trip_summary_screen.dart';
 
 /// Trip Builder routes. Spread into the top-level `routes:` list as siblings of
 /// `ShellRoute` so they overlay the bottom nav — matching the house pattern
@@ -20,6 +21,22 @@ List<RouteBase> tripRoutes() => [
       GoRoute(
         path: '/trips/:id/builder',
         builder: (context, state) => TripBuilderScreen(
+          tripId: state.pathParameters['id']!,
+        ),
+      ),
+      // Explicit `/summary` alias, registered before the bare `:id` canonical so
+      // the more-specific path is matched first.
+      GoRoute(
+        path: '/trips/:id/summary',
+        builder: (context, state) => TripSummaryScreen(
+          tripId: state.pathParameters['id']!,
+        ),
+      ),
+      // Canonical landing. Listed AFTER `/trips/new` so the literal `new` route
+      // still wins that segment; `:id` only captures real trip ids.
+      GoRoute(
+        path: '/trips/:id',
+        builder: (context, state) => TripSummaryScreen(
           tripId: state.pathParameters['id']!,
         ),
       ),

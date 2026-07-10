@@ -770,7 +770,7 @@ class _NextTripCard extends StatelessWidget {
     final fill = (status.pct / 100).clamp(0.0, 1.0);
 
     return GestureDetector(
-      onTap: () => context.go('/trips/${active.id}/builder'),
+      onTap: () => context.go('/trips/${active.id}'),
       behavior: HitTestBehavior.opaque,
       child: _NextTripShell(
         child: Column(
@@ -959,7 +959,7 @@ class _TripsTab extends StatelessWidget {
 
 /// One trip in the MY TRIPS list — the [_GemRow] idiom (tinted leading tile,
 /// name + subtitle, trailing accent) with a budget-pct pill instead of a
-/// chevron. Taps into the builder.
+/// chevron. Taps into the trip summary.
 class _TripRow extends StatelessWidget {
   final Trip trip;
   final bool divider;
@@ -972,7 +972,7 @@ class _TripRow extends StatelessWidget {
     final status = BudgetStatus.of(spent: spent, budgetVnd: trip.budgetVnd);
     final pct = status.pct.round();
     return GestureDetector(
-      onTap: () => context.go('/trips/${trip.id}/builder'),
+      onTap: () => context.go('/trips/${trip.id}'),
       behavior: HitTestBehavior.opaque,
       child: Container(
         padding: const EdgeInsets.symmetric(vertical: 14),
