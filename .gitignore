@@ -51,3 +51,6 @@ app.*.map.json
 # Vercel deploy state
 .vercel/
 .vercel-link/
+
+# Claude Code session / worktree artifacts (never commit)
+.claude/
