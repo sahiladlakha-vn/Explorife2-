@@ -190,3 +190,35 @@ site with a greppable marker:
     // composed with legend — Decision A (%-only arc labels) depends on this
 If the card ever composes the donut WITHOUT a legend, revert arc labels to
 "Category %" (the sidebar's inline-label pattern). Grep tag: `composed with legend`.
+
+## Migration conventions — added 2026-07-09 (verified grep-across-dir)
+
+Corrects an earlier overstatement that "every migration follows the
+`IF NOT EXISTS` + `pg_policies` existence-guard convention." Verified against the
+whole `supabase/migrations/` directory (not one exemplar): the convention was
+NOT universal, and one half of it didn't exist yet. Grep tag: MIGRATION-CONVENTION.
+
+- **Table / index / extension / function guards ARE universal.** Every migration
+  uses `create table if not exists`, `create index if not exists`,
+  `create extension if not exists`, `create or replace function`. Re-running these
+  is always a no-op. Keep this.
+- **Policy DO-block guard lives in ONE file.** The
+  `do $$ begin if not exists (select 1 from pg_policies where schemaname=... and
+  tablename=... and policyname=...) then create policy ... end if; end $$;`
+  pattern exists ONLY in `20260618000100_create_gem_saves.sql`.
+  `20260630000000_create_trip_builder.sql` uses **bare** `create policy` (errors
+  `42710` on re-run). **Standard going forward: the `gem_saves` DO-block.** The
+  two 2026-07 feature migrations (`trip_checklist_items`, `trip_category_budgets`)
+  were brought up to it on 2026-07-09.
+- **Trigger guard established 2026-07-09.** No migration had a trigger before the
+  two 2026-07 feature migrations. Convention set there:
+  `drop trigger if exists <name> on <table>;` immediately before `create trigger`
+  — chosen for version independence (no reliance on PG14+
+  `create or replace trigger`). Precedent file:
+  `20260707000000_create_trip_checklist_items.sql` (header documents the choice);
+  `20260708000000_create_trip_category_budgets.sql` references it.
+
+Durable rule (meta): claimed repo-wide conventions must be verified by grep
+across the WHOLE directory before being relied on — twice in the 2026-07-09
+session a convention was overstated from a partial read (policies, then triggers),
+each caught by directory-wide grep before executing on the false framing.
