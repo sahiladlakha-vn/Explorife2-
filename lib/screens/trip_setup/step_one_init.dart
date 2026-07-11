@@ -139,6 +139,12 @@ class _StepOneInitState extends State<StepOneInit> {
           decoration: const InputDecoration(
             prefixText: '₫ ',
             hintText: '0',
+            // Scale hint — the raw field accepts bare digits, so anchor the
+            // magnitude a real VND budget lives at. Comma grouping matches the
+            // formatted echo below (Trip.formatVnd) and the app-wide
+            // convention; kept always-on so the field height doesn't jump on
+            // the first keystroke.
+            helperText: 'Example: 5,000,000 = ₫5M',
           ),
           onChanged: (v) {
             d.budgetVnd = int.tryParse(v) ?? 0;
