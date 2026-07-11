@@ -4,16 +4,31 @@ import '../../../core/theme/app_theme.dart';
 import '../../../models/trip.dart';
 import 'chart_legend.dart';
 
-/// Budget-by-category donut for the Trip Summary. Renders the four budget
-/// buckets (stay / food / activity / transit) as a stroked ring sweeping
-/// clockwise from 12 o'clock, each slice's share labelled outside the arc on a
-/// hairline connector, the total spend in the ring hole, and a colour legend
-/// below.
+/// Budget-by-category donut for the Trip Summary. Renders as two nested rings:
 ///
-/// Composition (per Refinement 2): the painter draws ring + arc labels +
-/// connectors only; the legend is a separate [ChartLegend] widget, and the
-/// centre total is a [FittedBox] child stacked over the paint — none of that
-/// lives in `paint()`.
+///   * Outer ring — the four budget buckets (stay / food / activity / transit)
+///     from the trip's PLANNED distribution (`TripProvider.plannedByCategory`),
+///     stroked clockwise from 12 o'clock, each slice's share labelled outside
+///     the arc on a hairline connector.
+///   * Inner ring — the ACTUAL logged spend (`TripProvider.categoryTotals`),
+///     drawn thinner inside the hole at reduced alpha so it reads as a "shadow"
+///     of the plan it fills. Rendered ONLY when some spend exists; on a fresh
+///     trip the hole stays clean and the centre label ("₫5M / planned") does
+///     the "no actuals yet" work (Decision A.i — a grey placeholder ring reads
+///     as data-to-interpret, not empty state).
+///
+/// The centre label mode-switches: actuals total + "spent" once spend exists,
+/// otherwise planned total + "planned". Over-budget categories
+/// (actual > planned, planned > 0) get a downward danger triangle on the outer
+/// ring slice — mirrors the bar chart's overage marker
+/// (planned_vs_actual_chart.dart). A planned==0 category has no outer slice to
+/// anchor a marker on, so it is skipped (matches the bar chart's guard).
+///
+/// Composition (per Refinement 2): the painter draws rings + arc labels +
+/// connectors + markers only; the legend is a separate [ChartLegend] widget,
+/// the centre total is a [FittedBox] child stacked over the paint, and the
+/// two-ring caption ("Outer: planned · Inner: actuals") is a sibling [Text] —
+/// none of that lives in `paint()`, and none of it couples into [ChartLegend].
 ///
 /// Follows the CustomPainter house pattern in
 /// trip_builder/widgets/summary_sidebar.dart: `size.isEmpty` guard,
@@ -21,16 +36,25 @@ import 'chart_legend.dart';
 class ExpenseDonut extends StatelessWidget {
   const ExpenseDonut({
     super.key,
-    required this.categoryTotals,
-    this.diameter = 180,
+    required this.planned,
+    required this.actual,
+    this.diameter = 200,
   });
 
-  /// The four zero-filled buckets from `TripProvider.categoryTotals` (VND).
-  final Map<String, int> categoryTotals;
+  /// The four zero-filled PLANNED buckets (VND) — the outer ring / colour key.
+  final Map<String, int> planned;
+
+  /// The four zero-filled ACTUAL buckets (VND) — the inner ring. All-zero on a
+  /// fresh trip, in which case the inner ring is not drawn.
+  final Map<String, int> actual;
+
+  /// Bumped 180→200 (relief (i)): the inner ring steals the centre hole the
+  /// label uses, so the extra diameter keeps both ring strokes and the label
+  /// legible rather than shrinking the label to fit a 180px hole.
   final double diameter;
 
   // Fixed bucket order so slice colours and the legend stay stable regardless
-  // of the incoming map's iteration order.
+  // of the incoming maps' iteration order.
   static const List<String> _order = ['stay', 'food', 'activity', 'transit'];
   static const Map<String, String> _labels = {
     'stay': 'Stay',
@@ -47,11 +71,22 @@ class ExpenseDonut extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final slices = [
+    final plannedSlices = [
       for (final k in _order)
-        _DonutSlice(_labels[k]!, categoryTotals[k] ?? 0, _colors[k]!),
+        _DonutSlice(_labels[k]!, planned[k] ?? 0, _colors[k]!),
     ];
-    final total = slices.fold<int>(0, (s, e) => s + e.value);
+    final actualSlices = [
+      for (final k in _order)
+        _DonutSlice(_labels[k]!, actual[k] ?? 0, _colors[k]!),
+    ];
+    final plannedTotal = plannedSlices.fold<int>(0, (s, e) => s + e.value);
+    final actualTotal = actualSlices.fold<int>(0, (s, e) => s + e.value);
+
+    // Mode-switched centre label: actuals win once spend exists, otherwise the
+    // plan. One label at a time — never both, never ambiguous.
+    final hasActual = actualTotal > 0;
+    final centreValue = hasActual ? actualTotal : plannedTotal;
+    final centreCaption = hasActual ? 'spent' : 'planned';
 
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -64,11 +99,17 @@ class ExpenseDonut extends StatelessWidget {
             children: [
               CustomPaint(
                 size: Size.square(diameter),
-                painter: _ExpenseDonutPainter(slices),
+                painter: _ExpenseDonutPainter(plannedSlices, actualSlices),
               ),
               // Centre total. FittedBox scales down so ₫999,999,999 still fits
               // the ring hole at small viewport sizes. Padding keeps the text
-              // inside the hole rather than overrunning the ring.
+              // inside the hole rather than overrunning the ring. Rendered as a
+              // Stack child AFTER the CustomPaint, so it always composites on
+              // top of the reduced-alpha inner ring — the label never loses
+              // contrast to the ring behind it (Refinement 1).
+              // TODO(label-transition): the mode-switch ₫planned→₫spent can
+              // re-scale the FittedBox on the first actuals write; consider a
+              // fixed-scale label if the jump reads as jarring.
               Padding(
                 padding: EdgeInsets.all(diameter * 0.30),
                 child: FittedBox(
@@ -77,16 +118,16 @@ class ExpenseDonut extends StatelessWidget {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Text(
-                        '₫${Trip.formatVnd(total, short: true)}',
+                        '₫${Trip.formatVnd(centreValue, short: true)}',
                         style: const TextStyle(
                           color: AppTheme.textPrimary,
                           fontSize: 20,
                           fontWeight: FontWeight.w800,
                         ),
                       ),
-                      const Text(
-                        'spent',
-                        style: TextStyle(
+                      Text(
+                        centreCaption,
+                        style: const TextStyle(
                           color: AppTheme.textSecondary,
                           fontSize: 11,
                           fontWeight: FontWeight.w600,
@@ -100,14 +141,30 @@ class ExpenseDonut extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 12),
-        // composed with legend — arc labels are % only per Decision A;
+        // Colour key comes from the PLANNED distribution (the outer ring / the
+        // always-present series). Arc labels are % only per Decision A;
         // see docs/audits/explorife-triage-audit-2026-07-04.md
         ChartLegend(
           items: [
-            for (final s in slices)
+            for (final s in plannedSlices)
               if (s.value > 0) (s.label, s.color),
           ],
         ),
+        // Two-ring caption — only meaningful once the inner ring is actually
+        // drawn (Refinement 2). Sits below the whole legend Wrap (Column
+        // composition), so it stays under a multi-row chip stack at narrow
+        // widths rather than attaching to one chip row. No bullet prefix.
+        if (hasActual) ...[
+          const SizedBox(height: 6),
+          const Text(
+            'Outer: planned · Inner: actuals',
+            style: TextStyle(
+              color: AppTheme.textSecondary,
+              fontSize: 10,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        ],
       ],
     );
   }
@@ -121,14 +178,19 @@ class _DonutSlice {
 }
 
 class _ExpenseDonutPainter extends CustomPainter {
-  _ExpenseDonutPainter(this.slices);
+  _ExpenseDonutPainter(this.planned, this.actual);
 
-  final List<_DonutSlice> slices;
+  /// Same length, same `_order` index alignment — zipped for overage checks.
+  final List<_DonutSlice> planned;
+  final List<_DonutSlice> actual;
 
-  static const double _ringThickness = 16;
+  static const double _ringThickness = 16; // outer (planned) ring
+  static const double _innerThickness = 8; // inner (actuals) ring, ~half
+  static const double _ringGap = 4; // breathing space between the two rings
   static const double _labelGutter = 46; // room outside the ring for labels
   static const double _connector = 8; // hairline length from arc edge to label
   static const double _minLabelFraction = 0.03; // hide labels under 3%
+  static const double _innerAlpha = 0.7; // inner ring reads as a "shadow"
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -139,38 +201,96 @@ class _ExpenseDonutPainter extends CustomPainter {
     final ringRadius = min(size.width, size.height) / 2 - _labelGutter;
     if (ringRadius <= 0) return;
 
-    final ring = Paint()
+    final plannedTotal = planned.fold<int>(0, (s, e) => s + e.value);
+
+    // Degenerate: no plan at all — faint placeholder ring, no labels. Defensive
+    // only; the composing card gates on plannedTotal > 0 and the seed
+    // guarantees a nonzero plan, so this should never render in practice.
+    if (plannedTotal == 0) {
+      canvas.drawCircle(
+        center,
+        ringRadius,
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = _ringThickness
+          ..strokeCap = StrokeCap.butt
+          ..color = AppTheme.divider,
+      );
+      return;
+    }
+
+    // --- Outer ring: PLANNED distribution -----------------------------------
+    final outerRect = Rect.fromCircle(center: center, radius: ringRadius);
+    final outerPaint = Paint()
       ..style = PaintingStyle.stroke
       ..strokeWidth = _ringThickness
       ..strokeCap = StrokeCap.butt;
 
-    final total = slices.fold<int>(0, (s, e) => s + e.value);
-
-    // Degenerate: nothing spent yet — faint placeholder ring, no labels.
-    if (total == 0) {
-      ring.color = AppTheme.divider;
-      canvas.drawCircle(center, ringRadius, ring);
-      return;
-    }
-
-    final rect = Rect.fromCircle(center: center, radius: ringRadius);
     const startAngle = -pi / 2; // 12 o'clock
     var angle = startAngle;
+    // Capture each slice's mid-angle so the overage markers below can anchor to
+    // the outer ring. null == slice not drawn (planned value 0) → no anchor.
+    final midAngles = List<double?>.filled(planned.length, null);
 
-    // Single-category case is handled naturally: frac == 1 → a full-circle arc,
-    // one label, no collisions.
-    for (final s in slices) {
+    for (var i = 0; i < planned.length; i++) {
+      final s = planned[i];
       if (s.value == 0) continue; // skip empty buckets entirely
-      final frac = s.value / total;
+      final frac = s.value / plannedTotal;
       final sweep = frac * 2 * pi; // clockwise (positive sweep, y-down)
-      ring.color = s.color;
-      canvas.drawArc(rect, angle, sweep, false, ring);
-      // TODO(donut-labels): revisit if small trips look cluttered — may want an
-      // absolute-value threshold too, not just the percentage one.
+      outerPaint.color = s.color;
+      canvas.drawArc(outerRect, angle, sweep, false, outerPaint);
+      final mid = angle + sweep / 2;
+      midAngles[i] = mid;
       if (frac >= _minLabelFraction) {
-        _paintLabel(canvas, center, ringRadius, angle + sweep / 2, frac);
+        _paintLabel(canvas, center, ringRadius, mid, frac);
       }
       angle += sweep;
+    }
+
+    // --- Inner ring: ACTUAL spend (only when spend exists) ------------------
+    final actualTotal = actual.fold<int>(0, (s, e) => s + e.value);
+    if (actualTotal > 0) {
+      // Nest inside the hole: outer inner-edge (ringRadius - t/2), then a gap,
+      // then this ring's own half-thickness.
+      final innerRadius =
+          ringRadius - _ringThickness / 2 - _ringGap - _innerThickness / 2;
+      if (innerRadius > 0) {
+        final innerRect = Rect.fromCircle(center: center, radius: innerRadius);
+        final innerPaint = Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = _innerThickness
+          ..strokeCap = StrokeCap.butt;
+        var a = startAngle;
+        for (final s in actual) {
+          if (s.value == 0) continue;
+          final sweep = (s.value / actualTotal) * 2 * pi;
+          // Same slice colour as the plan, muted so the two rings visually
+          // stack. TODO(donut-alpha): if the centre label loses contrast where
+          // the inner ring passes behind it, drop to 0.5 — verified on the dark
+          // theme at write-time (label composites on top, so contrast holds).
+          innerPaint.color = s.color.withValues(alpha: _innerAlpha);
+          canvas.drawArc(innerRect, a, sweep, false, innerPaint);
+          a += sweep;
+        }
+      }
+    }
+
+    // --- Over-budget markers on the OUTER ring ------------------------------
+    // Per-category (Decision B.ii): a slice is over iff actual > planned AND
+    // planned > 0 — the marker anchors on the planned slice's mid-angle, which
+    // only exists when that slice was drawn. Mark ALL offenders (Decision
+    // C.ii); a chart full of triangles is itself the "overspending across the
+    // board" signal.
+    // TODO(donut-density): if user testing shows 4+ triangles on one chart
+    // looks cluttered, consider aggregating into a single marker with a count
+    // badge.
+    for (var i = 0; i < planned.length; i++) {
+      final mid = midAngles[i];
+      if (mid == null) continue; // planned == 0 → nothing to anchor on
+      if (actual[i].value > planned[i].value) {
+        final dir = Offset(cos(mid), sin(mid));
+        _overageMarker(canvas, center + dir * ringRadius);
+      }
     }
   }
 
@@ -218,6 +338,33 @@ class _ExpenseDonutPainter extends CustomPainter {
         onRight ? elbow.dx + 4 : elbow.dx - 4 - tp.width,
         elbow.dy - tp.height / 2,
       ),
+    );
+  }
+
+  /// Downward-pointing (▼) danger triangle centred on [at]. Screen-axis-aligned
+  /// (not rotated to the ring's radial normal) so it reads as the same warning
+  /// glyph as the bar chart's overage marker rather than a tilted arbitrary
+  /// shape. Geometry copied from planned_vs_actual_chart.dart `_overageMarker`:
+  /// 8px base, 5.6px tall, filled + round-join restroke.
+  void _overageMarker(Canvas canvas, Offset at) {
+    const halfW = 4.0; // 8px base
+    const triH = 5.6; // flatter than equilateral → reads as ▽/⚠
+    final topY = at.dy - triH / 2;
+    final apexY = at.dy + triH / 2;
+    final path = Path()
+      ..moveTo(at.dx - halfW, topY) // top-left
+      ..lineTo(at.dx + halfW, topY) // top-right
+      ..lineTo(at.dx, apexY) // apex points down
+      ..close();
+    canvas.drawPath(path, Paint()..color = AppTheme.danger);
+    // Soften the corners: restroke the same outline with a round join.
+    canvas.drawPath(
+      path,
+      Paint()
+        ..color = AppTheme.danger
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.5
+        ..strokeJoin = StrokeJoin.round,
     );
   }
 

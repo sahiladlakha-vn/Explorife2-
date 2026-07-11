@@ -441,24 +441,46 @@ class _ExpenseDonutCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final t = context.select<TripProvider, (int, int, int, int)>((p) {
-      final m = p.categoryTotals(tripId);
-      return (m['stay'] ?? 0, m['food'] ?? 0, m['activity'] ?? 0,
-          m['transit'] ?? 0);
+    // Both series in one 8-tuple so value-equality (not Map identity) drives
+    // rebuilds. $1..$4 = planned (outer ring), $5..$8 = actual (inner ring).
+    final v = context
+        .select<TripProvider, (int, int, int, int, int, int, int, int)>((p) {
+      final pl = p.plannedByCategory(tripId);
+      final ac = p.categoryTotals(tripId);
+      return (
+        pl['stay'] ?? 0,
+        pl['food'] ?? 0,
+        pl['activity'] ?? 0,
+        pl['transit'] ?? 0,
+        ac['stay'] ?? 0,
+        ac['food'] ?? 0,
+        ac['activity'] ?? 0,
+        ac['transit'] ?? 0,
+      );
     });
-    final total = t.$1 + t.$2 + t.$3 + t.$4;
-    final totals = {
-      'stay': t.$1,
-      'food': t.$2,
-      'activity': t.$3,
-      'transit': t.$4,
+    final plannedTotal = v.$1 + v.$2 + v.$3 + v.$4;
+    final planned = {
+      'stay': v.$1,
+      'food': v.$2,
+      'activity': v.$3,
+      'transit': v.$4,
+    };
+    final actual = {
+      'stay': v.$5,
+      'food': v.$6,
+      'activity': v.$7,
+      'transit': v.$8,
     };
 
     return _SummaryCard(
       title: "Where it's going",
-      child: total == 0
-          ? _emptyLine('No spending logged yet.')
-          : Center(child: ExpenseDonut(categoryTotals: totals)),
+      // The donut now renders the PLANNED distribution from trip creation, so
+      // the empty state is effectively dead code (the vibe seed guarantees a
+      // nonzero plan). Kept defensively — fires only if a trip somehow has a
+      // zero budget, hence "No budget set yet." not "No spending logged yet."
+      child: plannedTotal == 0
+          ? _emptyLine('No budget set yet.')
+          : Center(child: ExpenseDonut(planned: planned, actual: actual)),
     );
   }
 }
