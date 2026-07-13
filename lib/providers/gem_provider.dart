@@ -54,7 +54,16 @@ class GemProvider extends ChangeNotifier {
   String? _error;
   String _selectedCategory = 'all';
   GemSort _sort = GemSort.recent;
+
+  // Saves are backed by the `gem_saves` join table. [_savedIds] is the single
+  // in-memory truth the heart-toggle reads; [_savedGems] is the hydrated card
+  // list the Saved tab renders, kept in lockstep with it. Both are seeded by
+  // [loadSaved] and mutated together on every [toggleSave].
   final Set<String> _savedIds = <String>{};
+  List<Gem> _savedGems = [];
+  GemStatus _savedStatus = GemStatus.initial;
+  String? _savedError;
+  bool _savedLoaded = false;
 
   List<Gem> get gems => _filtered;
   List<Gem> get allGems => _gems;
@@ -64,6 +73,14 @@ class GemProvider extends ChangeNotifier {
   String? get error => _error;
   String get selectedCategory => _selectedCategory;
   GemSort get sort => _sort;
+
+  /// The signed-in user's saved gems, newest save first — what the Saved tab
+  /// renders. Populated by [loadSaved] and kept current by [toggleSave].
+  List<Gem> get savedGems => _savedGems;
+  GemStatus get savedStatus => _savedStatus;
+  bool get savedLoading => _savedStatus == GemStatus.loading;
+  bool get savedHasError => _savedStatus == GemStatus.error;
+  String? get savedError => _savedError;
 
   /// Applies the active category filter + sort to [source]. Factored so the
   /// global feed (map markers) and the focus-scoped sheet feed share one
@@ -461,21 +478,50 @@ class GemProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  // ───────── saves (optimistic, in-memory for v1) ─────────
+  // ───────── saves (optimistic, gem_saves-backed) ─────────
 
   /// Whether [id] is currently marked saved. Drives the card's save toggle.
   bool isSaved(String id) => _savedIds.contains(id);
 
-  /// Toggles the saved state for [gem] optimistically: the in-memory set flips
-  /// and listeners are notified immediately, then the repository seam is told.
-  /// If persistence ever fails we roll back and re-notify, so the UI stays the
-  /// single source of truth without ever touching Supabase directly.
+  /// Hydrates [_savedIds] + [_savedGems] from the `gem_saves` table. Guarded and
+  /// idempotent like the trip fetches: a no-op once loaded unless [force] is
+  /// set, and it won't stack a second in-flight fetch. Callers can fire it
+  /// on-mount without gating on their own flag.
+  Future<void> loadSaved({bool force = false}) async {
+    if (_savedLoaded && !force) return;
+    if (_savedStatus == GemStatus.loading) return;
+    _savedStatus = GemStatus.loading;
+    _savedError = null;
+    notifyListeners();
+    try {
+      final saved = await _repo.fetchSavedGems();
+      _savedGems = saved;
+      _savedIds
+        ..clear()
+        ..addAll(saved.map((g) => g.id));
+      _savedStatus = GemStatus.ready;
+      _savedLoaded = true;
+    } catch (e) {
+      _savedError = e.toString();
+      _savedStatus = GemStatus.error;
+      debugPrint('GemProvider.loadSaved error: $e');
+    }
+    notifyListeners();
+  }
+
+  /// Toggles the saved state for [gem] optimistically: the in-memory set and the
+  /// hydrated [_savedGems] card list flip together and listeners are notified
+  /// immediately, then the repository persists to `gem_saves`. If persistence
+  /// fails we roll both back and re-notify, so the toggle never lies about
+  /// persisted state and the Saved tab never shows a phantom (or missing) card.
   Future<void> toggleSave(Gem gem) async {
     final wasSaved = _savedIds.contains(gem.id);
     if (wasSaved) {
       _savedIds.remove(gem.id);
+      _savedGems = _savedGems.where((g) => g.id != gem.id).toList();
     } else {
       _savedIds.add(gem.id);
+      _savedGems = [gem, ..._savedGems];
     }
     notifyListeners();
     try {
@@ -488,8 +534,10 @@ class GemProvider extends ChangeNotifier {
       // Roll back on failure so the toggle never lies about persisted state.
       if (wasSaved) {
         _savedIds.add(gem.id);
+        _savedGems = [gem, ..._savedGems];
       } else {
         _savedIds.remove(gem.id);
+        _savedGems = _savedGems.where((g) => g.id != gem.id).toList();
       }
       debugPrint('GemProvider.toggleSave error: $e');
       notifyListeners();

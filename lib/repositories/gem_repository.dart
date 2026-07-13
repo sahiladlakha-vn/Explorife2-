@@ -139,24 +139,76 @@ class GemRepository {
 
   // ───────── saves ─────────
 
-  /// Saved-gem ids held in memory for v1. This is a deliberate seam: the bodies
-  /// of [saveGem] / [unsaveGem] are local-only today, but the signatures are
-  /// the contract the UI/state already code against, so swapping in the
-  /// `gem_saves` table later is a one-file change with no caller churn.
-  final Set<String> _savedIds = <String>{};
+  /// The join table pairing a user with the catalogue gems they've bookmarked.
+  /// RLS scopes every read/write to `auth.uid() = user_id`, so no client-side
+  /// user filter is needed.
+  static const String savesTable = 'gem_saves';
 
-  /// Ids currently marked saved. A defensive copy so callers can't mutate
-  /// internal state.
-  Set<String> get savedGemIds => Set.unmodifiable(_savedIds);
+  /// Embeds the full catalogue row for each save so one round-trip yields the
+  /// gems themselves, newest-save first. `gem_id` FKs `saved_gems(id)`; the
+  /// embed is disambiguated by that constraint. Falls back to a two-query path
+  /// if the embed errors (e.g. a stale PostgREST schema cache) so the Saved tab
+  /// never breaks over an embed hiccup.
+  static const String _savesWithGem =
+      'saved_at, saved_gems!gem_saves_gem_id_fkey(*)';
 
-  /// Marks [gemId] as saved. In-memory for v1; will persist to `gem_saves`.
-  Future<void> saveGem(String gemId) async {
-    _savedIds.add(gemId);
+  /// The signed-in user's saved gems, newest save first. Returns `[]` when
+  /// signed out (RLS would return nothing anyway).
+  Future<List<Gem>> fetchSavedGems() async {
+    if (_db.auth.currentUser == null) return [];
+    try {
+      final data = await _db
+          .from(savesTable)
+          .select(_savesWithGem)
+          .order('saved_at', ascending: false);
+      return (data as List)
+          .map((e) => e['saved_gems'])
+          .whereType<Map<String, dynamic>>()
+          .map(Gem.fromJson)
+          .toList();
+    } catch (e) {
+      debugPrint('GemRepository.fetchSavedGems embed failed, '
+          'falling back to two queries: $e');
+      final ids = await savedGemIds();
+      if (ids.isEmpty) return [];
+      final data =
+          await _db.from(table).select().inFilter('id', ids.toList());
+      return (data as List).map((e) => Gem.fromJson(e)).toList();
+    }
   }
 
-  /// Removes [gemId] from saved. In-memory for v1; will persist to `gem_saves`.
+  /// The set of gem ids the signed-in user has saved. Used to hydrate the
+  /// heart-toggle state; empty when signed out.
+  Future<Set<String>> savedGemIds() async {
+    if (_db.auth.currentUser == null) return <String>{};
+    final data = await _db.from(savesTable).select('gem_id');
+    return (data as List).map((e) => e['gem_id'] as String).toSet();
+  }
+
+  /// Persists a save. Idempotent: an upsert on the (user_id, gem_id) primary
+  /// key means re-saving an already-saved gem is a no-op rather than a
+  /// duplicate-key error — critical for cold starts where the in-memory set
+  /// hasn't been hydrated yet. Throws when signed out (nothing to attribute).
+  Future<void> saveGem(String gemId) async {
+    final uid = _db.auth.currentUser?.id;
+    if (uid == null) throw StateError('saveGem requires an authenticated user');
+    await _db.from(savesTable).upsert(
+      {'user_id': uid, 'gem_id': gemId},
+      onConflict: 'user_id,gem_id',
+      ignoreDuplicates: true,
+    );
+  }
+
+  /// Removes a save. Already idempotent — deleting a row that isn't there
+  /// affects zero rows and does not error.
   Future<void> unsaveGem(String gemId) async {
-    _savedIds.remove(gemId);
+    final uid = _db.auth.currentUser?.id;
+    if (uid == null) return;
+    await _db
+        .from(savesTable)
+        .delete()
+        .eq('user_id', uid)
+        .eq('gem_id', gemId);
   }
 
   // ───────── realtime ─────────

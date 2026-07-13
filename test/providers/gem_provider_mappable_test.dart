@@ -56,7 +56,9 @@ class _SeededRepo implements GemRepository {
   Future<List<String>> uploadPhotos(String userId, List<XFile> files) async =>
       [];
   @override
-  Set<String> get savedGemIds => const {};
+  Future<List<Gem>> fetchSavedGems() async => [];
+  @override
+  Future<Set<String>> savedGemIds() async => const {};
   @override
   Future<void> saveGem(String gemId) async {}
   @override

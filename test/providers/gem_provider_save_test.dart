@@ -46,7 +46,10 @@ class FakeGemRepository implements GemRepository {
       [];
 
   @override
-  Set<String> get savedGemIds => Set.unmodifiable(saved);
+  Future<List<Gem>> fetchSavedGems() async => [];
+
+  @override
+  Future<Set<String>> savedGemIds() async => Set.of(saved);
 
   @override
   Future<void> saveGem(String gemId) async {
