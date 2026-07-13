@@ -1,0 +1,701 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Travel Planner — Profile</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet" />
+<style>
+  :root{
+    --ink:#1c1208;           /* near-black brown */
+    --cream:#f5f1e8;         /* card-light bg */
+    --cream-2:#eee8dd;       /* screen bg */
+    --paper:#ffffff;         /* card bg */
+    --hair:rgba(28,18,8,.10);/* hairline border */
+    --hair-2:rgba(28,18,8,.18);
+    --muted:rgba(28,18,8,.55);
+    --muted-2:rgba(28,18,8,.40);
+    --orange:#ff6a3d;        /* primary accent */
+    --teal:#1f9d6c;          /* money / positive */
+    --red:#c0392b;           /* alerts */
+    --amber:#c9871f;
+    --on-dark:#f5efe6;
+    --on-dark-mute:rgba(245,239,230,.55);
+    --mono:'IBM Plex Mono',ui-monospace,monospace;
+    --disp:'Space Grotesk',system-ui,sans-serif;
+  }
+
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{
+    font-family:var(--mono);
+    background:
+      radial-gradient(1200px 600px at 50% -10%, #4a4038, #2b2620 60%, #201c17);
+    min-height:100vh;
+    display:flex;align-items:center;justify-content:center;
+    padding:32px 16px;color:var(--ink);
+    -webkit-font-smoothing:antialiased;
+  }
+
+  /* ---------- Phone frame ---------- */
+  .bezel{
+    width:414px;padding:11px;background:#0b0a09;border-radius:56px;
+    box-shadow:0 40px 90px rgba(0,0,0,.55), inset 0 0 0 2px #2a2622;
+  }
+  .screen{
+    width:392px;height:844px;background:var(--cream-2);
+    border-radius:46px;overflow:hidden;position:relative;
+    display:flex;flex-direction:column;
+  }
+  .notch{
+    position:absolute;top:0;left:50%;transform:translateX(-50%);
+    width:150px;height:26px;background:#0b0a09;border-radius:0 0 18px 18px;z-index:60;
+  }
+
+  /* ---------- Scroll helpers ---------- */
+  .scroll-x{overflow-x:auto;overflow-y:hidden;-webkit-overflow-scrolling:touch;scrollbar-width:none}
+  .scroll-x::-webkit-scrollbar{display:none}
+  .body-scroll{flex:1;overflow-y:auto;scrollbar-width:none}
+  .body-scroll::-webkit-scrollbar{display:none}
+
+  /* ---------- Header ---------- */
+  header.app{
+    background:var(--ink);color:var(--on-dark);
+    padding:34px 18px 0;flex-shrink:0;
+  }
+  .h-top{display:flex;align-items:center;justify-content:space-between;height:34px}
+  .icon-btn{
+    width:34px;height:34px;border:none;background:transparent;color:var(--on-dark);
+    display:grid;place-items:center;cursor:pointer;border-radius:9px;
+  }
+  .icon-btn:hover{background:rgba(255,255,255,.08)}
+  .icon-btn.danger:hover{background:rgba(192,57,43,.20);color:#ff9a8f}
+  .h-right{display:flex;gap:2px}
+  svg{display:block}
+
+  .profile{display:flex;gap:13px;align-items:center;padding:14px 2px 16px}
+  .avatar-wrap{position:relative;flex-shrink:0}
+  .avatar{width:58px;height:58px;border-radius:50%;object-fit:cover;border:2px solid rgba(245,239,230,.85)}
+  .status-dot{
+    position:absolute;right:1px;bottom:1px;width:14px;height:14px;border-radius:50%;
+    background:var(--teal);border:2.5px solid var(--ink);
+  }
+  .p-name{font-family:var(--disp);font-weight:600;font-size:19px;letter-spacing:.2px;display:flex;align-items:center;gap:7px}
+  .p-name .edit{opacity:.55}
+  .p-handle{font-size:12px;color:var(--on-dark-mute);margin-top:3px}
+  .p-since{font-size:10.5px;color:var(--on-dark-mute);margin-top:5px;letter-spacing:.3px}
+
+  /* Stat strip */
+  .stats{display:flex;border-top:1px solid rgba(245,239,230,.12);margin:0 -18px;padding:0 6px}
+  .stat{flex:1;padding:11px 6px 13px;text-align:center;position:relative}
+  .stat + .stat::before{content:"";position:absolute;left:0;top:12px;bottom:12px;width:1px;background:rgba(245,239,230,.12)}
+  .stat b{font-family:var(--disp);font-weight:600;font-size:16px;display:block;letter-spacing:.4px}
+  .stat.money b{color:#5fd6a6}
+  .stat.alert b{color:#ff9a8f}
+  .stat span{font-size:9px;text-transform:uppercase;letter-spacing:.9px;color:var(--on-dark-mute);margin-top:3px;display:block}
+
+  /* ---------- Pill tab row ---------- */
+  .pills{
+    background:var(--cream-2);flex-shrink:0;padding:12px 0 11px;
+    border-bottom:1px solid var(--hair);
+  }
+  .pills-inner{display:flex;gap:8px;padding:0 16px;white-space:nowrap}
+  .pill{
+    font-family:var(--mono);font-size:12px;font-weight:500;
+    padding:8px 15px;border-radius:999px;border:1px solid var(--hair-2);
+    background:var(--paper);color:var(--muted);cursor:pointer;flex-shrink:0;
+    transition:.15s;
+  }
+  .pill:hover{color:var(--ink);border-color:var(--ink)}
+  .pill.active{background:var(--orange);color:#fff;border-color:var(--orange);font-weight:600}
+
+  /* ---------- Content ---------- */
+  .content{padding:16px 16px 40px}
+  .tab{display:none}
+  .tab.show{display:block;animation:fade .25s ease}
+  @keyframes fade{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+
+  .sec-head{display:flex;align-items:center;justify-content:space-between;margin:22px 2px 11px}
+  .sec-head:first-child{margin-top:2px}
+  .sec-title{font-family:var(--disp);font-weight:600;font-size:14.5px;letter-spacing:.3px}
+  .view-all{font-size:11px;color:var(--orange);font-weight:500;cursor:pointer;display:flex;gap:3px;align-items:center}
+
+  .card{background:var(--paper);border:1px solid var(--hair);border-radius:16px;padding:15px}
+  .tag{font-size:9.5px;text-transform:uppercase;letter-spacing:1.2px;font-weight:600}
+  .tag.orange{color:var(--orange)}
+
+  /* Active trip hero */
+  .hero{padding:0;overflow:hidden}
+  .hero-photo{height:112px;position:relative;background-size:cover;background-position:center}
+  .hero-photo::after{content:"";position:absolute;inset:0;background:linear-gradient(180deg,rgba(28,18,8,.05),rgba(28,18,8,.55))}
+  .hero-badge{position:absolute;top:11px;left:12px;z-index:2;background:rgba(28,18,8,.72);color:var(--orange);padding:5px 10px;border-radius:8px;backdrop-filter:blur(4px)}
+  .hero-count{position:absolute;top:11px;right:12px;z-index:2;background:var(--orange);color:#fff;padding:5px 11px;border-radius:8px;font-family:var(--disp);font-weight:600;font-size:11px}
+  .hero-body{padding:14px 15px 16px}
+  .hero-dest{font-family:var(--disp);font-weight:700;font-size:22px;letter-spacing:.2px;display:flex;align-items:center;gap:8px}
+  .hero-dest .arw{color:var(--orange)}
+  .hero-dates{font-size:12px;color:var(--muted);margin-top:5px}
+
+  .bar{height:8px;border-radius:99px;background:var(--cream);overflow:hidden;border:1px solid var(--hair)}
+  .bar > i{display:block;height:100%;border-radius:99px}
+  .bar-row{margin-top:14px}
+  .bar-label{display:flex;justify-content:space-between;font-size:11px;margin-bottom:6px}
+  .bar-label .amt{font-family:var(--disp);font-weight:600}
+  .teal{background:var(--teal)}
+  .money{color:var(--teal)}
+
+  .chips{display:flex;gap:8px;margin-top:15px}
+  .chip{flex:1;text-align:center;font-size:11px;font-weight:500;padding:10px 4px;border:1px solid var(--hair-2);border-radius:11px;background:var(--cream);color:var(--ink);cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:5px}
+  .chip:hover{border-color:var(--orange);color:var(--orange)}
+  .chip svg{opacity:.75}
+
+  /* Alerts card */
+  .alerts{border-left:3px solid var(--red);padding:13px 15px}
+  .alert-row{display:flex;gap:11px;align-items:flex-start;padding:9px 0}
+  .alert-row + .alert-row{border-top:1px solid var(--hair)}
+  .alert-ico{width:26px;height:26px;border-radius:8px;flex-shrink:0;display:grid;place-items:center}
+  .alert-ico.red{background:rgba(192,57,43,.12);color:var(--red)}
+  .alert-ico.amber{background:rgba(201,135,31,.14);color:var(--amber)}
+  .alert-txt b{font-family:var(--disp);font-weight:600;font-size:13px;display:block}
+  .alert-txt span{font-size:11px;color:var(--muted);margin-top:2px;display:block;line-height:1.5}
+
+  /* Horizontal gem preview */
+  .gem-strip{display:flex;gap:11px;padding:2px 16px 4px;margin:0 -16px}
+  .gem-card{width:140px;flex-shrink:0;background:var(--paper);border:1px solid var(--hair);border-radius:14px;overflow:hidden}
+  .gem-photo{height:92px;background-size:cover;background-position:center;position:relative}
+  .gem-pin{position:absolute;top:8px;left:8px;width:22px;height:22px;border-radius:7px;background:rgba(28,18,8,.68);color:var(--orange);display:grid;place-items:center}
+  .gem-meta{padding:9px 10px 11px}
+  .gem-name{font-family:var(--disp);font-weight:600;font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .gem-loc{font-size:10px;color:var(--muted);margin-top:3px;display:flex;align-items:center;gap:3px}
+
+  /* Stories list */
+  .story{display:flex;align-items:center;gap:12px;padding:12px 0}
+  .story + .story{border-top:1px solid var(--hair)}
+  .story-thumb{width:44px;height:44px;border-radius:10px;background-size:cover;background-position:center;flex-shrink:0}
+  .story-body{flex:1;min-width:0}
+  .story-title{font-family:var(--disp);font-weight:600;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .story-loc{font-size:11px;color:var(--muted);margin-top:2px}
+  .status{font-size:9.5px;font-weight:600;text-transform:uppercase;letter-spacing:.6px;padding:4px 9px;border-radius:99px;white-space:nowrap}
+  .status.ok{background:rgba(31,157,108,.13);color:var(--teal)}
+  .status.pend{background:rgba(201,135,31,.15);color:var(--amber)}
+  .status.draft{background:var(--cream);color:var(--muted);border:1px solid var(--hair)}
+
+  /* Badges strip */
+  .badge-strip{display:flex;gap:10px;justify-content:space-between}
+  .badge{flex:1;text-align:center}
+  .badge .ic{width:100%;aspect-ratio:1;border-radius:14px;display:grid;place-items:center;font-size:22px}
+  .badge.earned .ic{background:rgba(255,106,61,.13);border:1.5px solid var(--orange);color:var(--orange)}
+  .badge.locked .ic{background:transparent;border:1.5px dashed var(--hair-2);color:var(--muted-2);filter:grayscale(1)}
+  .badge small{display:block;font-size:9px;margin-top:6px;color:var(--muted);letter-spacing:.2px}
+
+  /* ---------- My Trip ---------- */
+  .trip-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:6px}
+  .trip-name{font-family:var(--disp);font-weight:700;font-size:18px}
+  .trip-sub{font-size:11.5px;color:var(--muted);margin-top:4px}
+  .btn{font-family:var(--mono);font-size:11.5px;font-weight:600;border:none;border-radius:10px;padding:10px 13px;cursor:pointer;display:flex;align-items:center;gap:6px;white-space:nowrap}
+  .btn.primary{background:var(--orange);color:#fff}
+  .btn.ghost{background:var(--paper);color:var(--ink);border:1px solid var(--hair-2)}
+
+  .segment{display:flex;background:var(--cream);border:1px solid var(--hair);border-radius:12px;padding:4px;margin:16px 0}
+  .seg{flex:1;text-align:center;font-size:12px;font-weight:500;padding:8px;border-radius:9px;cursor:pointer;color:var(--muted)}
+  .seg.active{background:var(--paper);color:var(--ink);font-weight:600;box-shadow:0 1px 3px rgba(28,18,8,.10)}
+  .subtab{display:none}
+  .subtab.show{display:block}
+
+  /* Itinerary */
+  .day-chips{display:flex;gap:8px;margin:0 -16px 4px;padding:2px 16px 10px}
+  .day-chip{flex-shrink:0;min-width:56px;text-align:center;padding:8px 10px;border-radius:11px;border:1px solid var(--hair-2);background:var(--paper);cursor:pointer}
+  .day-chip.active{background:var(--ink);border-color:var(--ink);color:var(--on-dark)}
+  .day-chip b{font-family:var(--disp);font-weight:600;font-size:14px;display:block}
+  .day-chip span{font-size:9px;color:var(--muted);letter-spacing:.4px}
+  .day-chip.active span{color:var(--on-dark-mute)}
+
+  .slot{display:flex;gap:12px;padding:2px 0}
+  .slot-time{font-family:var(--disp);font-weight:600;font-size:11px;width:52px;flex-shrink:0;padding-top:14px;color:var(--muted)}
+  .slot-line{width:14px;flex-shrink:0;display:flex;flex-direction:column;align-items:center;padding-top:15px}
+  .slot-dot{width:9px;height:9px;border-radius:50%;background:var(--orange);border:2px solid var(--cream-2);z-index:1}
+  .slot-track{flex:1;width:2px;background:var(--hair)}
+  .slot-card{flex:1;margin-bottom:10px}
+  .slot-card .card{padding:12px 13px}
+  .slot-t{font-family:var(--disp);font-weight:600;font-size:13px}
+  .slot-p{font-size:11px;color:var(--muted);margin-top:3px}
+  .transit{display:flex;align-items:center;gap:8px;font-size:10.5px;color:var(--muted);padding:5px 0 5px 78px}
+  .transit svg{opacity:.6}
+  .closed{margin:2px 0 10px 78px;background:rgba(192,57,43,.08);border:1px solid rgba(192,57,43,.2);color:var(--red);font-size:10.5px;padding:8px 11px;border-radius:9px;display:flex;gap:8px;align-items:center}
+
+  /* Bookings */
+  .book{margin-bottom:11px}
+  .book-top{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}
+  .book-t{font-family:var(--disp);font-weight:600;font-size:14px}
+  .book-prov{font-size:11px;color:var(--muted);margin-top:3px}
+  .book-code{font-size:11px;margin-top:10px;padding-top:10px;border-top:1px solid var(--hair);display:flex;justify-content:space-between}
+  .book-code span{color:var(--muted)}
+  .book-code b{font-weight:600;letter-spacing:.5px}
+
+  /* Budget */
+  .kpi{display:flex;gap:10px;margin-bottom:14px}
+  .kpi .card{flex:1;padding:12px 13px}
+  .kpi b{font-family:var(--disp);font-weight:700;font-size:18px;display:block}
+  .kpi span{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.7px;margin-top:3px;display:block}
+
+  .pace{position:relative;height:10px;border-radius:99px;background:var(--cream);border:1px solid var(--hair);overflow:visible;margin:8px 0 4px}
+  .pace > i{display:block;height:100%;border-radius:99px;background:var(--teal)}
+  .pace .mark{position:absolute;top:-4px;width:2px;height:18px;background:var(--ink)}
+  .pace .mark::after{content:"TODAY";position:absolute;top:-13px;left:50%;transform:translateX(-50%);font-size:7.5px;font-weight:600;letter-spacing:.5px;color:var(--ink)}
+
+  /* Planned vs actual chart */
+  .chart{display:flex;gap:14px;align-items:flex-end;height:118px;padding:6px 4px 0}
+  .col{flex:1;display:flex;flex-direction:column;align-items:center;gap:6px;height:100%;justify-content:flex-end}
+  .col-bars{display:flex;gap:4px;align-items:flex-end;height:100%;width:100%;justify-content:center}
+  .cbar{width:12px;border-radius:4px 4px 0 0}
+  .cbar.plan{background:var(--hair-2)}
+  .cbar.act{background:var(--teal)}
+  .cbar.over{background:var(--red)}
+  .col small{font-size:9.5px;color:var(--muted)}
+  .legend{display:flex;gap:14px;justify-content:center;margin-top:12px;font-size:10px;color:var(--muted)}
+  .legend i{display:inline-block;width:9px;height:9px;border-radius:3px;margin-right:5px;vertical-align:-1px}
+
+  .pack-row{display:flex;align-items:center;gap:11px;padding:10px 0}
+  .pack-row + .pack-row{border-top:1px solid var(--hair)}
+  .pack-av{width:32px;height:32px;border-radius:50%;object-fit:cover;flex-shrink:0}
+  .pack-name{font-size:12px;font-weight:500;width:64px;flex-shrink:0}
+  .pack-pct{font-family:var(--disp);font-weight:600;font-size:11px;width:34px;text-align:right;flex-shrink:0}
+
+  /* ---------- Saved Gems grid ---------- */
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .grid2 .gem-card{width:auto}
+  .grid2 .gem-photo{height:110px}
+
+  /* ---------- Stories tab ---------- */
+  .cta{width:100%;border:1.5px dashed var(--orange);background:rgba(255,106,61,.05);color:var(--orange);border-radius:14px;padding:15px;font-family:var(--mono);font-weight:600;font-size:13px;display:flex;align-items:center;justify-content:center;gap:8px;cursor:pointer;margin-bottom:6px}
+
+  /* ---------- Badges grid ---------- */
+  .grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+  .grid3 .badge .ic{border-radius:16px;font-size:26px}
+
+  /* ---------- Settings ---------- */
+  .set-list{background:var(--paper);border:1px solid var(--hair);border-radius:16px;overflow:hidden}
+  .set-row{display:flex;align-items:center;gap:13px;padding:15px 16px;cursor:pointer}
+  .set-row + .set-row{border-top:1px solid var(--hair)}
+  .set-row:hover{background:var(--cream)}
+  .set-ic{width:30px;height:30px;border-radius:9px;background:var(--cream);display:grid;place-items:center;color:var(--ink);flex-shrink:0}
+  .set-label{flex:1;font-size:13px}
+  .set-row .chev{color:var(--muted-2)}
+  .signout{margin-top:14px;width:100%;background:var(--paper);border:1px solid rgba(192,57,43,.3);color:var(--red);border-radius:14px;padding:15px;font-family:var(--mono);font-weight:600;font-size:13px;display:flex;align-items:center;justify-content:center;gap:8px;cursor:pointer}
+  .sub-note{font-size:10px;color:var(--muted-2);text-align:center;margin-top:14px;letter-spacing:.3px}
+</style>
+</head>
+<body>
+<div class="bezel">
+  <div class="screen">
+    <div class="notch"></div>
+
+    <!-- ================= HEADER ================= -->
+    <header class="app">
+      <div class="h-top">
+        <button class="icon-btn" aria-label="Menu">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+        </button>
+        <div class="h-right">
+          <button class="icon-btn" aria-label="Settings">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9c.2.61.76 1.05 1.42 1.05H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+          </button>
+          <button class="icon-btn danger" aria-label="Sign out">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+          </button>
+        </div>
+      </div>
+
+      <div class="profile">
+        <div class="avatar-wrap">
+          <img class="avatar" src="https://i.pravatar.cc/120?img=15" alt="avatar" />
+          <span class="status-dot"></span>
+        </div>
+        <div>
+          <div class="p-name">Sahil Adlakha
+            <svg class="edit" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+          </div>
+          <div class="p-handle">@sahil.travels</div>
+          <div class="p-since">◷ Member since Mar 2024</div>
+        </div>
+      </div>
+
+      <div class="stats">
+        <div class="stat"><b>7</b><span>Trips</span></div>
+        <div class="stat"><b>24</b><span>Saved</span></div>
+        <div class="stat money"><b>₫41M</b><span>Spent</span></div>
+        <div class="stat alert"><b>2</b><span>Alerts</span></div>
+      </div>
+    </header>
+
+    <!-- ================= PILL TABS ================= -->
+    <nav class="pills">
+      <div class="pills-inner scroll-x">
+        <button class="pill active" data-tab="overview">Overview</button>
+        <button class="pill" data-tab="mytrip">My Trip</button>
+        <button class="pill" data-tab="gems">Saved Gems</button>
+        <button class="pill" data-tab="stories">My Stories</button>
+        <button class="pill" data-tab="badges">Badges</button>
+        <button class="pill" data-tab="settings">Settings</button>
+      </div>
+    </nav>
+
+    <!-- ================= CONTENT ================= -->
+    <div class="body-scroll">
+      <div class="content">
+
+        <!-- ---------- OVERVIEW ---------- -->
+        <section class="tab show" id="overview">
+          <div class="tag orange" style="margin:2px 0 9px">● Currently traveling</div>
+          <div class="card hero">
+            <div class="hero-photo" style="background-image:url('https://picsum.photos/seed/danang/440/220')">
+              <div class="hero-badge tag orange">Active Trip</div>
+              <div class="hero-count">5 days to go</div>
+            </div>
+            <div class="hero-body">
+              <div class="hero-dest">Đà Nẵng <span class="arw">→</span> Hội An</div>
+              <div class="hero-dates">Jul 18 – Jul 24, 2026 · 6 nights · 2 travelers</div>
+
+              <div class="bar-row">
+                <div class="bar-label">
+                  <span>Budget used</span>
+                  <span class="amt money">₫8.2M <span style="color:var(--muted);font-weight:400">/ ₫12M</span></span>
+                </div>
+                <div class="bar"><i class="teal" style="width:68%"></i></div>
+              </div>
+
+              <div class="chips">
+                <div class="chip">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M8 2v4M16 2v4M3 10h18M5 4h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z"/></svg>
+                  Itinerary
+                </div>
+                <div class="chip">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 4h16v4H4zM4 8v12h16V8"/><path d="M9 12h6"/></svg>
+                  Bookings
+                </div>
+                <div class="chip">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 1v22M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+                  Budget
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Alerts -->
+          <div class="sec-head"><div class="sec-title">Needs attention</div></div>
+          <div class="card alerts">
+            <div class="alert-row">
+              <div class="alert-ico red">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+              </div>
+              <div class="alert-txt">
+                <b>Passport expires soon</b>
+                <span>Valid until Nov 2026 — under the 6-month rule for re-entry.</span>
+              </div>
+            </div>
+            <div class="alert-row">
+              <div class="alert-ico amber">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+              </div>
+              <div class="alert-txt">
+                <b>Hotel booking unconfirmed</b>
+                <span>An Bàng Beach Villa — payment pending, hold expires in 2 days.</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Saved Gems preview -->
+          <div class="sec-head"><div class="sec-title">Saved Gems</div><div class="view-all">View all →</div></div>
+          <div class="gem-strip scroll-x">
+            <div class="gem-card">
+              <div class="gem-photo" style="background-image:url('https://picsum.photos/seed/goldbridge/300/200')"><div class="gem-pin">📍</div></div>
+              <div class="gem-meta"><div class="gem-name">Golden Bridge</div><div class="gem-loc">◷ Bà Nà Hills</div></div>
+            </div>
+            <div class="gem-card">
+              <div class="gem-photo" style="background-image:url('https://picsum.photos/seed/lantern/300/200')"><div class="gem-pin">📍</div></div>
+              <div class="gem-meta"><div class="gem-name">Lantern Street</div><div class="gem-loc">◷ Hội An Old Town</div></div>
+            </div>
+            <div class="gem-card">
+              <div class="gem-photo" style="background-image:url('https://picsum.photos/seed/marble/300/200')"><div class="gem-pin">📍</div></div>
+              <div class="gem-meta"><div class="gem-name">Marble Mountains</div><div class="gem-loc">◷ Ngũ Hành Sơn</div></div>
+            </div>
+          </div>
+
+          <!-- Stories preview -->
+          <div class="sec-head"><div class="sec-title">My Stories</div><div class="view-all">View all →</div></div>
+          <div class="card" style="padding:4px 15px">
+            <div class="story">
+              <div class="story-thumb" style="background-image:url('https://picsum.photos/seed/street/120/120')"></div>
+              <div class="story-body"><div class="story-title">Street food after dark</div><div class="story-loc">Đà Nẵng</div></div>
+              <span class="status ok">Approved</span>
+            </div>
+            <div class="story">
+              <div class="story-thumb" style="background-image:url('https://picsum.photos/seed/river/120/120')"></div>
+              <div class="story-body"><div class="story-title">Sunrise on the Thu Bồn</div><div class="story-loc">Hội An</div></div>
+              <span class="status pend">Pending</span>
+            </div>
+          </div>
+
+          <!-- Badges preview -->
+          <div class="sec-head"><div class="sec-title">Badges</div><div class="view-all">View all →</div></div>
+          <div class="card">
+            <div class="badge-strip">
+              <div class="badge earned"><div class="ic">🧭</div><small>Explorer</small></div>
+              <div class="badge earned"><div class="ic">💸</div><small>Budgeter</small></div>
+              <div class="badge earned"><div class="ic">🍜</div><small>Foodie</small></div>
+              <div class="badge locked"><div class="ic">✈️</div><small>Jetsetter</small></div>
+              <div class="badge locked"><div class="ic">🏔️</div><small>Peakbag</small></div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ---------- MY TRIP ---------- -->
+        <section class="tab" id="mytrip">
+          <div class="trip-head">
+            <div>
+              <div class="trip-name">Đà Nẵng → Hội An</div>
+              <div class="trip-sub">Jul 18 – Jul 24, 2026 · 6 nights</div>
+            </div>
+            <button class="btn primary">＋ New Trip</button>
+          </div>
+
+          <div class="segment">
+            <div class="seg active" data-sub="itin">Itinerary</div>
+            <div class="seg" data-sub="book">Bookings</div>
+            <div class="seg" data-sub="budg">Budget</div>
+          </div>
+
+          <!-- Itinerary -->
+          <div class="subtab show" id="itin">
+            <div class="day-chips scroll-x">
+              <div class="day-chip active"><b>18</b><span>THU</span></div>
+              <div class="day-chip"><b>19</b><span>FRI</span></div>
+              <div class="day-chip"><b>20</b><span>SAT</span></div>
+              <div class="day-chip"><b>21</b><span>SUN</span></div>
+              <div class="day-chip"><b>22</b><span>MON</span></div>
+              <div class="day-chip"><b>23</b><span>TUE</span></div>
+            </div>
+
+            <div class="slot">
+              <div class="slot-time">08:30</div>
+              <div class="slot-line"><div class="slot-dot"></div><div class="slot-track"></div></div>
+              <div class="slot-card"><div class="card"><div class="slot-t">Marble Mountains</div><div class="slot-p">Cave temples + summit viewpoint · ~2h</div></div></div>
+            </div>
+            <div class="transit">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M5 17h14M6 17V9l2-4h8l2 4v8"/><circle cx="8" cy="17" r="1.5"/><circle cx="16" cy="17" r="1.5"/></svg>
+              Grab car · 18 min · ₫95k
+            </div>
+
+            <div class="slot">
+              <div class="slot-time">12:00</div>
+              <div class="slot-line"><div class="slot-dot"></div><div class="slot-track"></div></div>
+              <div class="slot-card"><div class="card"><div class="slot-t">Lunch — Bà Buội Chicken Rice</div><div class="slot-p">Hội An old town · booked table for 2</div></div></div>
+            </div>
+            <div class="closed">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+              Heads up: My Sơn Sanctuary is closed Mondays — moved to Day 5.
+            </div>
+
+            <div class="slot">
+              <div class="slot-time">15:30</div>
+              <div class="slot-line"><div class="slot-dot"></div></div>
+              <div class="slot-card"><div class="card"><div class="slot-t">Old Town walk + lantern market</div><div class="slot-p">Free · best light after 17:00</div></div></div>
+            </div>
+          </div>
+
+          <!-- Bookings -->
+          <div class="subtab" id="book">
+            <div class="card book">
+              <div class="book-top">
+                <div><div class="book-t">An Bàng Beach Villa</div><div class="book-prov">Agoda · 6 nights · check-in Jul 18</div></div>
+                <span class="status pend">Pending</span>
+              </div>
+              <div class="book-code"><span>Confirmation</span><b>—</b></div>
+            </div>
+            <div class="card book">
+              <div class="book-top">
+                <div><div class="book-t">VietJet VJ628</div><div class="book-prov">SGN → DAD · Jul 18, 06:40</div></div>
+                <span class="status ok">Confirmed</span>
+              </div>
+              <div class="book-code"><span>Confirmation</span><b>VJ8K2M</b></div>
+            </div>
+            <div class="card book">
+              <div class="book-top">
+                <div><div class="book-t">Hải Vân Pass private tour</div><div class="book-prov">GetYourGuide · Jul 21, 09:00</div></div>
+                <span class="status ok">Confirmed</span>
+              </div>
+              <div class="book-code"><span>Confirmation</span><b>GYG-40192</b></div>
+            </div>
+          </div>
+
+          <!-- Budget -->
+          <div class="subtab" id="budg">
+            <div class="kpi">
+              <div class="card"><b class="money">₫8.2M</b><span>Spent</span></div>
+              <div class="card"><b>₫3.8M</b><span>Remaining</span></div>
+            </div>
+
+            <div class="sec-head" style="margin-top:6px"><div class="sec-title">Pre-trip checklist</div><div class="view-all">9 / 12</div></div>
+            <div class="bar"><i class="teal" style="width:75%"></i></div>
+
+            <div class="sec-head"><div class="sec-title">Pace vs. budget</div><div class="view-all" style="color:var(--teal)">On track</div></div>
+            <div class="pace"><i style="width:68%"></i><div class="mark" style="left:72%"></div></div>
+            <div style="font-size:10.5px;color:var(--muted);margin-top:8px">Spending is just under the day-by-day plan.</div>
+
+            <div class="sec-head"><div class="sec-title">Planned vs. actual</div></div>
+            <div class="card">
+              <div class="chart">
+                <div class="col"><div class="col-bars"><div class="cbar plan" style="height:70%"></div><div class="cbar act" style="height:62%"></div></div><small>Stay</small></div>
+                <div class="col"><div class="col-bars"><div class="cbar plan" style="height:45%"></div><div class="cbar over" style="height:58%"></div></div><small>Food</small></div>
+                <div class="col"><div class="col-bars"><div class="cbar plan" style="height:55%"></div><div class="cbar act" style="height:40%"></div></div><small>Do</small></div>
+                <div class="col"><div class="col-bars"><div class="cbar plan" style="height:35%"></div><div class="cbar act" style="height:30%"></div></div><small>Move</small></div>
+              </div>
+              <div class="legend">
+                <span><i style="background:var(--hair-2)"></i>Planned</span>
+                <span><i style="background:var(--teal)"></i>Actual</span>
+                <span><i style="background:var(--red)"></i>Over</span>
+              </div>
+            </div>
+
+            <div class="sec-head"><div class="sec-title">Packing status</div></div>
+            <div class="card" style="padding:4px 15px">
+              <div class="pack-row">
+                <img class="pack-av" src="https://i.pravatar.cc/60?img=15" alt="">
+                <div class="pack-name">Sahil</div>
+                <div class="bar" style="flex:1"><i class="teal" style="width:80%"></i></div>
+                <div class="pack-pct money">80%</div>
+              </div>
+              <div class="pack-row">
+                <img class="pack-av" src="https://i.pravatar.cc/60?img=32" alt="">
+                <div class="pack-name">Toan</div>
+                <div class="bar" style="flex:1"><i style="width:45%;background:var(--amber)"></i></div>
+                <div class="pack-pct" style="color:var(--amber)">45%</div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ---------- SAVED GEMS ---------- -->
+        <section class="tab" id="gems">
+          <div class="sec-head" style="margin-top:2px"><div class="sec-title">Saved Gems · 24</div><div class="view-all">Filter ▾</div></div>
+          <div class="grid2">
+            <div class="gem-card"><div class="gem-photo" style="background-image:url('https://picsum.photos/seed/goldbridge/300/200')"><div class="gem-pin">📍</div></div><div class="gem-meta"><div class="gem-name">Golden Bridge</div><div class="gem-loc">◷ Bà Nà Hills</div></div></div>
+            <div class="gem-card"><div class="gem-photo" style="background-image:url('https://picsum.photos/seed/lantern/300/200')"><div class="gem-pin">📍</div></div><div class="gem-meta"><div class="gem-name">Lantern Street</div><div class="gem-loc">◷ Hội An</div></div></div>
+            <div class="gem-card"><div class="gem-photo" style="background-image:url('https://picsum.photos/seed/marble/300/200')"><div class="gem-pin">📍</div></div><div class="gem-meta"><div class="gem-name">Marble Mountains</div><div class="gem-loc">◷ Ngũ Hành Sơn</div></div></div>
+            <div class="gem-card"><div class="gem-photo" style="background-image:url('https://picsum.photos/seed/beach/300/200')"><div class="gem-pin">📍</div></div><div class="gem-meta"><div class="gem-name">An Bàng Beach</div><div class="gem-loc">◷ Hội An</div></div></div>
+            <div class="gem-card"><div class="gem-photo" style="background-image:url('https://picsum.photos/seed/haivan/300/200')"><div class="gem-pin">📍</div></div><div class="gem-meta"><div class="gem-name">Hải Vân Pass</div><div class="gem-loc">◷ Đà Nẵng</div></div></div>
+            <div class="gem-card"><div class="gem-photo" style="background-image:url('https://picsum.photos/seed/myson/300/200')"><div class="gem-pin">📍</div></div><div class="gem-meta"><div class="gem-name">Mỹ Sơn Sanctuary</div><div class="gem-loc">◷ Quảng Nam</div></div></div>
+          </div>
+        </section>
+
+        <!-- ---------- MY STORIES ---------- -->
+        <section class="tab" id="stories">
+          <div class="cta" style="margin-top:2px">✎ Share a story</div>
+          <div class="card" style="padding:4px 15px;margin-top:14px">
+            <div class="story">
+              <div class="story-thumb" style="background-image:url('https://picsum.photos/seed/street/120/120')"></div>
+              <div class="story-body"><div class="story-title">Street food after dark</div><div class="story-loc">Đà Nẵng · Jul 2026</div></div>
+              <span class="status ok">Approved</span>
+            </div>
+            <div class="story">
+              <div class="story-thumb" style="background-image:url('https://picsum.photos/seed/river/120/120')"></div>
+              <div class="story-body"><div class="story-title">Sunrise on the Thu Bồn</div><div class="story-loc">Hội An · Jul 2026</div></div>
+              <span class="status pend">Pending</span>
+            </div>
+            <div class="story">
+              <div class="story-thumb" style="background-image:url('https://picsum.photos/seed/pass/120/120')"></div>
+              <div class="story-body"><div class="story-title">Riding the Hải Vân Pass</div><div class="story-loc">Đà Nẵng · Jul 2026</div></div>
+              <span class="status draft">Draft</span>
+            </div>
+            <div class="story">
+              <div class="story-thumb" style="background-image:url('https://picsum.photos/seed/tailor/120/120')"></div>
+              <div class="story-body"><div class="story-title">Getting a suit tailored in 24h</div><div class="story-loc">Hội An · Jul 2026</div></div>
+              <span class="status ok">Approved</span>
+            </div>
+          </div>
+        </section>
+
+        <!-- ---------- BADGES ---------- -->
+        <section class="tab" id="badges">
+          <div class="sec-head" style="margin-top:2px"><div class="sec-title">Badges · 3 of 6</div><div class="view-all" style="color:var(--muted)">50%</div></div>
+          <div class="grid3">
+            <div class="badge earned"><div class="ic">🧭</div><small>Explorer</small></div>
+            <div class="badge earned"><div class="ic">💸</div><small>Budgeter</small></div>
+            <div class="badge earned"><div class="ic">🍜</div><small>Foodie</small></div>
+            <div class="badge locked"><div class="ic">✈️</div><small>Jetsetter</small></div>
+            <div class="badge locked"><div class="ic">🏔️</div><small>Peakbagger</small></div>
+            <div class="badge locked"><div class="ic">📸</div><small>Storyteller</small></div>
+          </div>
+          <div class="sub-note">Earn Jetsetter by logging trips to 5 countries.</div>
+        </section>
+
+        <!-- ---------- SETTINGS ---------- -->
+        <section class="tab" id="settings">
+          <div class="set-list" style="margin-top:4px">
+            <div class="set-row">
+              <div class="set-ic"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="8" r="4"/><path d="M4 21v-1a6 6 0 0 1 12 0v1"/></svg></div>
+              <div class="set-label">Account</div><span class="chev">›</span>
+            </div>
+            <div class="set-row">
+              <div class="set-ic"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg></div>
+              <div class="set-label">Notifications</div><span class="chev">›</span>
+            </div>
+            <div class="set-row">
+              <div class="set-ic"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></div>
+              <div class="set-label">Currency &amp; Units</div><span class="chev">›</span>
+            </div>
+            <div class="set-row">
+              <div class="set-ic"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg></div>
+              <div class="set-label">Privacy</div><span class="chev">›</span>
+            </div>
+            <div class="set-row">
+              <div class="set-ic"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg></div>
+              <div class="set-label">Help &amp; Support</div><span class="chev">›</span>
+            </div>
+          </div>
+          <button class="signout">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+            Sign Out
+          </button>
+          <div class="sub-note">Explorife v2.4.0 · Made for the road</div>
+        </section>
+
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  // Main pill tabs
+  document.querySelectorAll('.pill').forEach(function(p){
+    p.addEventListener('click', function(){
+      document.querySelectorAll('.pill').forEach(function(x){x.classList.remove('active')});
+      p.classList.add('active');
+      var id = p.dataset.tab;
+      document.querySelectorAll('.tab').forEach(function(t){t.classList.remove('show')});
+      document.getElementById(id).classList.add('show');
+      document.querySelector('.body-scroll').scrollTop = 0;
+    });
+  });
+
+  // My Trip sub-nav
+  document.querySelectorAll('.seg').forEach(function(s){
+    s.addEventListener('click', function(){
+      document.querySelectorAll('.seg').forEach(function(x){x.classList.remove('active')});
+      s.classList.add('active');
+      var id = s.dataset.sub;
+      document.querySelectorAll('.subtab').forEach(function(t){t.classList.remove('show')});
+      document.getElementById(id).classList.add('show');
+    });
+  });
+
+  // Day chips toggle (cosmetic)
+  document.querySelectorAll('.day-chip').forEach(function(d){
+    d.addEventListener('click', function(){
+      document.querySelectorAll('.day-chip').forEach(function(x){x.classList.remove('active')});
+      d.classList.add('active');
+    });
+  });
+</script>
+</body>
+</html>

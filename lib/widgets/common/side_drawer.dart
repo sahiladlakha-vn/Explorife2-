@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../../core/theme/app_theme.dart';
 import '../../providers/auth_provider.dart';
+import '../../providers/booking_provider.dart';
 
 // ─────────────────────────────────────────
 // SIDE DRAWER (slides in from the left)
@@ -42,6 +43,7 @@ class SideDrawer extends StatelessWidget {
           TextButton(
             onPressed: () {
               Navigator.pop(dialogCtx);
+              context.read<BookingProvider>().clear();
               context.read<AuthProvider>().signOut();
               context.go('/home');
             },

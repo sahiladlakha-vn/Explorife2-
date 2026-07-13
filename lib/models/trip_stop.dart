@@ -22,6 +22,24 @@ class TripStop {
   final int priceVnd;
   final int sortOrder;
 
+  // ── Transit-in leg ────────────────────────────────────────────────────────
+  // How you get FROM the previous stop TO this one. All four are nullable and
+  // move together: a stop with no transit leg (the day's first stop, or a
+  // walk-up) leaves them null. Back `trip_stops.transit_*` (migration
+  // 20260713000100). transitCostVnd stays in the VND trip-money world.
+
+  /// e.g. 'walk' | 'taxi' | 'bus' | 'train' | 'ferry'. Freeform to match the
+  /// nullable text column — no CHECK constraint, so no enum.
+  final String? transitMode;
+
+  /// Route/line label, e.g. 'Line 1' or 'Grab'. Null when not applicable.
+  final String? transitLine;
+
+  final int? transitDurationMin;
+
+  /// Cost of the transit leg in VND. See the null/0 distinction on [hasTransit].
+  final int? transitCostVnd;
+
   const TripStop({
     required this.id,
     required this.tripId,
@@ -31,10 +49,19 @@ class TripStop {
     this.customPayload,
     this.priceVnd = 0,
     this.sortOrder = 0,
+    this.transitMode,
+    this.transitLine,
+    this.transitDurationMin,
+    this.transitCostVnd,
   });
 
   /// True when this is a freeform stop rather than a saved gem.
   bool get isCustom => gemId == null;
+
+  /// True when this stop has a transit-in leg to render. [transitMode] is the
+  /// anchor: a leg without a mode isn't a leg. (A leg may still have a null
+  /// [transitCostVnd] — cost unknown — which is why we don't gate on cost.)
+  bool get hasTransit => transitMode != null;
 
   /// Display title for custom stops; null for gem stops (look up the gem).
   String? get customTitle => customPayload?['title'] as String?;
@@ -52,6 +79,10 @@ class TripStop {
           : null,
       priceVnd: (j['price_vnd'] as num?)?.toInt() ?? 0,
       sortOrder: (j['sort_order'] as num?)?.toInt() ?? 0,
+      transitMode: j['transit_mode'] as String?,
+      transitLine: j['transit_line'] as String?,
+      transitDurationMin: (j['transit_duration_min'] as num?)?.toInt(),
+      transitCostVnd: (j['transit_cost_vnd'] as num?)?.toInt(),
     );
   }
 
@@ -64,9 +95,34 @@ class TripStop {
         'custom_payload': customPayload,
         'price_vnd': priceVnd,
         'sort_order': sortOrder,
+        'transit_mode': transitMode,
+        'transit_line': transitLine,
+        'transit_duration_min': transitDurationMin,
+        'transit_cost_vnd': transitCostVnd,
       };
 
-  TripStop copyWith({int? priceVnd, int? sortOrder, int? day, String? slot}) =>
+  // Sentinel so copyWith can distinguish "not provided" from "set to null" for
+  // the four transit fields — "remove transit from this stop" is a real edit
+  // path, and the plain `?? this.x` pattern can't clear a value to null. Pass
+  // `transitMode: null` (etc.) to clear; omit to preserve.
+  //
+  // KNOWN LIMITATION (pre-existing, intentionally not touched this pass):
+  // [gemId] and [customPayload] are carried over verbatim and aren't even
+  // copyWith params, so they can't be changed or cleared here despite gem_id
+  // being ON DELETE SET NULL. Left as-is to keep this change scoped to transit;
+  // worth a sentinel pass of its own if a gem-clear edit path appears.
+  static const Object _unset = Object();
+
+  TripStop copyWith({
+    int? priceVnd,
+    int? sortOrder,
+    int? day,
+    String? slot,
+    Object? transitMode = _unset,
+    Object? transitLine = _unset,
+    Object? transitDurationMin = _unset,
+    Object? transitCostVnd = _unset,
+  }) =>
       TripStop(
         id: id,
         tripId: tripId,
@@ -76,5 +132,17 @@ class TripStop {
         customPayload: customPayload,
         priceVnd: priceVnd ?? this.priceVnd,
         sortOrder: sortOrder ?? this.sortOrder,
+        transitMode: identical(transitMode, _unset)
+            ? this.transitMode
+            : transitMode as String?,
+        transitLine: identical(transitLine, _unset)
+            ? this.transitLine
+            : transitLine as String?,
+        transitDurationMin: identical(transitDurationMin, _unset)
+            ? this.transitDurationMin
+            : transitDurationMin as int?,
+        transitCostVnd: identical(transitCostVnd, _unset)
+            ? this.transitCostVnd
+            : transitCostVnd as int?,
       );
 }

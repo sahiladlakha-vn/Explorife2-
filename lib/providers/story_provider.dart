@@ -11,11 +11,27 @@ class StoryProvider extends ChangeNotifier {
   String _activeFilter = 'All';
   RealtimeChannel? _channel;
 
+  // ── My Stories (owner view) ──────────────────────────────────────────────
+  // A dedicated cache, deliberately separate from `_stories`. The public feed
+  // (`_stories`) is approved-only — enforced by `_fetch`'s `.eq('status',...)`
+  // and by `_applyUpsert` dropping non-approved rows. The owner's own stories
+  // must include their PENDING (and rejected) submissions, so mixing them into
+  // `_stories` would corrupt the public-feed invariant and let the realtime
+  // channel evict them. Keeping a parallel list mirrors GemProvider._savedGems.
+  List<Story> _myStories = const [];
+  bool _myStoriesLoading = false;
+  bool _myStoriesLoaded = false;
+  String? _myStoriesError;
+
   List<Story> get stories => _filtered;
   List<Story> get allStories => _stories;
   bool get loading => _loading;
   String? get error => _error;
   String get activeFilter => _activeFilter;
+
+  List<Story> get myStories => _myStories;
+  bool get myStoriesLoading => _myStoriesLoading;
+  String? get myStoriesError => _myStoriesError;
 
   List<Story> get _filtered {
     if (_activeFilter == 'All') return _stories;
@@ -163,6 +179,39 @@ class StoryProvider extends ChangeNotifier {
   }
 
   Future<void> refresh() => _fetch();
+
+  /// Load the signed-in user's own stories by email — INCLUDING pending and
+  /// rejected ones. Note the absence of a `.eq('status', ...)` filter: unlike
+  /// the public feed, whether a non-approved row is visible here is decided by
+  /// RLS on the server, not by the client. If an owner-SELECT policy exists
+  /// (e.g. `email = auth.email()`), pending rows come back; if not, RLS
+  /// silently filters them and this returns approved-only. Either way the
+  /// client asks for everything and renders whatever it's allowed to see.
+  ///
+  /// Writes ONLY to `_myStories` — never `_stories` — so the public-feed
+  /// approved-only invariant and the realtime channel stay untouched.
+  Future<void> loadMyStories(String email, {bool force = false}) async {
+    if (_myStoriesLoaded && !force) return;
+    if (_myStoriesLoading) return;
+    _myStoriesLoading = true;
+    _myStoriesError = null;
+    notifyListeners();
+    try {
+      final data = await _db
+          .from('stories')
+          .select()
+          .eq('email', email)
+          .order('created_at', ascending: false);
+      _myStories = (data as List).map((e) => Story.fromJson(e)).toList();
+      _myStoriesLoaded = true;
+    } catch (e) {
+      _myStoriesError = e.toString();
+      debugPrint('StoryProvider loadMyStories error: $e');
+    } finally {
+      _myStoriesLoading = false;
+      notifyListeners();
+    }
+  }
 
   @override
   void dispose() {

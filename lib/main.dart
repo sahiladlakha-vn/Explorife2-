@@ -7,6 +7,7 @@ import 'core/router/app_router.dart';
 import 'core/theme/app_theme.dart';
 import 'models/gem.dart';
 import 'providers/auth_provider.dart';
+import 'providers/booking_provider.dart';
 import 'providers/destination_provider.dart';
 import 'providers/gem_provider.dart';
 import 'providers/story_provider.dart';
@@ -54,6 +55,11 @@ class _ExplorIfeAppState extends State<ExplorIfeApp> {
         ChangeNotifierProvider(create: (_) => StoryProvider()),
         ChangeNotifierProvider(create: (_) => HikeProvider()),
         ChangeNotifierProvider(create: (_) => SplitsProvider()),
+        // Plain provider (no proxy): reads are scoped by trip_id and enforced by
+        // RLS, so it needs no userId/AuthProvider. clear() is called at sign-out.
+        ChangeNotifierProvider(
+          create: (_) => BookingProvider(supabase: Supabase.instance.client),
+        ),
         // TripProvider depends on two others: the signed-in user's id (Auth) and
         // a gem-category lookup (Gem) for budget bucketing. A proxy provider
         // wires those in. Its category callback closes over the *live* GemProvider

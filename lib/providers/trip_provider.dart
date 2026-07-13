@@ -81,6 +81,20 @@ class TripProvider extends ChangeNotifier {
         .toList();
   }
 
+  /// All cached stops for a trip, in cache order (unsorted). Mirrors
+  /// [BookingProvider.bookingsFor] — a pure read safe to call in build().
+  /// Returns a const empty list for an unknown/unfetched trip (never null).
+  /// Callers that need ordering use [stopsForDay]; the insights layer only
+  /// needs the flat set (it buckets and dedups, order-independent).
+  List<TripStop> stopsFor(String tripId) =>
+      _stopsByTrip[tripId] ?? const <TripStop>[];
+
+  /// Public bucketer for one stop — the same category collapse the budget
+  /// chart uses ([_categoryFor] → [_mapToBucket]). Exposed so the insights
+  /// layer ([actualSpendByCategory]) can bucket stops without importing
+  /// GemProvider or reimplementing the mapping.
+  String bucketForStop(TripStop s) => _categoryFor(s);
+
   /// Stops for one day, ordered slot-first then by sortOrder.
   List<TripStop> stopsForDay(String tripId, int day) {
     final list =
