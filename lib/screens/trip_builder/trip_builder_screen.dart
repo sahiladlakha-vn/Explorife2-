@@ -6,8 +6,18 @@ import '../../models/trip.dart';
 import '../../providers/trip_provider.dart';
 import '../../widgets/budget_status.dart';
 import 'widgets/discovery_panel.dart';
+import 'widgets/discovery_sheet.dart';
 import 'widgets/itinerary_canvas.dart';
 import 'widgets/summary_sidebar.dart';
+
+/// Matches [SummarySidebar]'s `_MobilePeek` fixed height.
+const double _kSummaryPeekHeight = 120;
+
+/// Rough reserve for [DiscoveryBottomSheet]'s collapsed bar, so the itinerary's
+/// bottom-most content doesn't render underneath it. The sheet computes its
+/// own exact collapsed height from content, not this constant — this is just
+/// a little breathing room for the canvas padding, not a layout contract.
+const double _kDiscoveryCollapsedReserve = 56;
 
 /// Full-screen 3-pane Trip Builder. Subscriber, not owner: the only local state
 /// is [_activeDay]; trips/stops live on TripProvider. Dark colorway throughout.
@@ -76,22 +86,34 @@ class _TripBuilderScreenState extends State<TripBuilderScreen> {
               ],
             );
           }
-          // < 900: single column. Canvas (primary) → Discovery, with Summary
-          // pinned as a peeking bottom sheet. Its expand/collapse lands in File 12.
+          // < 900: full-screen itinerary as the base layer, with Discovery as
+          // a proper draggable bottom sheet (collapsed/half/full — see
+          // DiscoveryBottomSheet) floating above it, and the Summary peek
+          // pinned below that. The sheet is given the whole area above the
+          // peek (top: 0, bottom: _kSummaryPeekHeight) so its own fractional
+          // snap sizes are relative to "the space above the peek", not the
+          // full physical screen.
           return Stack(
             children: [
               Positioned.fill(
-                child: ListView(
-                  padding: const EdgeInsets.only(bottom: 140),
-                  children: [
-                    ItineraryCanvas(
-                      tripId: widget.tripId,
-                      activeDay: _activeDay,
-                      onDayChanged: _onDayChanged,
-                    ),
-                    DiscoveryPanel(tripId: widget.tripId),
-                  ],
+                child: Padding(
+                  // Bottom-pad the canvas so its lowest content never renders
+                  // underneath the peek or the sheet's collapsed bar.
+                  padding: const EdgeInsets.only(
+                      bottom: _kSummaryPeekHeight + _kDiscoveryCollapsedReserve),
+                  child: ItineraryCanvas(
+                    tripId: widget.tripId,
+                    activeDay: _activeDay,
+                    onDayChanged: _onDayChanged,
+                  ),
                 ),
+              ),
+              Positioned(
+                left: 0,
+                right: 0,
+                top: 0,
+                bottom: _kSummaryPeekHeight,
+                child: DiscoveryBottomSheet(tripId: widget.tripId),
               ),
               Align(
                 alignment: Alignment.bottomCenter,
@@ -133,9 +155,11 @@ class _TripBuilderScreenState extends State<TripBuilderScreen> {
                 SizedBox(width: 300, child: block()),
               ])
             : Column(children: [
-                Expanded(flex: 3, child: block()), // canvas placeholder
-                Expanded(flex: 2, child: block()), // discovery placeholder
-                SizedBox(height: 120, child: block()), // summary peek placeholder
+                Expanded(child: block()), // canvas placeholder
+                const SizedBox(height: 48), // discovery collapsed-bar gap
+                SizedBox(
+                    height: _kSummaryPeekHeight,
+                    child: block()), // summary peek placeholder
               ]),
       ),
     );
