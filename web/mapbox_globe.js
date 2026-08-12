@@ -8,6 +8,37 @@
     return typeof mapboxgl !== 'undefined';
   }
 
+  // (Re-)draws the route lines from el._routeGeojson (a FeatureCollection,
+  // one LineString feature per day, each carrying its own `color` property),
+  // if any. Called after the map/style has finished loading — a GL
+  // source+layer (unlike the DOM markers in explorifeMapSetGems) does NOT
+  // survive a full style swap, so this needs to be re-applied every time
+  // style.load fires, not just once. `line-color` reads each feature's own
+  // `color` property (data-driven paint) so multiple days render in their
+  // own distinct colors from a single source+layer, rather than needing one
+  // layer per day.
+  function applyRoute(el) {
+    var map = el._mb;
+    if (!map || !el._routeGeojson) return;
+    var srcId = 'ex-route-src', layerId = 'ex-route-line';
+    if (map.getSource(srcId)) {
+      map.getSource(srcId).setData(el._routeGeojson);
+    } else {
+      map.addSource(srcId, { type: 'geojson', data: el._routeGeojson });
+      map.addLayer({
+        id: layerId,
+        type: 'line',
+        source: srcId,
+        layout: { 'line-join': 'round', 'line-cap': 'round' },
+        paint: {
+          'line-color': ['get', 'color'],
+          'line-width': 3,
+          'line-opacity': 0.85,
+        },
+      });
+    }
+  }
+
   window.explorifeMapInit = function (el, token, style, onTap) {
     if (!libReady()) {
       console.error('[explorife] mapbox-gl not loaded');
@@ -53,6 +84,7 @@
         el._pendingGems = null;
         window.explorifeMapSetGems(el, pending);
       }
+      applyRoute(el);
     });
 
     var ro = new ResizeObserver(function () { map.resize(); });
@@ -84,9 +116,46 @@
       if (el._markers[g.id]) return;
       var node = document.createElement('div');
       var sel = el._selectedId;
+      var kind = g.kind || 'pin';
+
+      if (kind === 'arrow') {
+        // Direction arrow along a day's route segment — small, not a pin,
+        // not tappable.
+        node.className = 'ex-arrow';
+        node.style.color = g.color || '#6b4a3a';
+        node.style.transform = 'rotate(' + (g.rotation || 0) + 'deg)';
+        node.innerHTML =
+          '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">' +
+          '<path d="M12 2L4 22l8-6 8 6z"/></svg>';
+        var arrowMarker = new mapboxgl.Marker({ element: node })
+          .setLngLat([g.lng, g.lat])
+          .addTo(map);
+        el._markers[g.id] = arrowMarker;
+        return;
+      }
+
+      if (kind === 'dayChip') {
+        // "DAY N" pill along a day's route — small, not a pin, not tappable.
+        node.className = 'ex-daychip';
+        node.style.background = g.color || '#1a1a1a';
+        node.textContent = g.label || '';
+        var chipMarker = new mapboxgl.Marker({ element: node })
+          .setLngLat([g.lng, g.lat])
+          .addTo(map);
+        el._markers[g.id] = chipMarker;
+        return;
+      }
+
       node.className = 'ex-gem' +
         (sel === g.id ? ' selected' : (sel ? ' dimmed' : ''));
-      if (g.photo) {
+      if (g.label) {
+        // Numbered pin (e.g. a trip route stop) — takes precedence over
+        // photo/emoji. Colored per its own `color` (e.g. that stop's day)
+        // when given, falling back to the CSS default otherwise.
+        node.classList.add('ex-numbered');
+        node.textContent = g.label;
+        if (g.color) node.style.background = g.color;
+      } else if (g.photo) {
         // Show the uploaded photo as a circular thumbnail.
         node.classList.add('ex-photo');
         node.style.backgroundImage = 'url("' + g.photo + '")';
@@ -130,7 +199,9 @@
 
   window.explorifeMapSetStyle = function (el, style) {
     var map = el._mb; if (!map) return;
-    // DOM markers persist across setStyle; only re-apply fog.
+    // DOM markers persist across setStyle; the route line does NOT (it's a
+    // real GL source+layer, wiped along with the old style) — applyRoute
+    // re-adds it from el._routeGeojson once the new style has loaded.
     map.setStyle('mapbox://styles/mapbox/' + style);
     map.once('style.load', function () {
       try {
@@ -142,7 +213,41 @@
           'star-intensity': 0.6,
         });
       } catch (e) {}
+      applyRoute(el);
     });
+  };
+
+  // Draws (or clears, with an empty array) one connecting route line per
+  // day, each in its own color — a GeoJSON FeatureCollection of LineStrings
+  // (one per day), distinct from the DOM marker pins. `routesJson` is a JSON
+  // array of {color, points: [{lat,lng}, ...]}; an entry with fewer than 2
+  // points is skipped (nothing to draw a line through).
+  window.explorifeMapSetRoute = function (el, routesJson) {
+    var map = el._mb;
+    if (!map) return;
+    var routes = [];
+    try { routes = JSON.parse(routesJson) || []; } catch (e) { routes = []; }
+    var features = [];
+    routes.forEach(function (r) {
+      if (!r.points || r.points.length < 2) return;
+      features.push({
+        type: 'Feature',
+        properties: { color: r.color || '#6b4a3a' },
+        geometry: {
+          type: 'LineString',
+          coordinates: r.points.map(function (p) { return [p.lng, p.lat]; }),
+        },
+      });
+    });
+    if (!features.length) {
+      el._routeGeojson = null;
+      if (map.getLayer('ex-route-line')) map.removeLayer('ex-route-line');
+      if (map.getSource('ex-route-src')) map.removeSource('ex-route-src');
+      return;
+    }
+    el._routeGeojson = { type: 'FeatureCollection', features: features };
+    if (!el._loaded) return; // applied by applyRoute once style.load fires
+    applyRoute(el);
   };
 
   window.explorifeMapFlyTo = function (el, lat, lng, zoom) {
@@ -414,5 +519,57 @@
     map.on('rotateend', emit);
     // Emit the initial bearing so Dart starts in sync (usually 0).
     if (el._loaded) { emit(); } else { map.once('idle', emit); }
+  };
+
+  function escapeHtml(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+
+  // Shows the trip-route map's tap-a-pin callout — a native Mapbox GL Popup
+  // (white rounded box + pointed tail is its own default styling, tuned via
+  // the .ex-callout CSS in index.html), auto-anchored so Mapbox flips it to
+  // stay in view near an edge instead of clipping. Only one is ever open:
+  // replacing el._callout BEFORE removing the old one makes the old popup's
+  // own 'close' event (fired by .remove()) see it's already been superseded
+  // and skip notifying Dart — only a REAL standalone close (explicit
+  // explorifeMapHideCallout, or the user tapping empty map space via
+  // closeOnClick) should do that.
+  window.explorifeMapShowCallout = function (el, lat, lng, title, subtitle) {
+    var map = el._mb; if (!map) return;
+    var old = el._callout;
+    var html = '<div class="ex-callout-title">' + escapeHtml(title) + '</div>' +
+      (subtitle ? '<div class="ex-callout-sub">' + escapeHtml(subtitle) + '</div>' : '');
+    var popup = new mapboxgl.Popup({
+      closeButton: false,
+      closeOnClick: true,
+      className: 'ex-callout',
+      offset: 14,
+    }).setLngLat([lng, lat]).setHTML(html);
+    el._callout = popup;
+    if (old) old.remove();
+    popup.on('close', function () {
+      if (el._callout === popup) {
+        el._callout = null;
+        if (el._onCalloutClose) { try { el._onCalloutClose(); } catch (e) {} }
+      }
+    });
+    popup.addTo(map);
+  };
+
+  window.explorifeMapHideCallout = function (el) {
+    if (!el) return;
+    var popup = el._callout;
+    el._callout = null;
+    if (popup) popup.remove();
+  };
+
+  // Registers Dart's callback for "the callout closed for a reason Dart
+  // didn't initiate" (e.g. the user tapped empty map space) — see the
+  // el._callout === popup guard above for why a programmatic replace/hide
+  // doesn't also fire this.
+  window.explorifeMapOnCalloutClose = function (el, fn) {
+    el._onCalloutClose = fn;
   };
 })();

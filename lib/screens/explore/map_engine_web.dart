@@ -39,6 +39,19 @@ external void _mapFocusGem(web.HTMLElement el, JSNumber lat, JSNumber lng,
 @JS('explorifeMapFitGems')
 external void _mapFitGems(web.HTMLElement el, JSString gemsJson);
 
+@JS('explorifeMapSetRoute')
+external void _mapSetRoute(web.HTMLElement el, JSString routeJson);
+
+@JS('explorifeMapShowCallout')
+external void _mapShowCallout(web.HTMLElement el, JSNumber lat, JSNumber lng,
+    JSString title, JSString subtitle);
+
+@JS('explorifeMapHideCallout')
+external void _mapHideCallout(web.HTMLElement el);
+
+@JS('explorifeMapOnCalloutClose')
+external void _mapOnCalloutClose(web.HTMLElement el, JSFunction onClose);
+
 @JS('explorifeMapLocate')
 external void _mapLocate(web.HTMLElement el);
 
@@ -66,6 +79,9 @@ external void _mapOnRotate(web.HTMLElement el, JSFunction onRotate);
 
 int _viewSeq = 0;
 
+String _colorHex(Color c) =>
+    '#${c.toARGB32().toRadixString(16).padLeft(8, '0').substring(2)}';
+
 String _markersJson(List<MapMarkerData> markers) {
   return jsonEncode(markers
       .map((m) => {
@@ -74,8 +90,28 @@ String _markersJson(List<MapMarkerData> markers) {
             'lng': m.lng,
             'emoji': m.emoji,
             'photo': m.photoUrl,
+            'label': m.label,
+            'kind': m.kind.name,
+            'color': m.color != null ? _colorHex(m.color!) : null,
+            'rotation': m.rotationDegrees,
           })
       .toList());
+}
+
+/// One entry per day's route segment — `window.explorifeMapSetRoute`
+/// (mapbox_globe.js) turns this into one GeoJSON LineString feature per
+/// entry, each carrying its own `color` so days stay visually distinct even
+/// where routes cross.
+String _routesJson(List<MapRouteSegment>? routes) {
+  if (routes == null) return '[]';
+  return jsonEncode([
+    for (final seg in routes)
+      if (seg.points.length >= 2)
+        {
+          'color': _colorHex(seg.color),
+          'points': seg.points.map((p) => {'lat': p.lat, 'lng': p.lng}).toList(),
+        },
+  ]);
 }
 
 class _WebController implements MapEngineController {
@@ -127,6 +163,17 @@ class _WebController implements MapEngineController {
 
   @override
   void resetNorth() => _mapResetNorth(el);
+
+  @override
+  void showCallout(
+          {required double lat,
+          required double lng,
+          required String title,
+          String? subtitle}) =>
+      _mapShowCallout(el, lat.toJS, lng.toJS, title.toJS, (subtitle ?? '').toJS);
+
+  @override
+  void hideCallout() => _mapHideCallout(el);
 }
 
 class MapEngineView extends StatefulWidget {
@@ -152,6 +199,17 @@ class MapEngineView extends StatefulWidget {
   final double? userLat;
   final double? userLng;
 
+  /// One colored connecting line per day, drawn under the markers — e.g. a
+  /// trip's itinerary route. A segment with fewer than 2 points draws
+  /// nothing; null/empty draws no lines.
+  final List<MapRouteSegment>? routes;
+
+  /// Called whenever the current callout ([MapEngineController.showCallout])
+  /// closes for a reason the caller didn't directly initiate — e.g. the user
+  /// tapped empty map space (Mapbox's Popup `closeOnClick`). Lets the caller
+  /// keep its own "which marker is selected" state in sync without guessing.
+  final VoidCallback? onCalloutClosed;
+
   const MapEngineView({
     super.key,
     required this.markers,
@@ -163,6 +221,8 @@ class MapEngineView extends StatefulWidget {
     this.onBearingChanged,
     this.userLat,
     this.userLng,
+    this.routes,
+    this.onCalloutClosed,
   });
 
   @override
@@ -207,12 +267,20 @@ class _MapEngineViewState extends State<MapEngineView> {
               .toJS;
       _mapOnRotate(_host, onRotate);
     }
+    if (widget.onCalloutClosed != null) {
+      _mapOnCalloutClose(_host, (() => widget.onCalloutClosed!()).toJS);
+    }
     widget.onReady(_WebController(_host));
     _pushUserLocation();
+    _pushRoute();
   }
 
   void _pushMarkers() {
     _mapSetGems(_host, _markersJson(widget.markers).toJS);
+  }
+
+  void _pushRoute() {
+    _mapSetRoute(_host, _routesJson(widget.routes).toJS);
   }
 
   void _pushUserLocation() {
@@ -235,6 +303,9 @@ class _MapEngineViewState extends State<MapEngineView> {
         oldWidget.userLng != widget.userLng) {
       _pushUserLocation();
     }
+    if (!_sameRoutes(oldWidget.routes, widget.routes)) {
+      _pushRoute();
+    }
   }
 
   bool _sameMarkers(List<MapMarkerData> a, List<MapMarkerData> b) {
@@ -242,8 +313,29 @@ class _MapEngineViewState extends State<MapEngineView> {
     for (var i = 0; i < a.length; i++) {
       if (a[i].id != b[i].id ||
           a[i].lat != b[i].lat ||
-          a[i].lng != b[i].lng) {
+          a[i].lng != b[i].lng ||
+          a[i].label != b[i].label ||
+          a[i].kind != b[i].kind ||
+          a[i].color != b[i].color ||
+          a[i].rotationDegrees != b[i].rotationDegrees) {
         return false;
+      }
+    }
+    return true;
+  }
+
+  bool _sameRoutes(List<MapRouteSegment>? a, List<MapRouteSegment>? b) {
+    if (a == null || b == null) return a == b;
+    if (a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if (a[i].color != b[i].color || a[i].points.length != b[i].points.length) {
+        return false;
+      }
+      for (var j = 0; j < a[i].points.length; j++) {
+        if (a[i].points[j].lat != b[i].points[j].lat ||
+            a[i].points[j].lng != b[i].points[j].lng) {
+          return false;
+        }
       }
     }
     return true;

@@ -5,14 +5,26 @@ import 'dart:math' show Point;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
-import 'package:latlong2/latlong.dart';
+// hide Path: latlong2 exports its own generic Path<T> (a geo route path),
+// which otherwise shadows dart:ui's Path that _TailPainter's CustomPainter
+// needs for the callout bubble's pointed tail.
+import 'package:latlong2/latlong.dart' hide Path;
 
 import 'map_types.dart';
+
+typedef _ShowCalloutFn = void Function(
+    {required double lat,
+    required double lng,
+    required String title,
+    String? subtitle});
 
 class _NativeController implements MapEngineController {
   final MapController controller;
   final void Function(List<MapMarkerData>) onFit;
-  _NativeController(this.controller, this.onFit);
+  final _ShowCalloutFn onShowCallout;
+  final VoidCallback onHideCallout;
+  _NativeController(
+      this.controller, this.onFit, this.onShowCallout, this.onHideCallout);
 
   @override
   void zoomBy(double delta) {
@@ -71,6 +83,17 @@ class _NativeController implements MapEngineController {
 
   @override
   void setOverlayShields(List<MapShieldRect> rects) {/* no platform-view bleed */}
+
+  @override
+  void showCallout(
+          {required double lat,
+          required double lng,
+          required String title,
+          String? subtitle}) =>
+      onShowCallout(lat: lat, lng: lng, title: title, subtitle: subtitle);
+
+  @override
+  void hideCallout() => onHideCallout();
 }
 
 class MapEngineView extends StatefulWidget {
@@ -96,6 +119,17 @@ class MapEngineView extends StatefulWidget {
   final double? userLat;
   final double? userLng;
 
+  /// One colored connecting line per day, drawn under the markers — e.g. a
+  /// trip's itinerary route. A segment with fewer than 2 points draws
+  /// nothing (a line needs at least two ends); null/empty draws no lines.
+  final List<MapRouteSegment>? routes;
+
+  /// Called whenever the current callout ([MapEngineController.showCallout])
+  /// closes for a reason the caller didn't directly initiate — e.g. the user
+  /// tapped empty map space. Lets the caller keep its own "which marker is
+  /// selected" state in sync without guessing.
+  final VoidCallback? onCalloutClosed;
+
   const MapEngineView({
     super.key,
     required this.markers,
@@ -107,6 +141,8 @@ class MapEngineView extends StatefulWidget {
     this.onBearingChanged,
     this.userLat,
     this.userLng,
+    this.routes,
+    this.onCalloutClosed,
   });
 
   @override
@@ -115,6 +151,22 @@ class MapEngineView extends StatefulWidget {
 
 class _MapEngineViewState extends State<MapEngineView> {
   final MapController _controller = MapController();
+
+  ({double lat, double lng, String title, String? subtitle})? _callout;
+
+  void _showCallout(
+      {required double lat,
+      required double lng,
+      required String title,
+      String? subtitle}) {
+    setState(() => _callout = (lat: lat, lng: lng, title: title, subtitle: subtitle));
+  }
+
+  void _hideCallout({bool notify = false}) {
+    if (_callout == null) return;
+    setState(() => _callout = null);
+    if (notify) widget.onCalloutClosed?.call();
+  }
 
   String get _tileUrl {
     if (widget.token.isEmpty) {
@@ -140,6 +192,17 @@ class _MapEngineViewState extends State<MapEngineView> {
 
   @override
   Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) => Stack(
+        children: [
+          _buildMap(constraints.biggest),
+          if (_callout != null) _buildCalloutOverlay(constraints.biggest),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMap(Size size) {
     return FlutterMap(
       mapController: _controller,
       options: MapOptions(
@@ -147,8 +210,13 @@ class _MapEngineViewState extends State<MapEngineView> {
         initialZoom: 3,
         minZoom: 2,
         maxZoom: 18,
-        onMapReady: () =>
-            widget.onReady(_NativeController(_controller, _fit)),
+        onMapReady: () => widget.onReady(_NativeController(
+            _controller, _fit, _showCallout, () => _hideCallout())),
+        // Tapping empty map space (not a marker) dismisses any open callout
+        // — flutter_map has no separate "background tap" vs "marker tap"
+        // routing, so this only fires when the tap didn't land on a Marker's
+        // own GestureDetector (those consume the gesture first).
+        onTap: (_, __) => _hideCallout(notify: true),
         onPositionChanged: (camera, _) {
           final c = camera.center;
           // visibleBounds: southWest = (south lat, west lng), northEast =
@@ -168,6 +236,10 @@ class _MapEngineViewState extends State<MapEngineView> {
           // MapPosition carries no bearing; read it from the live camera, which
           // exposes rotation in degrees.
           widget.onBearingChanged?.call(_controller.camera.rotation);
+          // Keep the callout glued to its marker while panning/zooming —
+          // its screen position is derived from the camera below, so it
+          // needs a rebuild on every camera change, not just on open/close.
+          if (_callout != null) setState(() {});
         },
       ),
       children: [
@@ -177,41 +249,34 @@ class _MapEngineViewState extends State<MapEngineView> {
           userAgentPackageName: 'com.explorife.app',
           tileSize: 256,
         ),
+        if (widget.routes != null && widget.routes!.isNotEmpty)
+          PolylineLayer(
+            polylines: [
+              for (final seg in widget.routes!)
+                if (seg.points.length >= 2)
+                  Polyline(
+                    points: [
+                      for (final p in seg.points) LatLng(p.lat, p.lng),
+                    ],
+                    strokeWidth: 3,
+                    color: seg.color,
+                  ),
+            ],
+          ),
         MarkerLayer(
           markers: [
-            ...widget.markers.map((m) => Marker(
-                  point: LatLng(m.lat, m.lng),
-                  width: 46,
-                  height: 46,
-                  child: GestureDetector(
-                    onTap: () => widget.onMarkerTap(m.id),
-                    child: Container(
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        shape: BoxShape.circle,
-                        border: Border.all(
-                            color: const Color(0xFF14E08A), width: 2),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withValues(alpha: 0.4),
-                            blurRadius: 6,
-                            offset: const Offset(0, 3),
-                          ),
-                        ],
-                        image: m.photoUrl != null
-                            ? DecorationImage(
-                                image: NetworkImage(m.photoUrl!),
-                                fit: BoxFit.cover,
-                              )
-                            : null,
-                      ),
-                      child: m.photoUrl != null
-                          ? null
-                          : Icon(m.icon,
-                              size: 20, color: const Color(0xFF14E08A)),
-                    ),
-                  ),
-                )),
+            ...widget.markers.map((m) {
+              final size = _markerSize(m.kind);
+              return Marker(
+                point: LatLng(m.lat, m.lng),
+                width: size.width,
+                height: size.height,
+                child: GestureDetector(
+                  onTap: () => widget.onMarkerTap(m.id),
+                  child: _buildMarker(m),
+                ),
+              );
+            }),
             if (widget.userLat != null && widget.userLng != null)
               Marker(
                 point: LatLng(widget.userLat!, widget.userLng!),
@@ -237,4 +302,214 @@ class _MapEngineViewState extends State<MapEngineView> {
       ],
     );
   }
+
+  /// Positions the callout bubble relative to its marker using the camera's
+  /// own projection math (same technique [focusGem] already uses): the
+  /// marker's on-screen offset from the map's centre, in pixels, is
+  /// `project(marker) - project(cameraCenter)` at the current zoom — added
+  /// to the widget's own centre (from [size], via the enclosing
+  /// LayoutBuilder) gives its actual screen position. Flips below the
+  /// marker instead of above if the bubble would clip the top edge.
+  Widget _buildCalloutOverlay(Size size) {
+    final callout = _callout!;
+    final cam = _controller.camera;
+    final centerPx = cam.project(cam.center, cam.zoom);
+    final targetPx =
+        cam.project(LatLng(callout.lat, callout.lng), cam.zoom);
+    final markerX = size.width / 2 + (targetPx.x - centerPx.x);
+    final markerY = size.height / 2 + (targetPx.y - centerPx.y);
+
+    const bubbleWidth = 220.0;
+    const bubbleGap = 14.0; // clearance from the marker itself
+    const estimatedBubbleHeight = 56.0;
+    final pointsDown = markerY - estimatedBubbleHeight - bubbleGap >= 0;
+    final top = pointsDown
+        ? markerY - estimatedBubbleHeight - bubbleGap
+        : markerY + bubbleGap;
+    final left =
+        (markerX - bubbleWidth / 2).clamp(8.0, size.width - bubbleWidth - 8);
+
+    return Positioned(
+      left: left,
+      top: top,
+      child: IgnorePointer(
+        child: _CalloutBubble(
+          width: bubbleWidth,
+          title: callout.title,
+          subtitle: callout.subtitle,
+          pointDown: pointsDown,
+        ),
+      ),
+    );
+  }
+
+  Size _markerSize(MapMarkerKind kind) => switch (kind) {
+        MapMarkerKind.arrow => const Size(20, 20),
+        MapMarkerKind.dayChip => const Size(72, 26),
+        MapMarkerKind.pin => const Size(46, 46),
+      };
+
+  Widget _buildMarker(MapMarkerData m) {
+    switch (m.kind) {
+      case MapMarkerKind.arrow:
+        return Transform.rotate(
+          angle: (m.rotationDegrees ?? 0) * 3.1415926535 / 180,
+          child: Icon(Icons.arrow_upward,
+              size: 18, color: m.color ?? const Color(0xFF6B4A3A)),
+        );
+      case MapMarkerKind.dayChip:
+        return Container(
+          decoration: BoxDecoration(
+            color: m.color ?? const Color(0xFF1A1A1A),
+            borderRadius: BorderRadius.circular(999),
+            border: Border.all(color: Colors.white, width: 1.5),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.35),
+                blurRadius: 4,
+                offset: const Offset(0, 2),
+              ),
+            ],
+          ),
+          alignment: Alignment.center,
+          child: Text(
+            m.label ?? '',
+            style: const TextStyle(
+                color: Colors.white, fontSize: 11, fontWeight: FontWeight.w800),
+          ),
+        );
+      case MapMarkerKind.pin:
+        if (m.label != null) {
+          return Container(
+            decoration: BoxDecoration(
+              color: m.color ?? const Color(0xFF1A1A1A),
+              shape: BoxShape.circle,
+              border: Border.all(color: Colors.white, width: 2),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.4),
+                  blurRadius: 6,
+                  offset: const Offset(0, 3),
+                ),
+              ],
+            ),
+            alignment: Alignment.center,
+            child: Text(
+              m.label!,
+              style: const TextStyle(
+                  color: Colors.white, fontSize: 12, fontWeight: FontWeight.w700),
+            ),
+          );
+        }
+        return Container(
+          decoration: BoxDecoration(
+            color: Colors.white,
+            shape: BoxShape.circle,
+            border: Border.all(color: const Color(0xFF14E08A), width: 2),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.4),
+                blurRadius: 6,
+                offset: const Offset(0, 3),
+              ),
+            ],
+            image: m.photoUrl != null
+                ? DecorationImage(
+                    image: NetworkImage(m.photoUrl!), fit: BoxFit.cover)
+                : null,
+          ),
+          child: m.photoUrl != null
+              ? null
+              : Icon(m.icon, size: 20, color: const Color(0xFF14E08A)),
+        );
+    }
+  }
+}
+
+/// White rounded callout with a small pointed tail toward its marker —
+/// native's hand-built equivalent of web's Mapbox GL `Popup` (which renders
+/// this same look via its own default styling instead). [pointDown] is true
+/// when the bubble sits above the marker (tail on the bottom edge pointing
+/// down at it); false when flipped below (tail on top, pointing up).
+class _CalloutBubble extends StatelessWidget {
+  const _CalloutBubble({
+    required this.width,
+    required this.title,
+    required this.subtitle,
+    required this.pointDown,
+  });
+
+  final double width;
+  final String title;
+  final String? subtitle;
+  final bool pointDown;
+
+  @override
+  Widget build(BuildContext context) {
+    final bubble = Container(
+      width: width,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(10),
+        boxShadow: [
+          BoxShadow(
+              color: Colors.black.withValues(alpha: 0.25),
+              blurRadius: 8,
+              offset: const Offset(0, 3)),
+        ],
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(title,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                  color: Color(0xFF1A1A1A),
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700)),
+          if (subtitle != null) ...[
+            const SizedBox(height: 2),
+            Text(subtitle!,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(color: Color(0xFF6B6B6B), fontSize: 11.5)),
+          ],
+        ],
+      ),
+    );
+    final tail = CustomPaint(size: const Size(14, 7), painter: _TailPainter(pointDown));
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: pointDown ? [bubble, tail] : [tail, bubble],
+    );
+  }
+}
+
+class _TailPainter extends CustomPainter {
+  _TailPainter(this.pointDown);
+  final bool pointDown;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()..color = Colors.white;
+    final path = Path();
+    if (pointDown) {
+      path.moveTo(0, 0);
+      path.lineTo(size.width, 0);
+      path.lineTo(size.width / 2, size.height);
+    } else {
+      path.moveTo(size.width / 2, 0);
+      path.lineTo(size.width, size.height);
+      path.lineTo(0, size.height);
+    }
+    path.close();
+    canvas.drawPath(path, paint);
+  }
+
+  @override
+  bool shouldRepaint(covariant _TailPainter oldDelegate) =>
+      oldDelegate.pointDown != pointDown;
 }

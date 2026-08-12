@@ -56,7 +56,55 @@
     /* Non-selected pins dim back while a selection is active, so the deck's
        current card and its pin stand out from the rest. */
     .ex-gem.dimmed { opacity: 0.45; }
+    /* Numbered trip-route pin (Overview map card / full-screen trip map) —
+       dark circle + bold white number, distinct from the green gem-glow
+       treatment above since these mark itinerary order, not saved places. */
+    .ex-gem.ex-numbered {
+      background: #1a1a1a; border: 2px solid #ffffff;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+      /* 12px (not the base 20px) — "day.index" labels like "1.2"/"10.3" are
+         wider than a bare "1", need to fit the same 44px circle. */
+      font-size: 12px; font-weight: 700; color: #ffffff;
+      font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+    }
+    .ex-gem.ex-numbered.selected {
+      border-color: #ffffff; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+      /* Unlike the plain gem pin, a numbered pin's background is its day
+         color (set inline per-marker) — selection doesn't override it to
+         brand orange, that would erase the day-color coding this pin exists
+         to show. */
+    }
+    /* Direction arrow along a day's route segment (trip route map only) —
+       small, non-interactive, colored to match its day; rotated inline per
+       marker to point along the segment. */
+    .ex-arrow {
+      width: 16px; height: 16px;
+      display: flex; align-items: center; justify-content: center;
+      pointer-events: none;
+    }
+    /* "DAY N" pill along a day's route (trip route map only) — colored to
+       match that day, non-interactive. */
+    .ex-daychip {
+      padding: 3px 10px; border-radius: 999px;
+      border: 1.5px solid #ffffff;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.35);
+      font-size: 10.5px; font-weight: 800; letter-spacing: 0.4px;
+      color: #ffffff; white-space: nowrap;
+      font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+      pointer-events: none;
+    }
     .mapboxgl-ctrl-logo, .mapboxgl-ctrl-attrib { opacity: 0.35; }
+    /* Tap-a-pin callout on the trip route map — a native Mapbox GL Popup.
+       White rounded box + pointed tail are its own default styling
+       (.mapboxgl-popup-content / .mapboxgl-popup-tip); this just tunes
+       padding/typography and drops the default max-width so a two-line
+       "day.index: name" title doesn't wrap awkwardly. */
+    .ex-callout .mapboxgl-popup-content {
+      padding: 8px 12px; border-radius: 10px; max-width: 220px;
+      font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+    }
+    .ex-callout-title { font-size: 13px; font-weight: 700; color: #1a1a1a; }
+    .ex-callout-sub { font-size: 11.5px; color: #6b6b6b; margin-top: 2px; }
   </style>
 </head>
 <body>

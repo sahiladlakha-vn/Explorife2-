@@ -1,5 +1,22 @@
 import 'package:flutter/widgets.dart';
 
+/// What a [MapMarkerData] visually renders as. `pin` is the default (and the
+/// only kind Explore's gem markers ever use); `arrow`/`dayChip` back the trip
+/// route map's direction indicators and per-day labels.
+enum MapMarkerKind {
+  /// Circular pin — emoji/icon/photo by default, or a numbered badge when
+  /// [MapMarkerData.label] is set. Tappable.
+  pin,
+
+  /// Small rotated triangle showing travel direction along a route segment.
+  /// Not tappable.
+  arrow,
+
+  /// Rounded pill label (e.g. "DAY 1"), placed along a day's route. Not
+  /// tappable.
+  dayChip,
+}
+
 /// A single marker to render on the map. Kept platform-agnostic so the same
 /// data drives both the web (Mapbox GL globe) and native (flutter_map) engines.
 class MapMarkerData {
@@ -13,6 +30,22 @@ class MapMarkerData {
   /// instead of the category emoji/icon.
   final String? photoUrl;
 
+  /// When present (and [kind] is [MapMarkerKind.pin]), the marker renders as
+  /// a numbered/labeled pin instead of the emoji/icon/photo treatment — e.g.
+  /// a trip itinerary's "1.2" stop label, or "DAY 1" for a [MapMarkerKind.dayChip].
+  final String? label;
+
+  final MapMarkerKind kind;
+
+  /// Fill/accent color — a [pin]'s background, an [arrow]'s fill, or a
+  /// [dayChip]'s pill background. Null keeps each kind's own default (green
+  /// glow for a plain gem pin, dark for a plain numbered pin).
+  final Color? color;
+
+  /// Rotation in degrees (0 = pointing up/north), meaningful for
+  /// [MapMarkerKind.arrow] only.
+  final double? rotationDegrees;
+
   const MapMarkerData({
     required this.id,
     required this.lat,
@@ -20,7 +53,20 @@ class MapMarkerData {
     required this.emoji,
     required this.icon,
     this.photoUrl,
+    this.label,
+    this.kind = MapMarkerKind.pin,
+    this.color,
+    this.rotationDegrees,
   });
+}
+
+/// One day's route line, in its own color — the trip route map draws one of
+/// these per day rather than a single flat multi-day line, so days stay
+/// visually distinguishable even where routes cross.
+class MapRouteSegment {
+  final List<({double lat, double lng})> points;
+  final Color color;
+  const MapRouteSegment({required this.points, required this.color});
 }
 
 /// A rectangular region (in CSS/logical pixels, measured from the map's
@@ -89,4 +135,20 @@ abstract class MapEngineController {
   /// deterministic DOM-level backstop [setSheetCoverage] uses, extended to the
   /// overlays that aren't the bottom sheet. No-op on native.
   void setOverlayShields(List<MapShieldRect> rects);
+
+  /// Shows a small callout/tooltip anchored to the point at [lat]/[lng] —
+  /// e.g. a tapped trip-route pin's stop name and day/time. Only one is ever
+  /// shown at a time: calling this again replaces whatever callout is
+  /// already open. Web uses Mapbox GL JS's native `Popup` (auto-anchored, so
+  /// it flips to stay in view near an edge); native has no built-in
+  /// equivalent in flutter_map, so it's a custom Flutter overlay positioned
+  /// via the camera's own projection math.
+  void showCallout(
+      {required double lat,
+      required double lng,
+      required String title,
+      String? subtitle});
+
+  /// Hides the current callout, if any. No-op if none is showing.
+  void hideCallout();
 }
