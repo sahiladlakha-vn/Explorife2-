@@ -19,8 +19,6 @@ const _kGreen = Color(0xFF3C9A5F);
 // the light profile surface (the header's 0xFFFF6B6B is dark-surface-only).
 const _kCritical = Color(0xFFD32F2F);
 const _kWarn = Color(0xFFB8860B);
-const _headerTop = Color(0xFF1A1008);
-const _headerBottom = Color(0xFF0F0A05);
 
 const _months = [
   'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',

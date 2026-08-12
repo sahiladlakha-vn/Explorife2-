@@ -6,6 +6,8 @@ import 'package:cached_network_image/cached_network_image.dart';
 import '../../core/theme/app_theme.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/booking_provider.dart';
+import '../../providers/trip_setup_provider.dart';
+import '../../providers/splits_provider.dart';
 
 // ─────────────────────────────────────────
 // SIDE DRAWER (slides in from the left)
@@ -44,6 +46,8 @@ class SideDrawer extends StatelessWidget {
             onPressed: () {
               Navigator.pop(dialogCtx);
               context.read<BookingProvider>().clear();
+              context.read<TripSetupProvider>().clear();
+              context.read<SplitsProvider>().clear();
               context.read<AuthProvider>().signOut();
               context.go('/home');
             },
@@ -216,6 +220,12 @@ class SideDrawer extends StatelessWidget {
                   const SizedBox(height: 26),
                   _sectionLabel('MY ACCOUNT'),
                   const SizedBox(height: 8),
+                  _AccountTile(
+                    icon: Icons.luggage_outlined,
+                    title: 'My Trips',
+                    subtitle: 'All your trips, past & upcoming',
+                    onTap: () => _go(context, '/trips'),
+                  ),
                   _AccountTile(
                     icon: Icons.bookmark_border,
                     title: 'Saved Gems',

@@ -30,145 +30,102 @@ class _Header extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       decoration: const BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [_headerTop, _headerBottom],
-        ),
+        color: AppTheme.lightSurface,
+        border: Border(bottom: BorderSide(color: AppTheme.lightBorder)),
       ),
       child: SafeArea(
         bottom: false,
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 18),
+          padding: const EdgeInsets.fromLTRB(16, 10, 12, 14),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Menu button
-              GestureDetector(
-                onTap: onMenu,
-                child: Container(
-                  width: 50,
-                  height: 50,
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(14),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.25),
-                        blurRadius: 10,
-                        offset: const Offset(0, 4),
-                      ),
-                    ],
-                  ),
-                  child: const Icon(Icons.menu, color: Color(0xFF1A1A1A)),
-                ),
-              ),
-              const SizedBox(height: 12),
               Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  _Avatar(user: user),
-                  const SizedBox(width: 16),
-                  Expanded(
-                    child: Padding(
-                      padding: const EdgeInsets.only(top: 6),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              Flexible(
-                                child: Text(
-                                  user.name,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: GoogleFonts.bebasNeue(
-                                    fontSize: 32,
-                                    color: Colors.white,
-                                    letterSpacing: 0.5,
-                                    height: 1,
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(width: 8),
-                              Icon(Icons.edit_outlined,
-                                  size: 18,
-                                  color: Colors.white.withValues(alpha: 0.7)),
-                            ],
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            _handle,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: GoogleFonts.jetBrainsMono(
-                              fontSize: 13,
-                              color: Colors.white.withValues(alpha: 0.6),
-                            ),
-                          ),
-                          if (memberSince != null) ...[
-                            const SizedBox(height: 2),
-                            Text(
-                              memberSince!,
-                              style: GoogleFonts.jetBrainsMono(
-                                fontSize: 12,
-                                color: Colors.white.withValues(alpha: 0.45),
-                              ),
-                            ),
-                          ],
-                        ],
-                      ),
+                  GestureDetector(
+                    onTap: onMenu,
+                    child: SizedBox(
+                      width: 34,
+                      height: 34,
+                      child: Icon(Icons.menu,
+                          color: AppTheme.lightInk.withValues(alpha: 0.9)),
                     ),
                   ),
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    children: [
-                      GestureDetector(
-                        onTap: onSettings,
-                        child: Container(
-                          width: 42,
-                          height: 42,
-                          decoration: BoxDecoration(
-                            color: Colors.white.withValues(alpha: 0.08),
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(
-                                color: Colors.white.withValues(alpha: 0.15)),
-                          ),
-                          child: Icon(Icons.settings_outlined,
-                              size: 20, color: Colors.white.withValues(alpha: 0.8)),
-                        ),
-                      ),
-                      const SizedBox(height: 10),
-                      GestureDetector(
-                        onTap: onSignOut,
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 14, vertical: 9),
-                          decoration: BoxDecoration(
-                            color: Colors.red.withValues(alpha: 0.12),
-                            borderRadius: BorderRadius.circular(12),
-                            border:
-                                Border.all(color: Colors.red.withValues(alpha: 0.4)),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              const Icon(Icons.logout,
-                                  size: 15, color: Color(0xFFFF6B6B)),
-                              const SizedBox(width: 6),
-                              Text(
-                                'Out',
-                                style: GoogleFonts.dmSans(
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w700,
-                                  color: const Color(0xFFFF6B6B),
+                  const Spacer(),
+                  GestureDetector(
+                    onTap: onSettings,
+                    child: SizedBox(
+                      width: 34,
+                      height: 34,
+                      child: Icon(Icons.settings_outlined,
+                          size: 20,
+                          color: AppTheme.lightInk.withValues(alpha: 0.8)),
+                    ),
+                  ),
+                  GestureDetector(
+                    onTap: onSignOut,
+                    child: const SizedBox(
+                      width: 34,
+                      height: 34,
+                      child: Icon(Icons.logout,
+                          size: 19, color: Color(0xFFFF6B6B)),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  _Avatar(user: user),
+                  const SizedBox(width: 13),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Flexible(
+                              child: Text(
+                                user.name,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: GoogleFonts.bebasNeue(
+                                  fontSize: 22,
+                                  color: AppTheme.lightInk,
+                                  letterSpacing: 0.3,
+                                  height: 1,
                                 ),
                               ),
-                            ],
+                            ),
+                            const SizedBox(width: 7),
+                            Icon(Icons.edit_outlined,
+                                size: 14,
+                                color: AppTheme.lightInk.withValues(alpha: 0.55)),
+                          ],
+                        ),
+                        const SizedBox(height: 3),
+                        Text(
+                          _handle,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: GoogleFonts.jetBrainsMono(
+                            fontSize: 12,
+                            color: AppTheme.lightInk.withValues(alpha: 0.55),
                           ),
                         ),
-                      ),
-                    ],
+                        if (memberSince != null) ...[
+                          const SizedBox(height: 5),
+                          Text(
+                            memberSince!,
+                            style: GoogleFonts.jetBrainsMono(
+                              fontSize: 10.5,
+                              color: AppTheme.lightInk.withValues(alpha: 0.4),
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
                   ),
                 ],
               ),
@@ -187,16 +144,16 @@ class _Avatar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      width: 96,
-      height: 96,
+      width: 58,
+      height: 58,
       child: Stack(
         children: [
           Container(
-            width: 96,
-            height: 96,
+            width: 58,
+            height: 58,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              border: Border.all(color: const Color(0xFF6B4A2F), width: 3),
+              border: Border.all(color: const Color(0xFF6B4A2F), width: 2),
             ),
             clipBehavior: Clip.antiAlias,
             child: user.avatarUrl != null
@@ -209,21 +166,21 @@ class _Avatar extends StatelessWidget {
                             ? user.name[0].toUpperCase()
                             : 'E',
                         style: GoogleFonts.bebasNeue(
-                            fontSize: 40, color: AppTheme.primary),
+                            fontSize: 24, color: AppTheme.primary),
                       ),
                     ),
                   ),
           ),
           Positioned(
-            right: 4,
-            bottom: 4,
+            right: 1,
+            bottom: 1,
             child: Container(
-              width: 18,
-              height: 18,
+              width: 13,
+              height: 13,
               decoration: BoxDecoration(
                 color: const Color(0xFF2ECC71),
                 shape: BoxShape.circle,
-                border: Border.all(color: _headerBottom, width: 3),
+                border: Border.all(color: AppTheme.lightSurface, width: 2.5),
               ),
             ),
           ),
@@ -258,14 +215,14 @@ class _StatsBar extends StatelessWidget {
       color: _kStripe,
       child: Row(
         children: [
-          _cell('$gems', 'SAVED', AppTheme.primary),
-          _divider(),
           _cell('$trips', 'TRIPS', _kInk),
           _divider(),
-          _cell(alerts == null ? '–' : '$alerts', 'ALERTS', _kInk),
+          _cell('$gems', 'SAVED', AppTheme.primary),
           _divider(),
           _cell(loading ? '··' : '\$${spent.toStringAsFixed(0)}', 'SPLIT SPEND',
               _kTeal),
+          _divider(),
+          _cell(alerts == null ? '–' : '$alerts', 'ALERTS', _kInk),
         ],
       ),
     );
@@ -297,7 +254,7 @@ class _StatsBar extends StatelessWidget {
 // TAB BAR
 // ─────────────────────────────────────────
 class _TabBar extends StatelessWidget {
-  final List<(IconData, String)> tabs;
+  final List<String> tabs;
   final int active;
   final ValueChanged<int> onSelect;
   const _TabBar(
@@ -307,44 +264,36 @@ class _TabBar extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       decoration: const BoxDecoration(
-        color: Colors.white,
+        color: _kStripe,
         border: Border(bottom: BorderSide(color: _kBorder)),
       ),
+      padding: const EdgeInsets.symmetric(vertical: 11),
       child: SingleChildScrollView(
         scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 16),
         child: Row(
           children: tabs.asMap().entries.map((e) {
             final i = e.key;
             final isActive = i == active;
-            final color = isActive ? AppTheme.primary : _kMute;
             return GestureDetector(
               onTap: () => onSelect(i),
               behavior: HitTestBehavior.opaque,
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+                margin: const EdgeInsets.only(right: 8),
+                padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 9),
                 decoration: BoxDecoration(
-                  border: Border(
-                    bottom: BorderSide(
-                      color: isActive ? AppTheme.primary : Colors.transparent,
-                      width: 2.5,
-                    ),
-                  ),
+                  color: isActive ? AppTheme.primary : Colors.white,
+                  borderRadius: BorderRadius.circular(999),
+                  border: Border.all(
+                      color: isActive ? AppTheme.primary : _kBorder),
                 ),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(e.value.$1, size: 20, color: color),
-                    const SizedBox(height: 5),
-                    Text(
-                      e.value.$2,
-                      style: GoogleFonts.jetBrainsMono(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w700,
-                        color: color,
-                        letterSpacing: 0.5,
-                      ),
-                    ),
-                  ],
+                child: Text(
+                  e.value,
+                  style: GoogleFonts.dmSans(
+                    fontSize: 13,
+                    fontWeight: isActive ? FontWeight.w700 : FontWeight.w500,
+                    color: isActive ? Colors.white : _kMute,
+                  ),
                 ),
               ),
             );

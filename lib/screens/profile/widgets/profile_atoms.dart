@@ -130,66 +130,6 @@ class _StoryRow extends StatelessWidget {
   }
 }
 
-class _GemRow extends StatelessWidget {
-  final Gem gem;
-  final bool divider;
-  const _GemRow({required this.gem, required this.divider});
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: () => context.go('/gems/${gem.id}'),
-      behavior: HitTestBehavior.opaque,
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 14),
-        decoration: BoxDecoration(
-          border: divider
-              ? const Border(top: BorderSide(color: _kBorder))
-              : null,
-        ),
-        child: Row(
-          children: [
-            Container(
-              width: 38,
-              height: 38,
-              decoration: BoxDecoration(
-                color: AppTheme.primary.withValues(alpha: 0.12),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: const Icon(Icons.place,
-                  size: 20, color: AppTheme.primary),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    gem.gemName,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: GoogleFonts.dmSans(
-                        fontSize: 16, fontWeight: FontWeight.w800, color: _kInk),
-                  ),
-                  const SizedBox(height: 3),
-                  Text(
-                    (gem.gemLocation ?? gem.displayCategory).toUpperCase(),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: GoogleFonts.jetBrainsMono(
-                        fontSize: 11, color: _kMute, letterSpacing: 0.5),
-                  ),
-                ],
-              ),
-            ),
-            const Icon(Icons.chevron_right, size: 20, color: _kMute),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
 class _EmptyState extends StatelessWidget {
   final IconData icon;
   final String title;

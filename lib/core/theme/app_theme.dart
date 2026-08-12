@@ -41,6 +41,18 @@ class AppTheme {
   static const Color sheetChipBorder = Color(0xFFE2E2E2);
   static const Color sheetHandle = Color(0xFFD9D9D9);
 
+  // Warm light palette — the unified theme for the whole trip-planner journey
+  // (Profile, My Trip, trip creation/edit, Trip Builder, bottom nav). Single
+  // source of truth: previously duplicated as Profile's private `_k*` consts
+  // and trip_setup's `kSetup*` consts; both now point here. Distinct from the
+  // `sheet*` tokens above (a cooler neutral gray built for the map's discovery
+  // sheet, unrelated purpose) — don't conflate the two palettes.
+  static const Color lightSurface = Color(0xFFFFFFFF);
+  static const Color lightCard = Color(0xFFF5F3EF);
+  static const Color lightBorder = Color(0xFFE7E2D9);
+  static const Color lightInk = Color(0xFF1A1A1A);
+  static const Color lightMute = Color(0xFF8A8A8A);
+
   static TextTheme get _textTheme => GoogleFonts.dmSansTextTheme(
         const TextTheme(
           displayLarge: TextStyle(color: textPrimary),

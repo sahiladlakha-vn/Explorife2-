@@ -46,6 +46,9 @@ class _AppShellState extends State<AppShell> {
     if (location.startsWith('/stories'))  return 2;
     if (location.startsWith('/listings')) return 3;
     if (location.startsWith('/profile'))  return 4;
+    // Trip Builder isn't one of the 5 primary tabs (reached from Profile) —
+    // no pill should light up while it's open.
+    if (location.startsWith('/trips'))    return -1;
     return 0;
   }
 

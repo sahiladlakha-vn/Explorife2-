@@ -44,8 +44,8 @@ class BottomNav extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       decoration: const BoxDecoration(
-        color: AppTheme.bg,
-        border: Border(top: BorderSide(color: AppTheme.divider)),
+        color: AppTheme.lightSurface,
+        border: Border(top: BorderSide(color: AppTheme.lightBorder)),
       ),
       child: SafeArea(
         top: false,
@@ -89,7 +89,7 @@ class NavItem extends StatelessWidget {
         ? AppTheme.primary.withValues(alpha: AppTheme.navPillOpacity)
         : Colors.transparent;
     final iconColor =
-        isSelected ? AppTheme.primary : AppTheme.textSecondary;
+        isSelected ? AppTheme.primary : AppTheme.lightMute;
     final padH = isSelected
         ? _NavMetrics.pillPadSelected
         : _NavMetrics.pillPadRest;
