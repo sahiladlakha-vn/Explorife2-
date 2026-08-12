@@ -7,6 +7,7 @@ import '../../models/trip_blueprint.dart';
 /// Presentational: mutates [draft].templateChoice / .blueprintId and calls
 /// [onChanged]. Blueprints + loading flag are passed down (parent reads the
 /// provider); the empty state is gated behind [isLoading] to survive cold start.
+/// Light colorway, matching Profile.
 class StepTwoTemplate extends StatelessWidget {
   const StepTwoTemplate({
     super.key,
@@ -83,8 +84,7 @@ class StepTwoTemplate extends StatelessWidget {
                 child: Text(
                   'No community blueprints for ${draft.location ?? 'this place'} yet.',
                   textAlign: TextAlign.center,
-                  style: const TextStyle(
-                      color: AppTheme.textSecondary, fontSize: 13),
+                  style: const TextStyle(color: AppTheme.lightMute, fontSize: 13),
                 ),
               ),
             )
@@ -131,18 +131,17 @@ class _ChoiceCard extends StatelessWidget {
           duration: const Duration(milliseconds: 150),
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
-            color: selected ? AppTheme.primarySoft : AppTheme.surface2,
+            color: selected ? AppTheme.primarySoft : AppTheme.lightCard,
             borderRadius: BorderRadius.circular(16),
             border: Border.all(
-              color: selected ? AppTheme.primary : AppTheme.divider,
+              color: selected ? AppTheme.primary : AppTheme.lightBorder,
               width: selected ? 1.5 : 1,
             ),
           ),
           child: Row(
             children: [
               Icon(icon,
-                  color: selected ? AppTheme.primary : AppTheme.textSecondary,
-                  size: 24),
+                  color: selected ? AppTheme.primary : AppTheme.lightMute, size: 24),
               const SizedBox(width: 14),
               Expanded(
                 child: Column(
@@ -150,15 +149,13 @@ class _ChoiceCard extends StatelessWidget {
                   children: [
                     Text(title,
                         style: const TextStyle(
-                            color: AppTheme.textPrimary,
+                            color: AppTheme.lightInk,
                             fontSize: 15,
                             fontWeight: FontWeight.w700)),
                     const SizedBox(height: 2),
                     Text(subtitle,
                         style: const TextStyle(
-                            color: AppTheme.textSecondary,
-                            fontSize: 12,
-                            height: 1.3)),
+                            color: AppTheme.lightMute, fontSize: 12, height: 1.3)),
                   ],
                 ),
               ),
@@ -195,10 +192,10 @@ class _BlueprintRow extends StatelessWidget {
           duration: const Duration(milliseconds: 150),
           padding: const EdgeInsets.all(14),
           decoration: BoxDecoration(
-            color: selected ? AppTheme.primarySoft : AppTheme.surface2,
+            color: selected ? AppTheme.primarySoft : AppTheme.lightCard,
             borderRadius: BorderRadius.circular(14),
             border: Border.all(
-              color: selected ? AppTheme.primary : AppTheme.divider,
+              color: selected ? AppTheme.primary : AppTheme.lightBorder,
               width: selected ? 1.5 : 1,
             ),
           ),
@@ -210,15 +207,14 @@ class _BlueprintRow extends StatelessWidget {
                   children: [
                     Text(blueprint.title,
                         style: const TextStyle(
-                            color: AppTheme.textPrimary,
+                            color: AppTheme.lightInk,
                             fontSize: 14,
                             fontWeight: FontWeight.w700)),
                     const SizedBox(height: 3),
                     Text(
                       blueprint.meta ??
                           '${blueprint.nights} days · ${blueprint.itemCount} stops',
-                      style: const TextStyle(
-                          color: AppTheme.textSecondary, fontSize: 12),
+                      style: const TextStyle(color: AppTheme.lightMute, fontSize: 12),
                     ),
                   ],
                 ),

@@ -106,6 +106,102 @@ class GeocodingService {
     }
   }
 
+  /// Mapbox Static Images API URL for a small non-interactive map thumbnail
+  /// (e.g. the Overview tab's trip hero card) — a plain image URL, not a
+  /// live map widget, so it's cacheable through the same AppNetworkImage/
+  /// cached_network_image path every other network image in the app already
+  /// uses. Distinct from [search]/[reverse]: this doesn't hit the network
+  /// itself, it just builds the URL a caller hands to an image widget. Style
+  /// matches the Explore map's default (`outdoors-v12`, see
+  /// explore_screen.dart's `_MapStyle.outdoors`) for visual consistency.
+  /// Returns null when no token is configured, so callers can fall back to
+  /// a placeholder rather than requesting a URL that will 401.
+  ///
+  /// [overlay] is a pre-built Mapbox overlay path segment (see
+  /// [buildStaticMapOverlay]) — omit for a plain destination map. [autoFit]
+  /// switches the position segment to `auto`, letting Mapbox frame the
+  /// viewport to the overlay's markers/path instead of the explicit
+  /// [lat]/[lng]/[zoom] — only meaningful when [overlay] is non-empty; there's
+  /// nothing to fit to otherwise, so callers should leave it false when there
+  /// are no stops to plot.
+  static String? staticImageUrl({
+    required double lat,
+    required double lng,
+    int zoom = 11,
+    int width = 800,
+    int height = 400,
+    String styleId = 'outdoors-v12',
+    String? overlay,
+    bool autoFit = false,
+  }) {
+    final token = dotenv.env['MAPBOX_TOKEN'] ?? '';
+    if (token.isEmpty) return null;
+    final overlaySegment = (overlay != null && overlay.isNotEmpty) ? '$overlay/' : '';
+    final position = autoFit ? 'auto' : '$lng,$lat,$zoom';
+    return 'https://api.mapbox.com/styles/v1/mapbox/$styleId/static/'
+        '$overlaySegment$position/${width}x$height@2x?access_token=$token';
+  }
+
+  /// Builds the `{overlay}` segment [staticImageUrl] inserts before the
+  /// position — comma-separated pin + path objects, per Mapbox's documented
+  /// static-images overlay syntax. Pure string building, no network call.
+  ///
+  /// [pins]' `label` must be an integer 0–99 or a lowercase a–z (Mapbox's
+  /// documented pin-label alphabet) — callers own picking a valid label,
+  /// e.g. the Overview map card's day.stopIndex labels. Each pin and route
+  /// carries its own `color` (6-digit hex, no '#' — see [hexFromArgb]) so a
+  /// multi-day trip renders one distinct color per day; a single-day trip
+  /// just passes the same color for everything. A route with fewer than 2
+  /// points draws nothing, since a line needs at least two ends. The static
+  /// API has no equivalent of the interactive map's direction arrows or day
+  /// chips — this is the deliberately simplified thumbnail rendering.
+  static String buildStaticMapOverlay({
+    required List<({double lat, double lng, String label, String color})> pins,
+    List<({List<({double lat, double lng})> points, String color})> routes = const [],
+  }) {
+    final parts = <String>[
+      for (final p in pins) 'pin-s-${p.label}+${p.color}(${p.lng},${p.lat})',
+      for (final r in routes)
+        if (r.points.length >= 2)
+          'path-3+${r.color}-0.85(${Uri.encodeComponent(_encodePolyline(r.points))})',
+    ];
+    return parts.join(',');
+  }
+
+  /// Converts an ARGB int (e.g. from lib/core/logic/trip_route.dart's
+  /// tripDayColors) to the 6-digit, no-'#' hex string Mapbox's overlay
+  /// syntax expects.
+  static String hexFromArgb(int argb) =>
+      (argb & 0xFFFFFF).toRadixString(16).padLeft(6, '0');
+
+  /// Google Encoded Polyline Algorithm Format, precision 5 — the format
+  /// Mapbox's `path-` overlay expects. No existing package in this repo did
+  /// this; it's a well-known, short, pure algorithm, not worth a dependency
+  /// for ~20 lines. https://developers.google.com/maps/documentation/utilities/polylinealgorithm
+  static String _encodePolyline(List<({double lat, double lng})> points) {
+    final buffer = StringBuffer();
+    var prevLat = 0, prevLng = 0;
+    for (final p in points) {
+      final lat = (p.lat * 1e5).round();
+      final lng = (p.lng * 1e5).round();
+      _encodeSignedNumber(lat - prevLat, buffer);
+      _encodeSignedNumber(lng - prevLng, buffer);
+      prevLat = lat;
+      prevLng = lng;
+    }
+    return buffer.toString();
+  }
+
+  static void _encodeSignedNumber(int num, StringBuffer buffer) {
+    var sgnNum = num << 1;
+    if (num < 0) sgnNum = ~sgnNum;
+    while (sgnNum >= 0x20) {
+      buffer.writeCharCode((0x20 | (sgnNum & 0x1f)) + 63);
+      sgnNum >>= 5;
+    }
+    buffer.writeCharCode(sgnNum + 63);
+  }
+
   /// Reverse-geocode a coordinate to its enclosing place. Returns null when
   /// unconfigured, no match exists, or the request fails.
   Future<GeoPlace?> reverse(

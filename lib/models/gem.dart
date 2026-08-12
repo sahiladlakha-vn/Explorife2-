@@ -10,6 +10,13 @@ class Gem {
   final String? photoUrl;
   final String? difficulty;
   final String? bestTimeToVisit;
+
+  /// Estimated visit duration in minutes, for the Itinerary's spot meta line
+  /// and day-summary planned-time rollup. Null means unknown/uncatalogued —
+  /// excluded from time sums, never treated as zero. Backs
+  /// `saved_gems.est_duration_min` (migration 20260806000600).
+  final int? estDurationMin;
+
   final DateTime savedAt;
   final String? userId;
 
@@ -30,6 +37,7 @@ class Gem {
     this.photoUrl,
     this.difficulty,
     this.bestTimeToVisit,
+    this.estDurationMin,
     required this.savedAt,
     this.userId,
     this.dropperHandle,
@@ -69,6 +77,7 @@ class Gem {
       photoUrl: json['photo_url'] as String?,
       difficulty: json['difficulty'] as String?,
       bestTimeToVisit: json['best_time_to_visit'] as String?,
+      estDurationMin: (json['est_duration_min'] as num?)?.toInt(),
       savedAt: DateTime.tryParse(json['saved_at'] as String? ?? '') ?? DateTime.now(),
       userId: json['user_id'] as String?,
       dropperHandle: dropperHandle,
@@ -90,6 +99,7 @@ class Gem {
         'photo_url': photoUrl,
         'difficulty': difficulty,
         'best_time_to_visit': bestTimeToVisit,
+        'est_duration_min': estDurationMin,
         'user_id': userId,
       };
 

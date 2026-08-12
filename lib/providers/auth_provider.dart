@@ -8,6 +8,7 @@ class AuthUser {
   final String? email;
   final String? avatarUrl;
   final String? provider;
+  final String? username;
 
   const AuthUser({
     required this.id,
@@ -15,6 +16,24 @@ class AuthUser {
     this.email,
     this.avatarUrl,
     this.provider,
+    this.username,
+  });
+}
+
+/// Another user's public identity, as resolved by [AuthProvider.findUserByIdentifier].
+/// Distinct from [AuthUser] (the signed-in account) — this is read-only, never
+/// the current session's own state.
+class PublicProfile {
+  final String id;
+  final String displayName;
+  final String? avatarUrl;
+  final String? username;
+
+  const PublicProfile({
+    required this.id,
+    required this.displayName,
+    this.avatarUrl,
+    this.username,
   });
 }
 
@@ -74,7 +93,7 @@ class AuthProvider extends ChangeNotifier {
   Future<AuthUser> _loadProfile(User authUser) async {
     final data = await _supabase
         .from('profiles')
-        .select('display_name, avatar_url')
+        .select('display_name, avatar_url, username')
         .eq('id', authUser.id)
         .maybeSingle();
 
@@ -92,6 +111,7 @@ class AuthProvider extends ChangeNotifier {
           (meta['avatar_url'] as String?) ??
           (meta['picture'] as String?),
       provider: authUser.appMetadata['provider'] as String?,
+      username: data?['username'] as String?,
     );
   }
 
@@ -141,8 +161,53 @@ class AuthProvider extends ChangeNotifier {
       email: _user!.email,
       avatarUrl: _user!.avatarUrl,
       provider: _user!.provider,
+      username: _user!.username,
     );
     notifyListeners();
+  }
+
+  /// Throws [PostgrestException] on a taken/invalid username (unique index /
+  /// format CHECK on profiles.username) — callers should catch and surface a
+  /// friendly message rather than letting it bubble as a generic error.
+  Future<void> updateUsername(String username) async {
+    if (_user == null) return;
+    final normalized = username.trim().toLowerCase();
+    await _supabase
+        .from('profiles')
+        .update({'username': normalized})
+        .eq('id', _user!.id);
+    _user = AuthUser(
+      id: _user!.id,
+      name: _user!.name,
+      email: _user!.email,
+      avatarUrl: _user!.avatarUrl,
+      provider: _user!.provider,
+      username: normalized,
+    );
+    notifyListeners();
+  }
+
+  /// Resolves an email or username to the account it belongs to, via the
+  /// find_user_by_identifier RPC (security definer — clients can't otherwise
+  /// read auth.users for the email side). Exact match only; null when nothing
+  /// matches. Backs the traveler-invite search (trip-setup wizard + Trip
+  /// tab's "+ Add Traveler").
+  Future<PublicProfile?> findUserByIdentifier(String identifier) async {
+    final trimmed = identifier.trim();
+    if (trimmed.isEmpty) return null;
+    final rows = await _supabase
+        .rpc('find_user_by_identifier', params: {'p_identifier': trimmed}) as List;
+    if (rows.isEmpty) return null;
+    final row = rows.first as Map<String, dynamic>;
+    final displayName = row['display_name'] as String?;
+    return PublicProfile(
+      id: row['id'] as String,
+      displayName: (displayName == null || displayName.trim().isEmpty)
+          ? 'Explorer'
+          : displayName,
+      avatarUrl: row['avatar_url'] as String?,
+      username: row['username'] as String?,
+    );
   }
 
   @override

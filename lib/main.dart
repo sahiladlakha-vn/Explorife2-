@@ -14,6 +14,7 @@ import 'providers/story_provider.dart';
 import 'providers/hike_provider.dart';
 import 'providers/splits_provider.dart';
 import 'providers/trip_provider.dart';
+import 'providers/trip_setup_provider.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -60,6 +61,11 @@ class _ExplorIfeAppState extends State<ExplorIfeApp> {
         ChangeNotifierProvider(
           create: (_) => BookingProvider(supabase: Supabase.instance.client),
         ),
+        // Same shape as BookingProvider, same reasoning: trip_documents /
+        // trip_packing_items RLS scopes reads by trip_id, no userId needed here.
+        ChangeNotifierProvider(
+          create: (_) => TripSetupProvider(supabase: Supabase.instance.client),
+        ),
         // TripProvider depends on two others: the signed-in user's id (Auth) and
         // a gem-category lookup (Gem) for budget bucketing. A proxy provider
         // wires those in. Its category callback closes over the *live* GemProvider
@@ -79,7 +85,7 @@ class _ExplorIfeAppState extends State<ExplorIfeApp> {
             // (empty) and 400. Rebuilding on change makes sign-in (and sign-out,
             // and account switching) reinitialise cleanly with the right owner.
             if (previous != null && previous.userId == uid) return previous;
-            return TripProvider(
+            final provider = TripProvider(
               supabase: Supabase.instance.client,
               userId: uid,
               gemCategoryLookup: (id) => gems.allGems
@@ -87,6 +93,15 @@ class _ExplorIfeAppState extends State<ExplorIfeApp> {
                   .firstWhere((g) => g?.id == id, orElse: () => null)
                   ?.category,
             );
+            // Kick the load off right here, the moment a real uid appears —
+            // don't rely on some downstream screen's one-shot mount hook to
+            // catch it. ProfileScreen's own `trips.init()` call (guarded by
+            // isEmpty/isLoading) becomes a no-op no-time-lost fallback rather
+            // than the sole trigger, closing the race where auth resolves
+            // after that screen's first frame has already fired its
+            // now-too-early init() against the previous, empty-userId instance.
+            if (uid.isNotEmpty) provider.init();
+            return provider;
           },
         ),
       ],

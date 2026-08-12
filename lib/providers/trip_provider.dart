@@ -11,6 +11,12 @@ import '../models/trip_vibe.dart';
 /// Slot ordering for itinerary reads. Module-level const, used by stopsForDay.
 const Map<String, int> _slotOrder = {'morning': 0, 'afternoon': 1, 'evening': 2};
 
+/// Sentinel for optional-clearable mutator params (distinguishes "not
+/// provided" from "set to null") — same convention as `TripStop.copyWith`'s
+/// own sentinel, but that one is private to the model class, so this is a
+/// separate module-level instance for provider-level mutators.
+const Object _unset = Object();
+
 /// Owns trips, their stops, and the blueprint catalogue. Pure reads recompute
 /// on each call (the lists are tiny; cache invalidation is the bigger risk).
 /// Mutators are optimistic with rollback, except [createTrip]/[seedFromBlueprint]
@@ -106,11 +112,23 @@ class TripProvider extends ChangeNotifier {
     return list;
   }
 
+  // MONEY RULE: priceVnd null (TBD) is excluded, same as adding 0 to a
+  // running total — never coalesced elsewhere, only here at the point of sum.
   int dayTotal(String tripId, int day) =>
-      stopsForDay(tripId, day).fold(0, (sum, s) => sum + s.priceVnd);
+      stopsForDay(tripId, day).fold(0, (sum, s) => sum + (s.priceVnd ?? 0));
+
+  /// Every stop across the whole trip, in true chronological order (day
+  /// ascending, then [stopsForDay]'s slot/sortOrder within each day) —
+  /// the "stop 1, 2, 3..." sequence the Overview map card numbers pins by.
+  /// Needs [dayCount] from the caller (Trip.nights + 1) since TripProvider
+  /// only stores stops, not the trip's own date span.
+  List<TripStop> allStopsOrdered(String tripId, int dayCount) => [
+        for (var day = 1; day <= dayCount; day++) ...stopsForDay(tripId, day),
+      ];
 
   int totalSpent(String tripId) =>
-      (_stopsByTrip[tripId] ?? const <TripStop>[]).fold(0, (sum, s) => sum + s.priceVnd);
+      (_stopsByTrip[tripId] ?? const <TripStop>[])
+          .fold(0, (sum, s) => sum + (s.priceVnd ?? 0));
 
   /// Spend per budget bucket. Always returns all four keys (zero-filled) so the
   /// chart can render a stable set of bars.
@@ -123,7 +141,7 @@ class TripProvider extends ChangeNotifier {
     };
     for (final s in _stopsByTrip[tripId] ?? const <TripStop>[]) {
       final bucket = _categoryFor(s);
-      totals[bucket] = (totals[bucket] ?? 0) + s.priceVnd;
+      totals[bucket] = (totals[bucket] ?? 0) + (s.priceVnd ?? 0);
     }
     return totals;
   }
@@ -286,6 +304,8 @@ class TripProvider extends ChangeNotifier {
           // .displayName supplies the "<location> escape" fallback in the UI.
           'name': '',
           'location': draft.location ?? '',
+          'location_lat': draft.locationLat,
+          'location_lng': draft.locationLng,
           'start_date':
               (draft.dateStart ?? DateTime.now()).toIso8601String().substring(0, 10),
           'end_date':
@@ -302,6 +322,44 @@ class TripProvider extends ChangeNotifier {
     final trip = Trip.fromJson(row);
     _trips[trip.id] = trip;
     _stopsByTrip[trip.id] = [];
+
+    // Gives the owner a real trip_collaborators row (permission='edit',
+    // status='confirmed') alongside the trip itself, so "assignee"/"document
+    // owner" pickers elsewhere (Trip segment) can reference the owner the
+    // same way they reference any other traveler — see the backfill
+    // migration (20260806000400) for the historical-data half of this and
+    // why it's purely additive, never a security change. Non-fatal for the
+    // same reason as the checklist/budget seeds below: the trip is already
+    // committed, and this is best-effort convenience, not correctness the
+    // trip depends on.
+    try {
+      await _supabase.from('trip_collaborators').insert({
+        'trip_id': trip.id,
+        'user_id': _currentUserId,
+        'permission': 'edit',
+        'status': 'confirmed',
+      });
+    } catch (e) {
+      _lastError = 'Trip created, owner collaborator row failed: $e';
+    }
+
+    // Travelers picked in the wizard's "Who's coming?" step (Step 2 of 3) —
+    // same non-fatal reasoning as the owner row above: the trip already
+    // exists, so one traveler's insert failing shouldn't undo trip creation
+    // or block the rest from being added. permission='edit' matches the
+    // owner's own row rather than defaulting collaborators to view-only.
+    for (final traveler in draft.pendingTravelers) {
+      try {
+        await _supabase.from('trip_collaborators').insert({
+          'trip_id': trip.id,
+          'user_id': traveler.userId,
+          'permission': 'edit',
+          'status': 'confirmed',
+        });
+      } catch (e) {
+        _lastError = 'Trip created, traveler "${traveler.displayName}" failed: $e';
+      }
+    }
 
     if (draft.templateChoice == 'blueprint' && draft.blueprintId != null) {
       await seedFromBlueprint(trip.id, draft.blueprintId!);
@@ -328,6 +386,161 @@ class TripProvider extends ChangeNotifier {
 
     notifyListeners();
     return trip;
+  }
+
+  /// Edits an existing trip's essentials (location/dates/budget/vibe).
+  /// Optimistic with rollback, like the stop/checklist mutators — unlike
+  /// createTrip there's real prior state here to roll back to on failure.
+  Future<void> updateTrip(
+    String tripId, {
+    required String location,
+    double? locationLat,
+    double? locationLng,
+    required DateTime startDate,
+    required DateTime endDate,
+    required int budgetVnd,
+    required TripVibe? vibe,
+  }) async {
+    final old = _trips[tripId];
+    if (old == null) return;
+    // Built directly rather than via copyWith: location and its coordinates
+    // change as one unit here, and null is a legitimate new value for
+    // locationLat/Lng (the user retyped the field without picking a fresh
+    // suggestion) — copyWith's `param ?? this.field` convention can't express
+    // "clear this", only "leave unchanged".
+    _trips[tripId] = Trip(
+      id: old.id,
+      ownerId: old.ownerId,
+      name: old.name,
+      location: location,
+      locationLat: locationLat,
+      locationLng: locationLng,
+      startDate: startDate,
+      endDate: endDate,
+      budgetVnd: budgetVnd,
+      currency: old.currency,
+      vibe: vibe,
+      templateId: old.templateId,
+      createdAt: old.createdAt,
+    );
+    notifyListeners();
+
+    try {
+      await _supabase.from('trips').update({
+        'location': location,
+        'location_lat': locationLat,
+        'location_lng': locationLng,
+        'start_date': startDate.toIso8601String().substring(0, 10),
+        'end_date': endDate.toIso8601String().substring(0, 10),
+        'budget_vnd': budgetVnd,
+        'vibe': vibe?.key,
+      }).eq('id', tripId);
+    } catch (e) {
+      _trips[tripId] = old; // rollback
+      _lastError = e.toString();
+      notifyListeners();
+      rethrow;
+    }
+  }
+
+  /// Extends the trip by one day (pushes `end_date` out by a day) — the new
+  /// day starts empty. Reuses [updateTrip] rather than a bespoke PATCH.
+  Future<void> addDay(String tripId) async {
+    final trip = _trips[tripId];
+    if (trip == null) return;
+    await updateTrip(
+      tripId,
+      location: trip.location,
+      startDate: trip.startDate,
+      endDate: trip.endDate.add(const Duration(days: 1)),
+      budgetVnd: trip.budgetVnd,
+      vibe: trip.vibe,
+    );
+  }
+
+  /// Deletes every stop on [day], shifts every later day's stops back by one
+  /// so day numbering stays contiguous, and shrinks `end_date` by a day to
+  /// match the new (smaller) day count. No-ops on a single-day trip — there's
+  /// nothing to shrink down to. Optimistic with rollback of both the stop
+  /// cache and the trip's dates.
+  Future<void> deleteDay(String tripId, int day) async {
+    final trip = _trips[tripId];
+    if (trip == null) return;
+    if (trip.nights + 1 <= 1) return;
+
+    final stops = _stopsByTrip[tripId] ?? const <TripStop>[];
+    final oldStops = List<TripStop>.from(stops);
+    final toDelete = <String>[];
+    final toShift = <TripStop>[];
+    final newList = <TripStop>[];
+    for (final s in stops) {
+      if (s.day == day) {
+        toDelete.add(s.id);
+      } else if (s.day > day) {
+        final moved = s.copyWith(day: s.day - 1);
+        toShift.add(moved);
+        newList.add(moved);
+      } else {
+        newList.add(s);
+      }
+    }
+    final newEndDate = trip.endDate.subtract(const Duration(days: 1));
+
+    _stopsByTrip[tripId] = newList;
+    _trips[tripId] = trip.copyWith(endDate: newEndDate);
+    notifyListeners();
+
+    try {
+      if (toDelete.isNotEmpty) {
+        await _supabase.from('trip_stops').delete().inFilter('id', toDelete);
+      }
+      for (final s in toShift) {
+        await _supabase
+            .from('trip_stops')
+            .update({'day': s.day}).eq('id', s.id);
+      }
+      await _supabase.from('trips').update({
+        'end_date': newEndDate.toIso8601String().substring(0, 10),
+      }).eq('id', tripId);
+    } catch (e) {
+      _stopsByTrip[tripId] = oldStops;
+      _trips[tripId] = trip;
+      _lastError = e.toString();
+      notifyListeners();
+      rethrow;
+    }
+  }
+
+  /// Extends the trip by one day (like [addDay]) and copies every one of
+  /// [sourceDay]'s stops into that new last day — a quick way to template a
+  /// repeat schedule. Appended at the end rather than inserted right after
+  /// [sourceDay]: simpler (no need to shift every later day on every
+  /// duplicate, unlike [deleteDay] which must shift to stay contiguous), and
+  /// still serves the "template a repeat schedule" use case. No-ops when
+  /// [sourceDay] has nothing to copy.
+  Future<void> duplicateDay(String tripId, int sourceDay) async {
+    final sourceStops = (_stopsByTrip[tripId] ?? const <TripStop>[])
+        .where((s) => s.day == sourceDay)
+        .toList();
+    if (sourceStops.isEmpty) return;
+
+    await addDay(tripId);
+    final updated = _trips[tripId];
+    if (updated == null) return;
+    final newDay = updated.nights + 1; // post-extension dayCount
+
+    for (final s in sourceStops) {
+      await addStop(
+        tripId: tripId,
+        day: newDay,
+        slot: s.slot,
+        gemId: s.gemId,
+        customPayload: s.customPayload,
+        priceVnd: s.priceVnd,
+        startTime: s.startTime,
+        notes: s.notes,
+      );
+    }
   }
 
   /// Awaited before the builder is shown, so non-optimistic: insert the seeded
@@ -499,7 +712,12 @@ class TripProvider extends ChangeNotifier {
     required String slot,
     String? gemId,
     Map<String, dynamic>? customPayload,
-    required int priceVnd,
+    // null = TBD (not yet priced) — the default for a freshly-added stop.
+    // Callers pass an explicit value (including 0 for confirmed-free) once
+    // the user has actually set one via the price editor.
+    int? priceVnd,
+    String? startTime,
+    String? notes,
   }) async {
     // Append after existing stops in the same day+slot for a stable order.
     final sortOrder = (_stopsByTrip[tripId] ?? const <TripStop>[])
@@ -516,6 +734,8 @@ class TripProvider extends ChangeNotifier {
       customPayload: customPayload,
       priceVnd: priceVnd,
       sortOrder: sortOrder,
+      startTime: startTime,
+      notes: notes,
     );
     _stopsByTrip[tripId] = [...?_stopsByTrip[tripId], optimistic];
     notifyListeners();
@@ -533,6 +753,8 @@ class TripProvider extends ChangeNotifier {
             'custom_payload': customPayload,
             'price_vnd': priceVnd,
             'sort_order': sortOrder,
+            'start_time': startTime,
+            'notes': notes,
           })
           .select()
           .single();
@@ -551,7 +773,63 @@ class TripProvider extends ChangeNotifier {
     }
   }
 
-  Future<void> updateStopPrice(String stopId, int newPriceVnd) async {
+  /// Inline-editor mutator for My Trip's activity editor: title (custom stops
+  /// only — a gem-backed stop's title is catalogue data, not stop-owned, so
+  /// [title] is silently ignored when the stop isn't custom), start time,
+  /// and notes. Optimistic/rollback, same shape as [updateStopPrice]. Pass
+  /// `null` for a field to clear it; omit (leave at the sentinel default) to
+  /// leave it untouched — mirrors `TripStop.copyWith`'s own convention.
+  Future<void> updateStopDetails(
+    String stopId, {
+    Object? title = _unset,
+    Object? startTime = _unset,
+    Object? notes = _unset,
+    // Not sentinel-guarded like the others — slot has no meaningful "clear"
+    // state (it's always morning/afternoon/evening), so plain
+    // provided-or-not is enough. Moving a stop to a different slot doesn't
+    // renormalize sortOrder within the new slot; it keeps its old numeric
+    // value, which still sorts sensibly in practice (usually to the end)
+    // without needing a second write — a known, accepted minor gap, not a
+    // correctness issue (stopsForDay's slot-then-sortOrder sort still holds).
+    String? slot,
+  }) async {
+    final loc = _locate(stopId);
+    if (loc == null) return;
+    final (tripId, index) = loc;
+    final old = _stopsByTrip[tripId]![index];
+
+    final newPayload = (!identical(title, _unset) && old.isCustom)
+        ? {...?old.customPayload, 'title': title as String?}
+        : old.customPayload;
+
+    _stopsByTrip[tripId]![index] = old.copyWith(
+      customPayload: newPayload,
+      startTime: startTime,
+      notes: notes,
+      slot: slot,
+    );
+    notifyListeners();
+
+    try {
+      final patch = <String, dynamic>{
+        if (!identical(startTime, _unset)) 'start_time': startTime,
+        if (!identical(notes, _unset)) 'notes': notes,
+        if (!identical(title, _unset) && old.isCustom)
+          'custom_payload': newPayload,
+        if (slot != null) 'slot': slot,
+      };
+      if (patch.isNotEmpty) {
+        await _supabase.from('trip_stops').update(patch).eq('id', stopId);
+      }
+    } catch (e) {
+      _stopsByTrip[tripId]![index] = old; // rollback
+      _lastError = e.toString();
+      notifyListeners();
+      rethrow;
+    }
+  }
+
+  Future<void> updateStopPrice(String stopId, int? newPriceVnd) async {
     final loc = _locate(stopId);
     if (loc == null) return;
     final (tripId, index) = loc;
@@ -567,6 +845,45 @@ class TripProvider extends ChangeNotifier {
           .update({'price_vnd': newPriceVnd}).eq('id', stopId);
     } catch (e) {
       _stopsByTrip[tripId]![index] = old; // rollback
+      _lastError = e.toString();
+      notifyListeners();
+      rethrow;
+    }
+  }
+
+  /// Persists a new within-slot order after a drag-reorder. [orderedStopIds]
+  /// is the slot's full stop list in its new order — each gets a fresh
+  /// `sortOrder` (0..n-1) matching that position. Optimistic with rollback,
+  /// same shape as [updateStopPrice]. Cross-slot moves (dragging a stop into
+  /// a different morning/afternoon/evening group) aren't covered here.
+  Future<void> reorderStopsInSlot({
+    required String tripId,
+    required List<String> orderedStopIds,
+  }) async {
+    final list = _stopsByTrip[tripId];
+    if (list == null) return;
+    final oldOrders = {for (final s in list) s.id: s.sortOrder};
+
+    for (var i = 0; i < orderedStopIds.length; i++) {
+      final idx = list.indexWhere((s) => s.id == orderedStopIds[i]);
+      if (idx == -1) continue;
+      list[idx] = list[idx].copyWith(sortOrder: i);
+    }
+    notifyListeners();
+
+    try {
+      for (var i = 0; i < orderedStopIds.length; i++) {
+        await _supabase
+            .from('trip_stops')
+            .update({'sort_order': i}).eq('id', orderedStopIds[i]);
+      }
+    } catch (e) {
+      for (final id in orderedStopIds) {
+        final old = oldOrders[id];
+        if (old == null) continue;
+        final idx = list.indexWhere((s) => s.id == id);
+        if (idx != -1) list[idx] = list[idx].copyWith(sortOrder: old);
+      }
       _lastError = e.toString();
       notifyListeners();
       rethrow;
@@ -671,13 +988,32 @@ class TripProvider extends ChangeNotifier {
   }
 }
 
-/// Transient builder for Setup Steps 1–2. Not persisted; consumed by createTrip.
+/// A traveler picked in the wizard's "Who's coming?" step, resolved via
+/// AuthProvider.findUserByIdentifier — not yet a trip_collaborators row
+/// (the trip doesn't exist yet), just enough to insert one once it does.
+class PendingTraveler {
+  final String userId;
+  final String displayName;
+  final String? avatarUrl;
+  const PendingTraveler(
+      {required this.userId, required this.displayName, this.avatarUrl});
+}
+
+/// Transient builder for Setup Steps 1–3. Not persisted; consumed by createTrip.
 class TripDraft {
   String? location;
+
+  /// Set only when [location] came from picking an autocomplete suggestion
+  /// (StepOneInit); cleared back to null the moment the text is edited again,
+  /// since free-typed text no longer certainly matches those coordinates.
+  double? locationLat;
+  double? locationLng;
+
   DateTime? dateStart;
   DateTime? dateEnd;
   int budgetVnd = 0;
   TripVibe? vibe;
   String templateChoice = 'fresh'; // 'fresh' | 'blueprint'
   String? blueprintId;
+  List<PendingTraveler> pendingTravelers = [];
 }

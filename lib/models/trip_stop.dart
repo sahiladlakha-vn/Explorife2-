@@ -19,7 +19,16 @@ class TripStop {
   /// Freeform stop data (e.g. {'title': …, 'note': …}) when [gemId] is null.
   final Map<String, dynamic>? customPayload;
 
-  final int priceVnd;
+  /// VND cost of this stop. MONEY CONTRACT (matches trip_bookings.amountVnd
+  /// exactly, see that model's doc comment): null = TBD, not yet priced;
+  /// 0 = confirmed free. Never coalesce null to 0 — sum it under the
+  /// null-excluded/0-counted rule, same as every other *_vnd field in this
+  /// app's rollups. Nullable as of migration 20260806000800; existing rows
+  /// created before that migration were NOT backfilled to null, so a stop's
+  /// price_vnd = 0 today may honestly be either "confirmed free" (post-
+  /// migration) or "never priced" (pre-migration, ambiguous — see that
+  /// migration's own comment).
+  final int? priceVnd;
   final int sortOrder;
 
   // ── Transit-in leg ────────────────────────────────────────────────────────
@@ -40,6 +49,16 @@ class TripStop {
   /// Cost of the transit leg in VND. See the null/0 distinction on [hasTransit].
   final int? transitCostVnd;
 
+  /// Plain 'HH:mm' time-of-day, purely informational/editable — display
+  /// order is still [sortOrder], not derived from this. Null means no time
+  /// was set. Back `trip_stops.start_time` (migration 20260718000000).
+  final String? startTime;
+
+  /// Freeform per-stop notes, same migration as [startTime]. Distinct from
+  /// [customTitle] (which lives in [customPayload] and only applies to
+  /// custom stops) — notes apply to any stop, gem-backed or custom.
+  final String? notes;
+
   const TripStop({
     required this.id,
     required this.tripId,
@@ -47,12 +66,14 @@ class TripStop {
     required this.slot,
     this.gemId,
     this.customPayload,
-    this.priceVnd = 0,
+    this.priceVnd,
     this.sortOrder = 0,
     this.transitMode,
     this.transitLine,
     this.transitDurationMin,
     this.transitCostVnd,
+    this.startTime,
+    this.notes,
   });
 
   /// True when this is a freeform stop rather than a saved gem.
@@ -77,12 +98,16 @@ class TripStop {
       customPayload: payload is Map
           ? Map<String, dynamic>.from(payload)
           : null,
-      priceVnd: (j['price_vnd'] as num?)?.toInt() ?? 0,
+      priceVnd: (j['price_vnd'] as num?)?.toInt(),
       sortOrder: (j['sort_order'] as num?)?.toInt() ?? 0,
       transitMode: j['transit_mode'] as String?,
       transitLine: j['transit_line'] as String?,
       transitDurationMin: (j['transit_duration_min'] as num?)?.toInt(),
       transitCostVnd: (j['transit_cost_vnd'] as num?)?.toInt(),
+      // Postgres `time` round-trips as an 'HH:mm:ss' string; trim to 'HH:mm'
+      // to match what the editor writes and displays.
+      startTime: (j['start_time'] as String?)?.substring(0, 5),
+      notes: j['notes'] as String?,
     );
   }
 
@@ -99,22 +124,24 @@ class TripStop {
         'transit_line': transitLine,
         'transit_duration_min': transitDurationMin,
         'transit_cost_vnd': transitCostVnd,
+        'start_time': startTime,
+        'notes': notes,
       };
 
   // Sentinel so copyWith can distinguish "not provided" from "set to null" for
-  // the four transit fields — "remove transit from this stop" is a real edit
-  // path, and the plain `?? this.x` pattern can't clear a value to null. Pass
+  // the nullable fields below — "clear this value" is a real edit path, and
+  // the plain `?? this.x` pattern can't clear a value to null. Pass
   // `transitMode: null` (etc.) to clear; omit to preserve.
   //
   // KNOWN LIMITATION (pre-existing, intentionally not touched this pass):
-  // [gemId] and [customPayload] are carried over verbatim and aren't even
-  // copyWith params, so they can't be changed or cleared here despite gem_id
-  // being ON DELETE SET NULL. Left as-is to keep this change scoped to transit;
-  // worth a sentinel pass of its own if a gem-clear edit path appears.
+  // [gemId] is still carried over verbatim and isn't a copyWith param, so it
+  // can't be changed/cleared here despite gem_id being ON DELETE SET NULL.
+  // [customPayload] *is* now a param (needed for inline title editing) —
+  // only that one gap is closed this pass.
   static const Object _unset = Object();
 
   TripStop copyWith({
-    int? priceVnd,
+    Object? priceVnd = _unset,
     int? sortOrder,
     int? day,
     String? slot,
@@ -122,6 +149,9 @@ class TripStop {
     Object? transitLine = _unset,
     Object? transitDurationMin = _unset,
     Object? transitCostVnd = _unset,
+    Object? customPayload = _unset,
+    Object? startTime = _unset,
+    Object? notes = _unset,
   }) =>
       TripStop(
         id: id,
@@ -129,8 +159,11 @@ class TripStop {
         day: day ?? this.day,
         slot: slot ?? this.slot,
         gemId: gemId,
-        customPayload: customPayload,
-        priceVnd: priceVnd ?? this.priceVnd,
+        customPayload: identical(customPayload, _unset)
+            ? this.customPayload
+            : customPayload as Map<String, dynamic>?,
+        priceVnd:
+            identical(priceVnd, _unset) ? this.priceVnd : priceVnd as int?,
         sortOrder: sortOrder ?? this.sortOrder,
         transitMode: identical(transitMode, _unset)
             ? this.transitMode
@@ -144,5 +177,9 @@ class TripStop {
         transitCostVnd: identical(transitCostVnd, _unset)
             ? this.transitCostVnd
             : transitCostVnd as int?,
+        startTime: identical(startTime, _unset)
+            ? this.startTime
+            : startTime as String?,
+        notes: identical(notes, _unset) ? this.notes : notes as String?,
       );
 }

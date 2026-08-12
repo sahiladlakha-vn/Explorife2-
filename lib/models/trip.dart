@@ -10,6 +10,14 @@ class Trip {
   final String ownerId;
   final String name;
   final String location;
+
+  /// Set only when [location] was picked from the setup wizard's place
+  /// autocomplete (lib/core/services/geocoding_service.dart); null for a
+  /// free-typed location, including every trip created before this field
+  /// existed. Nothing downstream should assume these are present.
+  final double? locationLat;
+  final double? locationLng;
+
   final DateTime startDate;
   final DateTime endDate;
   final int budgetVnd;
@@ -23,6 +31,8 @@ class Trip {
     required this.ownerId,
     required this.name,
     required this.location,
+    this.locationLat,
+    this.locationLng,
     required this.startDate,
     required this.endDate,
     required this.budgetVnd,
@@ -51,6 +61,8 @@ class Trip {
         ownerId: j['owner_id'] as String,
         name: j['name'] as String,
         location: j['location'] as String,
+        locationLat: (j['location_lat'] as num?)?.toDouble(),
+        locationLng: (j['location_lng'] as num?)?.toDouble(),
         startDate: DateTime.parse(j['start_date'] as String),
         endDate: DateTime.parse(j['end_date'] as String),
         budgetVnd: (j['budget_vnd'] as num).toInt(),
@@ -67,6 +79,8 @@ class Trip {
         'owner_id': ownerId,
         'name': name,
         'location': location,
+        'location_lat': locationLat,
+        'location_lng': locationLng,
         'start_date': startDate.toIso8601String().substring(0, 10),
         'end_date': endDate.toIso8601String().substring(0, 10),
         'budget_vnd': budgetVnd,
@@ -81,6 +95,8 @@ class Trip {
   Trip copyWith({
     String? name,
     String? location,
+    double? locationLat,
+    double? locationLng,
     DateTime? startDate,
     DateTime? endDate,
     int? budgetVnd,
@@ -92,6 +108,8 @@ class Trip {
         ownerId: ownerId,
         name: name ?? this.name,
         location: location ?? this.location,
+        locationLat: locationLat ?? this.locationLat,
+        locationLng: locationLng ?? this.locationLng,
         startDate: startDate ?? this.startDate,
         endDate: endDate ?? this.endDate,
         budgetVnd: budgetVnd ?? this.budgetVnd,
