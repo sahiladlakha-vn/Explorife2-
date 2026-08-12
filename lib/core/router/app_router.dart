@@ -85,7 +85,11 @@ class AppRouter {
             ],
           ),
           GoRoute(path: '/search', builder: (_, __) => const SearchScreen()),
-          GoRoute(path: '/profile', builder: (_, __) => const ProfileScreen()),
+          GoRoute(
+            path: '/profile',
+            builder: (_, state) =>
+                ProfileScreen(deepLink: state.extra as ProfileDeepLink?),
+          ),
           GoRoute(path: '/stories', builder: (_, __) => const StoriesScreen()),
           GoRoute(
             path: '/gems/:id',
@@ -95,6 +99,9 @@ class AppRouter {
             path: '/stories/:id',
             builder: (context, state) => StoryDetailScreen(id: state.pathParameters['id']!),
           ),
+          // Nested here (unlike its sibling trip routes below) so it gets the
+          // shell's persistent bottom nav, matching every other screen.
+          tripBuilderRoute(),
         ],
       ),
       GoRoute(

@@ -1,22 +1,38 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
+import 'package:supabase_flutter/supabase_flutter.dart' show PostgrestException;
+import '../../core/services/geocoding_service.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/logic/trip_insights.dart';
+import '../../core/logic/trip_route.dart';
+import '../../core/logic/settle_up.dart';
+import '../../models/hike.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/booking_provider.dart';
 import '../../providers/gem_provider.dart';
 import '../../providers/story_provider.dart';
 import '../../providers/splits_provider.dart';
 import '../../providers/trip_provider.dart';
+import '../../providers/trip_setup_provider.dart';
 import '../../models/story.dart';
 import '../../models/gem.dart';
 import '../../models/trip.dart';
+import '../../models/trip_stop.dart';
+import '../../models/trip_booking.dart';
+import '../../models/trip_traveler.dart';
+import '../../models/trip_document.dart';
+import '../../models/packing_item.dart';
 import '../../widgets/common/app_shell.dart';
 import '../../widgets/budget_status.dart';
 import '../../widgets/state_views.dart';
 import '../../widgets/app_network_image.dart';
+import '../../widgets/common/traveler_lookup_sheet.dart';
+import '../trip_map/trip_map_dialog.dart';
+import '../trip_setup/edit_trip_sheet.dart';
+import '../trip_builder/widgets/add_stop_sheet.dart';
 
 part 'profile_palette.dart';
 part 'widgets/profile_atoms.dart';
@@ -28,34 +44,64 @@ part 'tabs/saved_tab.dart';
 part 'tabs/badges_tab.dart';
 part 'tabs/settings_tab.dart';
 
+/// Deep-link payload for `context.go('/profile', extra: ...)` — lets a caller
+/// (currently just Trip Builder's back button) land directly on a tab, and
+/// for My Trip specifically, a segment + trip. Closes the standing
+/// `TODO(tab-deeplink)` that every builder back-button used to carry.
+class ProfileDeepLink {
+  const ProfileDeepLink(
+      {required this.tab, this.tripId, this.segment = TripDetailSegment.itinerary});
+
+  final int tab;
+  final String? tripId;
+  final TripDetailSegment segment;
+}
+
 class ProfileScreen extends StatefulWidget {
-  const ProfileScreen({super.key});
+  const ProfileScreen({super.key, this.deepLink});
+
+  final ProfileDeepLink? deepLink;
 
   @override
   State<ProfileScreen> createState() => _ProfileScreenState();
 }
 
 class _ProfileScreenState extends State<ProfileScreen> {
-  int _tab = 0; // 0 Overview · 1 My Stories · 2 Saved Gems · 3 Badges · 4 My Trips · 5 Settings
+  // Both defaults are overridden from widget.deepLink in initState, below,
+  // when the screen is reached via a deep link (e.g. Trip Builder's back
+  // button) rather than the tab bar/drawer.
+  int _tab = 0; // 0 Overview · 1 My Trip · 2 Saved Gems · 3 My Stories · 4 Badges · 5 Settings
+  // Which My Trip segment to land on next time tab 1 opens — set by
+  // Overview's chip taps via _openMyTrip.
+  TripDetailSegment _myTripSegment = TripDetailSegment.itinerary;
 
   bool _statsLoading = false;
   double _spent = 0;
   int _groups = 0;
 
-  // SETTINGS stays terminal (near-universal convention); MY TRIPS, a primary
-  // feature, sits ahead of it. Keep this order in lockstep with the _body switch.
+  // Order matches docs/mockups/travel_planner_profile.html. SETTINGS stays
+  // terminal (near-universal convention). Keep this in lockstep with the
+  // _body switch.
   static const _tabs = [
-    (Icons.person_outline, 'OVERVIEW'),
-    (Icons.menu_book_outlined, 'MY STORIES'),
-    (Icons.diamond_outlined, 'SAVED GEMS'),
-    (Icons.emoji_events_outlined, 'BADGES'),
-    (Icons.map_outlined, 'MY TRIPS'),
-    (Icons.settings_outlined, 'SETTINGS'),
+    'Overview',
+    'My Trip',
+    'Saved Gems',
+    'My Stories',
+    'Badges',
+    'Settings',
   ];
+
+  void _openMyTrip(TripDetailSegment segment) =>
+      setState(() { _tab = 1; _myTripSegment = segment; });
 
   @override
   void initState() {
     super.initState();
+    final deepLink = widget.deepLink;
+    if (deepLink != null) {
+      _tab = deepLink.tab;
+      _myTripSegment = deepLink.segment;
+    }
     WidgetsBinding.instance.addPostFrameCallback((_) => _loadStats());
   }
 
@@ -232,26 +278,30 @@ class _ProfileScreenState extends State<ProfileScreen> {
             onSelect: (i) => setState(() => _tab = i),
           ),
           Expanded(
-            child: _body(context, gems, myStories, tripCount, badges, alerts,
-                pace, active?.budgetVnd),
+            child: _body(
+                context, myStories, tripCount, badges, alerts, pace, active),
           ),
         ],
       ),
     );
   }
 
-  Widget _body(BuildContext context, List<Gem> gems, List<Story> stories,
-      int tripCount, List<BadgeProgress> badges, List<Alert> alerts,
-      TripPace? pace, int? budgetVnd) {
+  Widget _body(BuildContext context, List<Story> stories, int tripCount,
+      List<BadgeProgress> badges, List<Alert> alerts, TripPace? pace,
+      Trip? active) {
     switch (_tab) {
       case 1:
-        return const _StoriesTab();
+        return _MyTripTab(
+          trip: active,
+          initialSegment: _myTripSegment,
+          initialTripId: widget.deepLink?.tripId,
+        );
       case 2:
         return const _SavedTab();
       case 3:
-        return _BadgesTab(badges: badges);
+        return const _StoriesTab();
       case 4:
-        return const _TripsTab();
+        return _BadgesTab(badges: badges);
       case 5:
         return _SettingsTab(onSignOut: () => _confirmSignOut(context));
       default:
@@ -260,10 +310,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
           groups: _groups,
           tripCount: tripCount,
           stories: stories,
-          gems: gems,
           alerts: alerts,
           pace: pace,
-          budgetVnd: budgetVnd,
+          budgetVnd: active?.budgetVnd,
+          badges: badges,
+          onOpenTripSegment: _openMyTrip,
+          onSwitchTab: (i) => setState(() => _tab = i),
         );
     }
   }
@@ -297,6 +349,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
             onPressed: () {
               Navigator.pop(context);
               context.read<BookingProvider>().clear();
+              context.read<TripSetupProvider>().clear();
+              context.read<SplitsProvider>().clear();
               context.read<AuthProvider>().signOut();
             },
             child: const Text('Sign Out', style: TextStyle(color: Colors.red)),

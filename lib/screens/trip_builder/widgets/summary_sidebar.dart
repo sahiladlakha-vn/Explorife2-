@@ -33,7 +33,7 @@ class SummarySidebar extends StatelessWidget {
       return _MobilePeek(tripId: tripId, activeDay: activeDay);
     }
     return Container(
-      color: AppTheme.surface,
+      color: AppTheme.lightCard,
       child: _SidebarBody(tripId: tripId, activeDay: activeDay),
     );
   }
@@ -61,13 +61,13 @@ class _SidebarBody extends StatelessWidget {
     final p = context.watch<TripProvider>();
     final gems = context.watch<GemProvider>().allGems;
 
-    final trip = p.activeTrip;
+    final trip = p.tripById(tripId);
     if (trip == null) {
       return const Center(
         child: Padding(
           padding: EdgeInsets.all(24),
           child: Text('No trip loaded.',
-              style: TextStyle(color: AppTheme.textSecondary)),
+              style: TextStyle(color: AppTheme.lightMute)),
         ),
       );
     }
@@ -146,7 +146,7 @@ class _Section extends StatelessWidget {
         children: [
           Text(title.toUpperCase(),
               style: const TextStyle(
-                  color: AppTheme.textSecondary,
+                  color: AppTheme.lightMute,
                   fontSize: 11,
                   fontWeight: FontWeight.w700,
                   letterSpacing: 1.2)),
@@ -173,9 +173,9 @@ class _RouteSchematic extends StatelessWidget {
     return Container(
       height: 160,
       decoration: BoxDecoration(
-        color: AppTheme.bg,
+        color: AppTheme.lightSurface,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: AppTheme.divider),
+        border: Border.all(color: AppTheme.lightBorder),
       ),
       child: CustomPaint(painter: _RoutePainter(points), size: Size.infinite),
     );
@@ -192,12 +192,12 @@ class _EmptyRoute extends StatelessWidget {
       height: 160,
       alignment: Alignment.center,
       decoration: BoxDecoration(
-        color: AppTheme.bg,
+        color: AppTheme.lightSurface,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: AppTheme.divider),
+        border: Border.all(color: AppTheme.lightBorder),
       ),
       child: const Text('No mappable stops today',
-          style: TextStyle(color: AppTheme.textSecondary, fontSize: 12)),
+          style: TextStyle(color: AppTheme.lightMute, fontSize: 12)),
     );
   }
 }
@@ -292,7 +292,7 @@ class _AlsoToday extends StatelessWidget {
         children: [
           const Text('Also today',
               style: TextStyle(
-                  color: AppTheme.textSecondary,
+                  color: AppTheme.lightMute,
                   fontSize: 11,
                   fontWeight: FontWeight.w600)),
           const SizedBox(height: 4),
@@ -303,7 +303,7 @@ class _AlsoToday extends StatelessWidget {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
-                      color: AppTheme.textPrimary, fontSize: 12)),
+                      color: AppTheme.lightInk, fontSize: 12)),
             ),
         ],
       ),
@@ -347,7 +347,7 @@ class _BudgetBar extends StatelessWidget {
               padding: const EdgeInsets.only(bottom: 2),
               child: Text('of ₫${Trip.formatVnd(budgetVnd, short: true)}',
                   style: const TextStyle(
-                      color: AppTheme.textSecondary, fontSize: 12)),
+                      color: AppTheme.lightMute, fontSize: 12)),
             ),
             const Spacer(),
             Text('${status.pct.round()}%',
@@ -362,7 +362,7 @@ class _BudgetBar extends StatelessWidget {
           borderRadius: BorderRadius.circular(6),
           child: Stack(
             children: [
-              Container(height: 8, color: AppTheme.surface2),
+              Container(height: 8, color: AppTheme.lightCard),
               FractionallySizedBox(
                 widthFactor: fill,
                 child: Container(
@@ -376,7 +376,7 @@ class _BudgetBar extends StatelessWidget {
         const SizedBox(height: 6),
         Text(tail,
             style: TextStyle(
-                color: status.over ? AppTheme.danger : AppTheme.textSecondary,
+                color: status.over ? AppTheme.danger : AppTheme.lightMute,
                 fontSize: 12,
                 fontWeight: FontWeight.w600)),
       ],
@@ -445,14 +445,14 @@ class _CategoryRow extends StatelessWidget {
           width: 68,
           child: Text(label,
               style: const TextStyle(
-                  color: AppTheme.textPrimary, fontSize: 12)),
+                  color: AppTheme.lightInk, fontSize: 12)),
         ),
         Expanded(
           child: ClipRRect(
             borderRadius: BorderRadius.circular(5),
             child: Stack(
               children: [
-                Container(height: 10, color: AppTheme.surface2),
+                Container(height: 10, color: AppTheme.lightCard),
                 FractionallySizedBox(
                   widthFactor: fraction,
                   child: Container(height: 10, color: color),
@@ -467,7 +467,7 @@ class _CategoryRow extends StatelessWidget {
           child: Text('₫${Trip.formatVnd(value, short: true)}',
               textAlign: TextAlign.end,
               style: const TextStyle(
-                  color: AppTheme.textSecondary,
+                  color: AppTheme.lightMute,
                   fontSize: 11,
                   fontWeight: FontWeight.w600)),
         ),
@@ -512,7 +512,7 @@ class _SpendByDayChart extends StatelessWidget {
                     style: TextStyle(
                         color: i == activeDay - 1
                             ? AppTheme.primary
-                            : AppTheme.textSecondary,
+                            : AppTheme.lightMute,
                         fontSize: 10,
                         fontWeight: i == activeDay - 1
                             ? FontWeight.w800
@@ -591,7 +591,7 @@ class _MobilePeek extends StatelessWidget {
         expand: false,
         builder: (ctx, controller) => Container(
           decoration: const BoxDecoration(
-            color: AppTheme.surface,
+            color: AppTheme.lightCard,
             borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
           ),
           child: Column(
@@ -602,7 +602,7 @@ class _MobilePeek extends StatelessWidget {
                   width: 44,
                   height: 5,
                   decoration: BoxDecoration(
-                    color: AppTheme.textSecondary,
+                    color: AppTheme.lightMute,
                     borderRadius: BorderRadius.circular(3),
                   ),
                 ),
@@ -624,21 +624,26 @@ class _MobilePeek extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final p = context.watch<TripProvider>();
-    final trip = p.activeTrip;
+    final trip = p.tripById(tripId);
     final safeDay =
         trip == null ? activeDay : activeDay.clamp(1, trip.nights + 1);
     final status = BudgetStatus.of(
         spent: p.totalSpent(tripId), budgetVnd: trip?.budgetVnd ?? 0);
 
     return Material(
-      color: AppTheme.surface,
+      color: AppTheme.lightCard,
       child: InkWell(
         onTap: () => _expand(context),
         child: Container(
           height: 120,
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+          // Horizontal padding matches the wizard's bottom bar rhythm (was
+          // 16). Not adding the wizard's safe-area bottom inset here too —
+          // this bar has a fixed 120px height (_kSummaryPeekHeight), and
+          // eating into that with a safe-area inset would compress/clip its
+          // two text rows on devices with a home-indicator inset.
+          padding: const EdgeInsets.fromLTRB(20, 12, 20, 12),
           decoration: const BoxDecoration(
-            border: Border(top: BorderSide(color: AppTheme.divider)),
+            border: Border(top: BorderSide(color: AppTheme.lightBorder)),
           ),
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
@@ -649,10 +654,10 @@ class _MobilePeek extends StatelessWidget {
                   Expanded(
                     child: Text(_dayStatusLine(p, tripId, safeDay),
                         style: const TextStyle(
-                            color: AppTheme.textSecondary, fontSize: 13)),
+                            color: AppTheme.lightMute, fontSize: 13)),
                   ),
                   const Icon(Icons.keyboard_arrow_up,
-                      color: AppTheme.textSecondary),
+                      color: AppTheme.lightMute),
                 ],
               ),
               const SizedBox(height: 6),
@@ -670,7 +675,7 @@ class _MobilePeek extends StatelessWidget {
                     text:
                         ' of ₫${Trip.formatVnd(trip?.budgetVnd ?? 0, short: true)}',
                     style: const TextStyle(
-                        color: AppTheme.textSecondary, fontSize: 13),
+                        color: AppTheme.lightMute, fontSize: 13),
                   ),
                 ]),
               ),

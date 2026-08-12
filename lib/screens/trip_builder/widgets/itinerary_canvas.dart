@@ -8,12 +8,13 @@ import '../../../models/trip_stop.dart';
 import '../../../providers/gem_provider.dart';
 import '../../../providers/trip_provider.dart';
 import '../../../widgets/app_network_image.dart';
-import '../asset_data.dart';
+import 'add_stop_sheet.dart';
 
 /// Center pane of the Trip Builder: a day chip strip + the active day's card,
-/// whose three [TimeSlotBlock]s are `DragTarget<AssetData>`s that receive gems
-/// dragged from the DiscoveryPanel. One active day is shown at a time (the
-/// shell owns [activeDay]); the sidebar's route map reads the same single day.
+/// whose three [TimeSlotBlock]s each open [AddStopSheet] (tap-to-search-and-
+/// select, replacing the old drag-from-Discovery mechanics) via their "+ Add"
+/// button. One active day is shown at a time (the shell owns [activeDay]);
+/// the sidebar's route map reads the same single day.
 ///
 /// Gem resolution is centralized here: one `watch<GemProvider>()` builds a
 /// lookup closure threaded down to every card, so a catalogue refresh rebuilds
@@ -33,7 +34,7 @@ class ItineraryCanvas extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final trip = context.select<TripProvider, Trip?>((p) => p.activeTrip);
+    final trip = context.select<TripProvider, Trip?>((p) => p.tripById(tripId));
     if (trip == null) {
       return const _CanvasMessage('This trip isn\'t loaded.');
     }
@@ -61,7 +62,7 @@ class ItineraryCanvas extends StatelessWidget {
     final date = trip.startDate.add(Duration(days: safeDay - 1));
 
     return Container(
-      color: AppTheme.bg,
+      color: AppTheme.lightSurface,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -70,7 +71,7 @@ class ItineraryCanvas extends StatelessWidget {
             dayCount: dayCount,
             onDayChanged: onDayChanged,
           ),
-          const Divider(height: 1, color: AppTheme.divider),
+          const Divider(height: 1, color: AppTheme.lightBorder),
           Expanded(
             child: DayCard(
               tripId: tripId,
@@ -114,32 +115,36 @@ class _DayChipStrip extends StatelessWidget {
           final day = i + 1;
           final selected = day == activeDay;
           final isDeparture = day == dayCount;
+          // Same selector-chip convention as Step 1's vibe grid / Step 3's
+          // template cards: selected = primarySoft fill + primary border
+          // (1.5px), label stays lightInk always — only the icon/accent
+          // switches color. Radius 16 to match those cards too (was 20, a
+          // pill shape unique to this component).
           return GestureDetector(
             onTap: () => onDayChanged(day),
-            child: Container(
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 150),
               alignment: Alignment.center,
               padding: const EdgeInsets.symmetric(horizontal: 14),
               decoration: BoxDecoration(
-                color: selected ? AppTheme.primary : AppTheme.surface2,
-                borderRadius: BorderRadius.circular(20),
+                color: selected ? AppTheme.primarySoft : AppTheme.lightCard,
+                borderRadius: BorderRadius.circular(16),
                 border: Border.all(
-                    color: selected ? AppTheme.primary : AppTheme.divider),
+                    color: selected ? AppTheme.primary : AppTheme.lightBorder,
+                    width: selected ? 1.5 : 1),
               ),
               child: Row(
                 children: [
                   Text('Day $day',
-                      style: TextStyle(
-                          color:
-                              selected ? Colors.white : AppTheme.textSecondary,
+                      style: const TextStyle(
+                          color: AppTheme.lightInk,
                           fontSize: 13,
                           fontWeight: FontWeight.w700)),
                   if (isDeparture) ...[
                     const SizedBox(width: 6),
                     Icon(Icons.flight_takeoff,
                         size: 14,
-                        color: selected
-                            ? Colors.white
-                            : AppTheme.textSecondary),
+                        color: selected ? AppTheme.primary : AppTheme.lightMute),
                   ],
                 ],
               ),
@@ -192,7 +197,7 @@ class DayCard extends StatelessWidget {
                     children: [
                       Text('Day $day',
                           style: const TextStyle(
-                              color: AppTheme.textPrimary,
+                              color: AppTheme.lightInk,
                               fontSize: 20,
                               fontWeight: FontWeight.w800)),
                       if (isDeparture) ...[
@@ -201,13 +206,13 @@ class DayCard extends StatelessWidget {
                           padding: const EdgeInsets.symmetric(
                               horizontal: 8, vertical: 2),
                           decoration: BoxDecoration(
-                            color: AppTheme.surface2,
+                            color: AppTheme.lightCard,
                             borderRadius: BorderRadius.circular(8),
-                            border: Border.all(color: AppTheme.divider),
+                            border: Border.all(color: AppTheme.lightBorder),
                           ),
                           child: const Text('Departure',
                               style: TextStyle(
-                                  color: AppTheme.textSecondary,
+                                  color: AppTheme.lightMute,
                                   fontSize: 11,
                                   fontWeight: FontWeight.w600)),
                         ),
@@ -217,7 +222,7 @@ class DayCard extends StatelessWidget {
                   const SizedBox(height: 2),
                   Text(_dateLabel(date),
                       style: const TextStyle(
-                          color: AppTheme.textSecondary, fontSize: 13)),
+                          color: AppTheme.lightMute, fontSize: 13)),
                 ],
               ),
             ),
@@ -250,24 +255,23 @@ class _DayTotalPill extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       decoration: BoxDecoration(
-        color: AppTheme.surface2,
+        color: AppTheme.lightCard,
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: AppTheme.divider),
+        border: Border.all(color: AppTheme.lightBorder),
       ),
       child: Text('₫${Trip.formatVnd(totalVnd, short: true)}',
           style: const TextStyle(
-              color: AppTheme.textPrimary,
+              color: AppTheme.lightInk,
               fontSize: 13,
               fontWeight: FontWeight.w700)),
     );
   }
 }
 
-// --- Time slot (the drop target) -----------------------------------------
+// --- Time slot --------------------------------------------------------
 
-/// One time slot of one day: the `DragTarget<AssetData>` that accepts gems.
-/// Slot is temporal, not typological — every gem is welcome (always-accept),
-/// so the only drop feedback is a hover highlight.
+/// One time slot of one day: its header (label + "+ Add", which opens
+/// [AddStopSheet] preselected to this slot) and its placed stops.
 class TimeSlotBlock extends StatelessWidget {
   const TimeSlotBlock({
     super.key,
@@ -293,104 +297,111 @@ class TimeSlotBlock extends StatelessWidget {
         .where((s) => s.slot == slot)
         .toList();
 
-    return DragTarget<AssetData>(
-      onWillAcceptWithDetails: (_) => true, // always-accept: slot is temporal
-      onAcceptWithDetails: (details) {
-        HapticFeedback.mediumImpact(); // collision haptic > pickup haptic
-        // Gems are free → price 0 at drop; the user sets it via the pill.
-        // Fire-and-forget: addStop is optimistic and self-rolls-back on error.
-        context.read<TripProvider>().addStop(
-              tripId: tripId,
-              day: day,
-              slot: slot,
-              gemId: details.data.gemId,
-              priceVnd: 0,
-            );
-      },
-      builder: (context, candidate, rejected) {
-        final hovering = candidate.isNotEmpty;
-        return AnimatedContainer(
-          duration: const Duration(milliseconds: 120),
-          decoration: BoxDecoration(
-            color: hovering ? AppTheme.primarySoft : AppTheme.surface,
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(
-              color: hovering ? AppTheme.primary : AppTheme.divider,
-              width: hovering ? 1.5 : 1,
-            ),
+    return Container(
+      decoration: BoxDecoration(
+        color: AppTheme.lightCard,
+        // 12, matching the wizard's dominant card/field radius (was 14).
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppTheme.lightBorder),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _SlotHeader(
+            slot: slot,
+            onAdd: () => _openAddStopSheet(context),
           ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              _SlotHeader(
-                slot: slot,
-                onAddCustom: () => _openCustomSheet(context),
+          if (stops.isEmpty)
+            const _SlotPlaceholder()
+          else if (stops.length == 1)
+            // No reorder machinery needed (or shown) for a single stop.
+            Padding(
+              padding: const EdgeInsets.fromLTRB(10, 0, 10, 10),
+              child: ItineraryItemCard(
+                stop: stops.first,
+                gem: stops.first.isCustom
+                    ? null
+                    : resolveGem(stops.first.gemId!),
               ),
-              if (stops.isEmpty)
-                _SlotPlaceholder(hovering: hovering)
-              else
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(10, 0, 10, 10),
-                  child: Column(
-                    children: [
-                      for (final s in stops)
-                        Padding(
-                          padding: const EdgeInsets.only(bottom: 8),
-                          child: ItineraryItemCard(
-                            stop: s,
-                            gem: s.isCustom ? null : resolveGem(s.gemId!),
-                          ),
-                        ),
-                    ],
-                  ),
-                ),
-            ],
-          ),
-        );
-      },
+            )
+          else
+            Padding(
+              padding: const EdgeInsets.fromLTRB(10, 0, 10, 10),
+              child: ReorderableListView.builder(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                buildDefaultDragHandles: false,
+                itemCount: stops.length,
+                itemBuilder: (context, i) {
+                  final s = stops[i];
+                  return Padding(
+                    key: ValueKey(s.id),
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: ItineraryItemCard(
+                      stop: s,
+                      gem: s.isCustom ? null : resolveGem(s.gemId!),
+                      dragHandleIndex: i,
+                    ),
+                  );
+                },
+                onReorderItem: (oldIndex, newIndex) {
+                  HapticFeedback.selectionClick();
+                  // onReorderItem (unlike the deprecated onReorder)
+                  // already adjusts newIndex for the removed item.
+                  final reordered = List<TripStop>.from(stops);
+                  reordered.insert(newIndex, reordered.removeAt(oldIndex));
+                  context.read<TripProvider>().reorderStopsInSlot(
+                        tripId: tripId,
+                        orderedStopIds: [for (final s in reordered) s.id],
+                      );
+                },
+              ),
+            ),
+        ],
+      ),
     );
   }
 
-  void _openCustomSheet(BuildContext context) {
+  void _openAddStopSheet(BuildContext context) {
     showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (_) => _CustomItemSheet(tripId: tripId, day: day, slot: slot),
+      builder: (_) =>
+          AddStopSheet(
+              tripId: tripId, day: day, initialSlot: slot, light: true),
     );
   }
 }
 
-/// Slot label + "+ Custom" affordance. Lives inside the drop target so hovering
-/// highlights the whole region including the label — what a user expects.
+/// Slot label + "+ Add" affordance, which opens [AddStopSheet] preselected
+/// to this slot.
 class _SlotHeader extends StatelessWidget {
-  const _SlotHeader({required this.slot, required this.onAddCustom});
+  const _SlotHeader({required this.slot, required this.onAdd});
 
   final String slot;
-  final VoidCallback onAddCustom;
+  final VoidCallback onAdd;
 
   @override
   Widget build(BuildContext context) {
-    final (label, icon) = _slotMeta(slot);
+    final (label, icon) = slotMeta(slot);
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 10, 8, 8),
       child: Row(
         children: [
-          Icon(icon, size: 16, color: AppTheme.textSecondary),
+          Icon(icon, size: 16, color: AppTheme.lightMute),
           const SizedBox(width: 8),
           Text(label,
               style: const TextStyle(
-                  color: AppTheme.textPrimary,
+                  color: AppTheme.lightInk,
                   fontSize: 13,
                   fontWeight: FontWeight.w700,
                   letterSpacing: 0.3)),
           const Spacer(),
-          // TODO(desktop): drag-through button ambiguity if we ever add
-          // drag-to-scroll — a pointer-down here is unambiguously a tap today.
           TextButton.icon(
-            onPressed: onAddCustom,
+            onPressed: onAdd,
             icon: const Icon(Icons.add, size: 16, color: AppTheme.primary),
-            label: const Text('Custom',
+            label: const Text('Add',
                 style: TextStyle(
                     color: AppTheme.primary,
                     fontSize: 12,
@@ -407,20 +418,18 @@ class _SlotHeader extends StatelessWidget {
   }
 }
 
-/// Empty-slot hint. Brightens on hover to reinforce "yes, drop here".
+/// Empty-slot hint.
 class _SlotPlaceholder extends StatelessWidget {
-  const _SlotPlaceholder({required this.hovering});
-
-  final bool hovering;
+  const _SlotPlaceholder();
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 0, 12, 16),
+    return const Padding(
+      padding: EdgeInsets.fromLTRB(12, 0, 12, 16),
       child: Text(
-        hovering ? 'Release to add' : 'Drag a gem here',
+        'No stops yet',
         style: TextStyle(
-          color: hovering ? AppTheme.primary : AppTheme.textSecondary,
+          color: AppTheme.lightMute,
           fontSize: 12,
           fontStyle: FontStyle.italic,
         ),
@@ -434,15 +443,18 @@ class _SlotPlaceholder extends StatelessWidget {
 /// A placed stop. Three render branches: a resolved gem, a custom entry, or an
 /// orphaned gem stop (gem deleted from the catalogue) — the last keeps its
 /// persisted price and its edit/remove affordances rather than auto-deleting.
-// TODO(reorder): drops are append-only — this card is a passive tile. To allow
-// dragging a placed stop within a slot or between slots, make it a
-// Draggable<...> source (a DragTarget already lives in TimeSlotBlock) and add
-// reorderStop / moveStopBetweenSlots to TripProvider with sortOrder recompute.
+/// [dragHandleIndex] is only set when the card is rendered inside a
+/// [ReorderableListView] (2+ stops in the slot — see [TimeSlotBlock]); it
+/// draws a drag handle wired to that index. Cross-slot moves are still a
+/// follow-up (see the "moveStopBetweenSlots" half of the reorder TODO this
+/// replaced).
 class ItineraryItemCard extends StatelessWidget {
-  const ItineraryItemCard({super.key, required this.stop, required this.gem});
+  const ItineraryItemCard(
+      {super.key, required this.stop, required this.gem, this.dragHandleIndex});
 
   final TripStop stop;
   final Gem? gem;
+  final int? dragHandleIndex;
 
   @override
   Widget build(BuildContext context) {
@@ -451,12 +463,21 @@ class ItineraryItemCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(8),
       decoration: BoxDecoration(
-        color: AppTheme.surface2,
+        color: AppTheme.lightCard,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppTheme.divider),
+        border: Border.all(color: AppTheme.lightBorder),
       ),
       child: Row(
         children: [
+          if (dragHandleIndex != null)
+            ReorderableDragStartListener(
+              index: dragHandleIndex!,
+              child: const Padding(
+                padding: EdgeInsets.only(right: 6),
+                child: Icon(Icons.drag_indicator,
+                    size: 18, color: AppTheme.lightMute),
+              ),
+            ),
           _Thumb(stop: stop, gem: gem),
           const SizedBox(width: 10),
           Expanded(
@@ -468,7 +489,7 @@ class ItineraryItemCard extends StatelessWidget {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
-                        color: AppTheme.textPrimary,
+                        color: AppTheme.lightInk,
                         fontSize: 13,
                         fontWeight: FontWeight.w700)),
                 const SizedBox(height: 2),
@@ -476,7 +497,7 @@ class ItineraryItemCard extends StatelessWidget {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
-                        color: AppTheme.textSecondary, fontSize: 11)),
+                        color: AppTheme.lightMute, fontSize: 11)),
               ],
             ),
           ),
@@ -492,7 +513,7 @@ class ItineraryItemCard extends StatelessWidget {
               context.read<TripProvider>().removeStop(stop.id);
             },
             icon: const Icon(Icons.close,
-                size: 18, color: AppTheme.textSecondary),
+                size: 18, color: AppTheme.lightMute),
             splashRadius: 18,
             constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
             padding: EdgeInsets.zero,
@@ -525,10 +546,10 @@ class _Thumb extends StatelessWidget {
   Widget build(BuildContext context) {
     Widget inner;
     if (stop.isCustom) {
-      inner = const Icon(Icons.edit_note, color: AppTheme.textSecondary);
+      inner = const Icon(Icons.edit_note, color: AppTheme.lightMute);
     } else if (gem == null) {
       inner = const Icon(Icons.help_outline,
-          color: AppTheme.textSecondary, size: 20);
+          color: AppTheme.lightMute, size: 20);
     } else if (gem!.photoUrl != null && gem!.photoUrl!.isNotEmpty) {
       inner = AppNetworkImage(url: gem!.photoUrl!);
     } else {
@@ -540,7 +561,7 @@ class _Thumb extends StatelessWidget {
       child: Container(
         width: 40,
         height: 40,
-        color: AppTheme.surface,
+        color: AppTheme.lightCard,
         child: inner,
       ),
     );
@@ -548,13 +569,15 @@ class _Thumb extends StatelessWidget {
 }
 
 /// Inline price editor. Tap the pill to swap it for a compact number field;
-/// commit on submit or on tapping away. Shows "Set price" while a stop is free.
+/// commit on submit or on tapping away. Three states, per the MONEY CONTRACT
+/// on [TripStop.priceVnd]: null → "Set price" (TBD), 0 → "Free" (confirmed),
+/// priced → the amount.
 class PriceEditPill extends StatefulWidget {
   const PriceEditPill(
       {super.key, required this.priceVnd, required this.onChanged});
 
-  final int priceVnd;
-  final ValueChanged<int> onChanged;
+  final int? priceVnd;
+  final ValueChanged<int?> onChanged;
 
   @override
   State<PriceEditPill> createState() => _PriceEditPillState();
@@ -571,14 +594,18 @@ class _PriceEditPillState extends State<PriceEditPill> {
   }
 
   void _start() {
-    _ctrl.text = widget.priceVnd == 0 ? '' : widget.priceVnd.toString();
+    // Blank only for genuinely-unset (null) — a confirmed 0 shows '0', so
+    // tapping away without typing anything can't silently flip free<->TBD.
+    _ctrl.text = widget.priceVnd?.toString() ?? '';
     setState(() => _editing = true);
   }
 
   void _commit() {
     if (!_editing) return; // guard double-fire (onSubmitted + onTapOutside)
     final digits = _ctrl.text.replaceAll(RegExp(r'[^0-9]'), '');
-    final v = int.tryParse(digits) ?? 0;
+    // Blank means TBD (null), not free (0) — an explicit '0' is what a user
+    // types to confirm a stop is actually free.
+    final v = digits.isEmpty ? null : int.tryParse(digits);
     if (v != widget.priceVnd) widget.onChanged(v);
     setState(() => _editing = false);
   }
@@ -595,7 +622,7 @@ class _PriceEditPillState extends State<PriceEditPill> {
           inputFormatters: [FilteringTextInputFormatter.digitsOnly],
           textAlign: TextAlign.end,
           style: const TextStyle(
-              color: AppTheme.textPrimary,
+              color: AppTheme.lightInk,
               fontSize: 13,
               fontWeight: FontWeight.w700),
           onSubmitted: (_) => _commit(),
@@ -604,11 +631,11 @@ class _PriceEditPillState extends State<PriceEditPill> {
             isDense: true,
             prefixText: '₫',
             prefixStyle:
-                const TextStyle(color: AppTheme.textSecondary, fontSize: 13),
+                const TextStyle(color: AppTheme.lightMute, fontSize: 13),
             contentPadding:
                 const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
             filled: true,
-            fillColor: AppTheme.surface,
+            fillColor: AppTheme.lightCard,
             enabledBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(10),
               borderSide: const BorderSide(color: AppTheme.primary),
@@ -622,23 +649,28 @@ class _PriceEditPillState extends State<PriceEditPill> {
       );
     }
 
-    final free = widget.priceVnd == 0;
+    final tbd = widget.priceVnd == null;
+    // Confirmed (free or priced) gets the primary accent — it's a real
+    // answer either way; only TBD reads as "needs attention."
+    final confirmed = !tbd;
     return GestureDetector(
       onTap: _start,
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
         decoration: BoxDecoration(
-          color: free ? Colors.transparent : AppTheme.primarySoft,
+          color: confirmed ? AppTheme.primarySoft : Colors.transparent,
           borderRadius: BorderRadius.circular(10),
-          border:
-              Border.all(color: free ? AppTheme.divider : AppTheme.primary),
+          border: Border.all(
+              color: confirmed ? AppTheme.primary : AppTheme.lightBorder),
         ),
         child: Text(
-          free
+          tbd
               ? 'Set price'
-              : '₫${Trip.formatVnd(widget.priceVnd, short: true)}',
+              : (widget.priceVnd == 0
+                  ? 'Free'
+                  : '₫${Trip.formatVnd(widget.priceVnd!, short: true)}'),
           style: TextStyle(
-              color: free ? AppTheme.textSecondary : AppTheme.primary,
+              color: confirmed ? AppTheme.primary : AppTheme.lightMute,
               fontSize: 12,
               fontWeight: FontWeight.w700),
         ),
@@ -647,186 +679,6 @@ class _PriceEditPillState extends State<PriceEditPill> {
   }
 }
 
-// --- Custom item sheet ----------------------------------------------------
-
-/// Quick-capture sheet for a freeform stop (title + optional price). Mirrors the
-/// app's canonical sheet chrome (28px top radius, handle) for consistency with
-/// TripSetupSheet. Adds via the same optimistic addStop path as a drop.
-class _CustomItemSheet extends StatefulWidget {
-  const _CustomItemSheet({
-    required this.tripId,
-    required this.day,
-    required this.slot,
-  });
-
-  final String tripId;
-  final int day;
-  final String slot;
-
-  @override
-  State<_CustomItemSheet> createState() => _CustomItemSheetState();
-}
-
-class _CustomItemSheetState extends State<_CustomItemSheet> {
-  final _titleCtrl = TextEditingController();
-  final _priceCtrl = TextEditingController();
-
-  @override
-  void dispose() {
-    _titleCtrl.dispose();
-    _priceCtrl.dispose();
-    super.dispose();
-  }
-
-  bool get _canAdd => _titleCtrl.text.trim().isNotEmpty;
-
-  void _add() {
-    final title = _titleCtrl.text.trim();
-    if (title.isEmpty) return;
-    final digits = _priceCtrl.text.replaceAll(RegExp(r'[^0-9]'), '');
-    final price = int.tryParse(digits) ?? 0;
-    HapticFeedback.mediumImpact();
-    context.read<TripProvider>().addStop(
-          tripId: widget.tripId,
-          day: widget.day,
-          slot: widget.slot,
-          customPayload: {'title': title},
-          priceVnd: price,
-        );
-    Navigator.of(context).pop();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final (label, _) = _slotMeta(widget.slot);
-    return Padding(
-      padding:
-          EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
-      child: Container(
-        decoration: const BoxDecoration(
-          color: AppTheme.surface,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            const SizedBox(height: 10),
-            Center(
-              child: Container(
-                width: 44,
-                height: 5,
-                decoration: BoxDecoration(
-                  color: AppTheme.textSecondary,
-                  borderRadius: BorderRadius.circular(3),
-                ),
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Text('Add custom stop · Day ${widget.day} $label',
-                      style: const TextStyle(
-                          color: AppTheme.textPrimary,
-                          fontSize: 16,
-                          fontWeight: FontWeight.w800)),
-                  const SizedBox(height: 16),
-                  _SheetField(
-                    controller: _titleCtrl,
-                    hint: 'What is it? (e.g. Airport taxi)',
-                    autofocus: true,
-                    onChanged: (_) => setState(() {}),
-                  ),
-                  const SizedBox(height: 12),
-                  _SheetField(
-                    controller: _priceCtrl,
-                    hint: 'Price (optional)',
-                    prefixText: '₫',
-                    keyboardType: TextInputType.number,
-                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                  ),
-                  const SizedBox(height: 20),
-                  FilledButton(
-                    onPressed: _canAdd ? _add : null,
-                    style: FilledButton.styleFrom(
-                      backgroundColor: AppTheme.primary,
-                      disabledBackgroundColor: AppTheme.surface2,
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(14)),
-                    ),
-                    child: Text('Add to itinerary',
-                        style: TextStyle(
-                            color: _canAdd
-                                ? Colors.white
-                                : AppTheme.textSecondary,
-                            fontSize: 15,
-                            fontWeight: FontWeight.w700)),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-/// Dark-surface text field for the custom sheet.
-class _SheetField extends StatelessWidget {
-  const _SheetField({
-    required this.controller,
-    required this.hint,
-    this.prefixText,
-    this.autofocus = false,
-    this.keyboardType,
-    this.inputFormatters,
-    this.onChanged,
-  });
-
-  final TextEditingController controller;
-  final String hint;
-  final String? prefixText;
-  final bool autofocus;
-  final TextInputType? keyboardType;
-  final List<TextInputFormatter>? inputFormatters;
-  final ValueChanged<String>? onChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    return TextField(
-      controller: controller,
-      autofocus: autofocus,
-      keyboardType: keyboardType,
-      inputFormatters: inputFormatters,
-      onChanged: onChanged,
-      style: const TextStyle(color: AppTheme.textPrimary, fontSize: 14),
-      decoration: InputDecoration(
-        isDense: true,
-        hintText: hint,
-        hintStyle: const TextStyle(color: AppTheme.textSecondary, fontSize: 14),
-        prefixText: prefixText,
-        prefixStyle:
-            const TextStyle(color: AppTheme.textSecondary, fontSize: 14),
-        filled: true,
-        fillColor: AppTheme.surface2,
-        contentPadding:
-            const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: AppTheme.divider),
-        ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: AppTheme.primary),
-        ),
-      ),
-    );
-  }
-}
 
 // --- Shared bits ----------------------------------------------------------
 
@@ -839,12 +691,12 @@ class _CanvasMessage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      color: AppTheme.bg,
+      color: AppTheme.lightSurface,
       alignment: Alignment.center,
       padding: const EdgeInsets.all(24),
       child: Text(text,
           textAlign: TextAlign.center,
-          style: const TextStyle(color: AppTheme.textSecondary, fontSize: 14)),
+          style: const TextStyle(color: AppTheme.lightMute, fontSize: 14)),
     );
   }
 }
@@ -859,16 +711,3 @@ const _months = [
 String _dateLabel(DateTime d) =>
     '${_weekdays[d.weekday - 1]}, ${_months[d.month - 1]} ${d.day}';
 
-/// Display label + icon for a slot key. Single source so header and sheet agree.
-(String, IconData) _slotMeta(String slot) {
-  switch (slot) {
-    case 'morning':
-      return ('Morning', Icons.wb_twilight);
-    case 'afternoon':
-      return ('Afternoon', Icons.wb_sunny_outlined);
-    case 'evening':
-      return ('Evening', Icons.nightlight_round);
-    default:
-      return (slot, Icons.schedule);
-  }
-}

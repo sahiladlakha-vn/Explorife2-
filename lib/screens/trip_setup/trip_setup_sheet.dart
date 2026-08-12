@@ -4,12 +4,14 @@ import 'package:provider/provider.dart';
 import '../../core/theme/app_theme.dart';
 import '../../providers/trip_provider.dart';
 import 'step_one_init.dart';
+import 'step_who_is_coming.dart';
 import 'step_two_template.dart';
 
 /// Modal bottom sheet host for Trip Setup. Owns the [TripDraft] and the step
 /// index; Steps 1 & 2 are presentational and receive the draft + callbacks.
-/// Dark colorway — the intentional light→dark shift from the Profile beneath
-/// signals "entering planning mode".
+/// Light colorway, matching Profile — this used to intentionally shift dark
+/// ("entering planning mode"), reversed per product decision so trip
+/// creation reads as a continuation of Profile instead of a mode jump.
 ///
 /// Header/handle dims match the app's canonical sheet (drop_gem_sheet):
 /// 28px top radius, centered 44×5 handle, boxed 44×44 close button.
@@ -22,11 +24,11 @@ class TripSetupSheet extends StatefulWidget {
 
 class _TripSetupSheetState extends State<TripSetupSheet> {
   final TripDraft _draft = TripDraft();
-  int _step = 0; // 0 = init, 1 = template
+  int _step = 0; // 0 = init, 1 = who's coming, 2 = template
   bool _isCreating = false;
 
-  void _onContinue() => setState(() => _step = 1);
-  void _onBack() => setState(() => _step = 0);
+  void _onContinue() => setState(() => _step++);
+  void _onBack() => setState(() => _step--);
 
   Future<void> _onComplete() async {
     final router = GoRouter.of(context);
@@ -52,9 +54,11 @@ class _TripSetupSheetState extends State<TripSetupSheet> {
   @override
   Widget build(BuildContext context) {
     final provider = context.read<TripProvider>();
-    final canAdvance = _step == 0
-        ? StepOneInit.isValid(_draft)
-        : StepTwoTemplate.isValid(_draft);
+    final canAdvance = switch (_step) {
+      0 => StepOneInit.isValid(_draft),
+      1 => StepWhoIsComing.isValid(_draft),
+      _ => StepTwoTemplate.isValid(_draft),
+    };
 
     return DraggableScrollableSheet(
       initialChildSize: 0.85,
@@ -63,7 +67,7 @@ class _TripSetupSheetState extends State<TripSetupSheet> {
       expand: false,
       builder: (context, scrollController) => Container(
         decoration: const BoxDecoration(
-          color: AppTheme.surface,
+          color: AppTheme.lightSurface,
           borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
         ),
         child: Column(
@@ -74,36 +78,44 @@ class _TripSetupSheetState extends State<TripSetupSheet> {
                 width: 44,
                 height: 5,
                 decoration: BoxDecoration(
-                  color: AppTheme.textSecondary,
+                  color: AppTheme.lightMute,
                   borderRadius: BorderRadius.circular(3),
                 ),
               ),
             ),
             _header(context),
-            const Divider(height: 1, color: AppTheme.divider),
+            const Divider(height: 1, color: AppTheme.lightBorder),
             Expanded(
               child: AnimatedSwitcher(
                 duration: const Duration(milliseconds: 220),
-                child: _step == 0
-                    ? StepOneInit(
-                        key: const ValueKey('step1'),
-                        draft: _draft,
-                        scrollController: scrollController,
-                        onChanged: () => setState(() {}),
-                      )
-                    : StepTwoTemplate(
-                        key: const ValueKey('step2'),
-                        draft: _draft,
-                        blueprints:
-                            provider.blueprintsFor(_draft.location ?? ''),
-                        isLoading: provider.isLoading,
-                        scrollController: scrollController,
-                        onChanged: () => setState(() {}),
-                      ),
+                child: switch (_step) {
+                  0 => StepOneInit(
+                      key: const ValueKey('step1'),
+                      draft: _draft,
+                      scrollController: scrollController,
+                      onChanged: () => setState(() {}),
+                    ),
+                  1 => StepWhoIsComing(
+                      key: const ValueKey('step2'),
+                      draft: _draft,
+                      scrollController: scrollController,
+                      onChanged: () => setState(() {}),
+                    ),
+                  _ => StepTwoTemplate(
+                      key: const ValueKey('step3'),
+                      draft: _draft,
+                      blueprints:
+                          provider.blueprintsFor(_draft.location ?? ''),
+                      isLoading: provider.isLoading,
+                      scrollController: scrollController,
+                      onChanged: () => setState(() {}),
+                    ),
+                },
               ),
             ),
             _Footer(
               step: _step,
+              lastStep: 2,
               canAdvance: canAdvance,
               isCreating: _isCreating,
               onBack: _onBack,
@@ -124,7 +136,7 @@ class _TripSetupSheetState extends State<TripSetupSheet> {
         children: [
           Expanded(
             child: Text(
-              'Step ${_step + 1} of 2',
+              'Step ${_step + 1} of 3',
               style: const TextStyle(
                 color: AppTheme.primary,
                 fontSize: 12,
@@ -134,17 +146,21 @@ class _TripSetupSheetState extends State<TripSetupSheet> {
             ),
           ),
           GestureDetector(
-            onTap: () => context.pop(),
+            // Every entry point pushes this sheet (see trip_routes.dart), so
+            // there's always a route to pop back to — canPop() is a defensive
+            // fallback matching the house pattern (see placement_screen.dart)
+            // in case a future call site reaches here via go() instead.
+            onTap: () =>
+                context.canPop() ? context.pop() : context.go('/profile'),
             child: Container(
               width: 44,
               height: 44,
               decoration: BoxDecoration(
-                color: AppTheme.surface2,
+                color: AppTheme.lightCard,
                 borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: AppTheme.divider),
+                border: Border.all(color: AppTheme.lightBorder),
               ),
-              child: const Icon(Icons.close,
-                  color: AppTheme.textSecondary, size: 20),
+              child: const Icon(Icons.close, color: AppTheme.lightMute, size: 20),
             ),
           ),
         ],
@@ -157,6 +173,7 @@ class _TripSetupSheetState extends State<TripSetupSheet> {
 class _Footer extends StatelessWidget {
   const _Footer({
     required this.step,
+    required this.lastStep,
     required this.canAdvance,
     required this.isCreating,
     required this.onBack,
@@ -165,6 +182,7 @@ class _Footer extends StatelessWidget {
   });
 
   final int step;
+  final int lastStep;
   final bool canAdvance;
   final bool isCreating;
   final VoidCallback onBack;
@@ -173,7 +191,7 @@ class _Footer extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isLast = step == 1;
+    final isLast = step == lastStep;
     final onPrimary = isLast
         ? (canAdvance && !isCreating ? onComplete : null)
         : (canAdvance ? onContinue : null);
@@ -182,23 +200,27 @@ class _Footer extends StatelessWidget {
       padding: EdgeInsets.fromLTRB(
           20, 12, 20, 12 + MediaQuery.of(context).padding.bottom),
       decoration: const BoxDecoration(
-        border: Border(top: BorderSide(color: AppTheme.divider)),
+        border: Border(top: BorderSide(color: AppTheme.lightBorder)),
       ),
       child: Row(
         children: [
-          if (isLast)
+          if (step > 0)
             TextButton(
               onPressed: isCreating ? null : onBack,
-              child: const Text('Back',
-                  style: TextStyle(color: AppTheme.textSecondary)),
+              child: const Text('Back', style: TextStyle(color: AppTheme.lightMute)),
             ),
           Expanded(
-            child: Center(child: _Dots(active: step)),
+            child: Center(child: _Dots(active: step, count: lastStep + 1)),
           ),
           SizedBox(
             width: 150,
             child: ElevatedButton(
               onPressed: onPrimary,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppTheme.primary,
+                disabledBackgroundColor: AppTheme.lightBorder,
+                foregroundColor: Colors.white,
+              ),
               child: isCreating
                   ? const SizedBox(
                       width: 20,
@@ -216,14 +238,15 @@ class _Footer extends StatelessWidget {
 }
 
 class _Dots extends StatelessWidget {
-  const _Dots({required this.active});
+  const _Dots({required this.active, required this.count});
   final int active;
+  final int count;
 
   @override
   Widget build(BuildContext context) {
     return Row(
       mainAxisSize: MainAxisSize.min,
-      children: List.generate(2, (i) {
+      children: List.generate(count, (i) {
         final on = i == active;
         return AnimatedContainer(
           duration: const Duration(milliseconds: 150),
@@ -231,7 +254,7 @@ class _Dots extends StatelessWidget {
           width: on ? 18 : 6,
           height: 6,
           decoration: BoxDecoration(
-            color: on ? AppTheme.primary : AppTheme.divider,
+            color: on ? AppTheme.primary : AppTheme.lightBorder,
             borderRadius: BorderRadius.circular(3),
           ),
         );

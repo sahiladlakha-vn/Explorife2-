@@ -5,32 +5,74 @@ import '../../core/theme/app_theme.dart';
 import '../../models/trip.dart';
 import '../../providers/trip_provider.dart';
 import '../../widgets/budget_status.dart';
-import 'widgets/discovery_panel.dart';
-import 'widgets/discovery_sheet.dart';
+import '../profile/profile_screen.dart';
 import 'widgets/itinerary_canvas.dart';
 import 'widgets/summary_sidebar.dart';
+
+/// The trip is auto-saved throughout the builder (createTrip commits before
+/// this screen ever mounts; every stop add persists immediately), so "back"
+/// never needs to save/discard — it just navigates. Lands on My Trip's
+/// Itinerary segment for this specific trip via ProfileDeepLink, closing the
+/// tab-deeplink gap every call site here used to carry as a TODO.
+void _exitToItinerary(BuildContext context, {String? tripId}) {
+  context.go('/profile',
+      extra: ProfileDeepLink(
+          tab: 1, tripId: tripId, segment: TripDetailSegment.itinerary));
+}
 
 /// Matches [SummarySidebar]'s `_MobilePeek` fixed height.
 const double _kSummaryPeekHeight = 120;
 
-/// Rough reserve for [DiscoveryBottomSheet]'s collapsed bar, so the itinerary's
-/// bottom-most content doesn't render underneath it. The sheet computes its
-/// own exact collapsed height from content, not this constant — this is just
-/// a little breathing room for the canvas padding, not a layout contract.
-const double _kDiscoveryCollapsedReserve = 56;
+/// Boxed icon affordance — pixel-identical to the "+ New Trip" wizard's close
+/// button (trip_setup_sheet.dart's header), reused here so the builder's exit
+/// control and share icon read as the same visual language as the rest of the
+/// trip-creation flow, not a stock unstyled BackButton/IconButton.
+class _HeaderIconBox extends StatelessWidget {
+  const _HeaderIconBox(
+      {required this.icon, required this.onTap, this.tooltip});
 
-/// Full-screen 3-pane Trip Builder. Subscriber, not owner: the only local state
-/// is [_activeDay]; trips/stops live on TripProvider. Dark colorway throughout.
+  final IconData icon;
+  final VoidCallback onTap;
+  final String? tooltip;
+
+  @override
+  Widget build(BuildContext context) {
+    final box = GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: 44,
+        height: 44,
+        decoration: BoxDecoration(
+          color: AppTheme.lightCard,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: AppTheme.lightBorder),
+        ),
+        child: Icon(icon, color: AppTheme.lightMute, size: 20),
+      ),
+    );
+    return tooltip == null ? box : Tooltip(message: tooltip!, child: box);
+  }
+}
+
+/// Full-screen 2-pane Trip Builder (Itinerary + Summary). Subscriber, not
+/// owner: the only local state is [_activeDay]; trips/stops live on
+/// TripProvider. Discovery is no longer a standalone pane/sheet here — gems
+/// are found and attached through [AddStopSheet], opened from each slot's
+/// "+ Add" (see itinerary_canvas.dart's `TimeSlotBlock`).
 class TripBuilderScreen extends StatefulWidget {
-  const TripBuilderScreen({super.key, required this.tripId});
+  const TripBuilderScreen({super.key, required this.tripId, this.initialDay});
   final String tripId;
+
+  /// Day to land on, e.g. when arriving from My Trip's "+ Add activity" for a
+  /// specific day. Defaults to Day 1 when absent.
+  final int? initialDay;
 
   @override
   State<TripBuilderScreen> createState() => _TripBuilderScreenState();
 }
 
 class _TripBuilderScreenState extends State<TripBuilderScreen> {
-  int _activeDay = 1;
+  late int _activeDay = widget.initialDay ?? 1;
   void _onDayChanged(int day) => setState(() => _activeDay = day);
 
   @override
@@ -43,10 +85,28 @@ class _TripBuilderScreenState extends State<TripBuilderScreen> {
 
     // Trip present wins: transient mutation errors surface via pane snackbars,
     // they must not blow the loaded builder away. Absent → loading/error/404.
-    if (trip != null) return _loaded(context, trip);
-    if (isLoading) return _skeleton();
-    if (error != null) return _errorState(context, error);
-    return _notFound(context);
+    final child = trip != null
+        ? _loaded(context, trip)
+        : isLoading
+            ? _skeleton()
+            : error != null
+                ? _errorState(context, error)
+                : _notFound(context);
+
+    // This screen is reached via router.push (trip_setup_sheet.dart), so it
+    // sits on top of the just-completed "+ New Trip" wizard sheet in the
+    // Navigator stack. An unhandled system back gesture/hardware button would
+    // pop straight into that now-stale sheet instead of landing on the trip —
+    // intercept it and route through the same itinerary deep link the header
+    // back button uses, so every exit path is consistent.
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) {
+        if (didPop) return;
+        _exitToItinerary(context, tripId: widget.tripId);
+      },
+      child: child,
+    );
   }
 
   // ---- State 4: loaded → responsive 3-pane ----
@@ -56,20 +116,16 @@ class _TripBuilderScreenState extends State<TripBuilderScreen> {
     // so there's no mismatch to reconcile).
     final isMobile = MediaQuery.of(context).size.width < 900;
     return Scaffold(
-      backgroundColor: AppTheme.bg,
+      backgroundColor: AppTheme.lightSurface,
       appBar: _TripBuilderHeader(tripId: widget.tripId, isMobile: isMobile),
       body: LayoutBuilder(
         builder: (context, constraints) {
           final w = constraints.maxWidth;
           if (w >= 900) {
-            final left = w >= 1100 ? 280.0 : 240.0;
             final right = w >= 1100 ? 320.0 : 280.0;
             return Row(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                SizedBox(
-                    width: left, child: DiscoveryPanel(tripId: widget.tripId)),
-                const VerticalDivider(width: 1, color: AppTheme.divider),
                 Expanded(
                   child: ItineraryCanvas(
                     tripId: widget.tripId,
@@ -77,7 +133,7 @@ class _TripBuilderScreenState extends State<TripBuilderScreen> {
                     onDayChanged: _onDayChanged,
                   ),
                 ),
-                const VerticalDivider(width: 1, color: AppTheme.divider),
+                const VerticalDivider(width: 1, color: AppTheme.lightBorder),
                 SizedBox(
                   width: right,
                   child: SummarySidebar(
@@ -86,42 +142,24 @@ class _TripBuilderScreenState extends State<TripBuilderScreen> {
               ],
             );
           }
-          // < 900: full-screen itinerary as the base layer, with Discovery as
-          // a proper draggable bottom sheet (collapsed/half/full — see
-          // DiscoveryBottomSheet) floating above it, and the Summary peek
-          // pinned below that. The sheet is given the whole area above the
-          // peek (top: 0, bottom: _kSummaryPeekHeight) so its own fractional
-          // snap sizes are relative to "the space above the peek", not the
-          // full physical screen.
-          return Stack(
+          // < 900: itinerary fills the space above the Summary peek. No more
+          // floating Discovery layer to reserve room for — AddStopSheet is a
+          // modal (showModalBottomSheet from each slot's "+ Add"), not a
+          // persistent overlay, so a plain Column replaces the old
+          // Stack/Positioned composition entirely.
+          return Column(
             children: [
-              Positioned.fill(
-                child: Padding(
-                  // Bottom-pad the canvas so its lowest content never renders
-                  // underneath the peek or the sheet's collapsed bar.
-                  padding: const EdgeInsets.only(
-                      bottom: _kSummaryPeekHeight + _kDiscoveryCollapsedReserve),
-                  child: ItineraryCanvas(
-                    tripId: widget.tripId,
-                    activeDay: _activeDay,
-                    onDayChanged: _onDayChanged,
-                  ),
-                ),
-              ),
-              Positioned(
-                left: 0,
-                right: 0,
-                top: 0,
-                bottom: _kSummaryPeekHeight,
-                child: DiscoveryBottomSheet(tripId: widget.tripId),
-              ),
-              Align(
-                alignment: Alignment.bottomCenter,
-                child: SummarySidebar(
+              Expanded(
+                child: ItineraryCanvas(
                   tripId: widget.tripId,
                   activeDay: _activeDay,
-                  collapsed: true, // peek mode at mobile widths
+                  onDayChanged: _onDayChanged,
                 ),
+              ),
+              SummarySidebar(
+                tripId: widget.tripId,
+                activeDay: _activeDay,
+                collapsed: true, // peek mode at mobile widths
               ),
             ],
           );
@@ -131,32 +169,35 @@ class _TripBuilderScreenState extends State<TripBuilderScreen> {
   }
 
   // ---- State 1: loading (trip not yet cached) ----
-  // Skeleton mirrors the mobile shape (canvas → discovery → summary peek) so the
-  // layout doesn't jump on first paint — a shape promise, not just "loading".
+  // Skeleton mirrors the 2-pane shape (canvas + summary) so the layout
+  // doesn't jump on first paint — a shape promise, not just "loading".
   Widget _skeleton() {
     Widget block() => Container(
           margin: const EdgeInsets.all(8),
           decoration: BoxDecoration(
-            color: AppTheme.surface2,
+            color: AppTheme.lightCard,
             borderRadius: BorderRadius.circular(12),
           ),
         );
     return Scaffold(
-      backgroundColor: AppTheme.bg,
+      backgroundColor: AppTheme.lightSurface,
       appBar: AppBar(
-        // TODO(tab-deeplink): target the Trips tab once it's deep-linkable.
-        leading: BackButton(onPressed: () => context.go('/profile')),
+        backgroundColor: AppTheme.lightSurface,
+        leading: Center(
+          child: _HeaderIconBox(
+            icon: Icons.close,
+            onTap: () => _exitToItinerary(context, tripId: widget.tripId),
+          ),
+        ),
       ),
       body: LayoutBuilder(
         builder: (context, c) => c.maxWidth >= 900
             ? Row(children: [
-                SizedBox(width: 260, child: block()),
                 Expanded(child: block()),
                 SizedBox(width: 300, child: block()),
               ])
             : Column(children: [
                 Expanded(child: block()), // canvas placeholder
-                const SizedBox(height: 48), // discovery collapsed-bar gap
                 SizedBox(
                     height: _kSummaryPeekHeight,
                     child: block()), // summary peek placeholder
@@ -168,10 +209,15 @@ class _TripBuilderScreenState extends State<TripBuilderScreen> {
   // ---- State 3: error ----
   Widget _errorState(BuildContext context, String message) {
     return Scaffold(
-      backgroundColor: AppTheme.bg,
+      backgroundColor: AppTheme.lightSurface,
       appBar: AppBar(
-        // TODO(tab-deeplink): target the Trips tab once it's deep-linkable.
-        leading: BackButton(onPressed: () => context.go('/profile')),
+        backgroundColor: AppTheme.lightSurface,
+        leading: Center(
+          child: _HeaderIconBox(
+            icon: Icons.close,
+            onTap: () => _exitToItinerary(context, tripId: widget.tripId),
+          ),
+        ),
       ),
       body: Center(
         child: Padding(
@@ -180,11 +226,11 @@ class _TripBuilderScreenState extends State<TripBuilderScreen> {
             mainAxisSize: MainAxisSize.min,
             children: [
               const Icon(Icons.error_outline,
-                  color: AppTheme.textSecondary, size: 40),
+                  color: AppTheme.lightMute, size: 40),
               const SizedBox(height: 12),
               const Text("Couldn't load this trip.",
                   style:
-                      TextStyle(color: AppTheme.textPrimary, fontSize: 16)),
+                      TextStyle(color: AppTheme.lightInk, fontSize: 16)),
               const SizedBox(height: 6),
               // Raw error kept as a clipped diagnostic breadcrumb for support.
               Text(message,
@@ -192,7 +238,7 @@ class _TripBuilderScreenState extends State<TripBuilderScreen> {
                   overflow: TextOverflow.ellipsis,
                   textAlign: TextAlign.center,
                   style: const TextStyle(
-                      color: AppTheme.textSecondary, fontSize: 12)),
+                      color: AppTheme.lightMute, fontSize: 12)),
               const SizedBox(height: 20),
               ElevatedButton(
                 onPressed: () => context.read<TripProvider>().init(),
@@ -208,10 +254,15 @@ class _TripBuilderScreenState extends State<TripBuilderScreen> {
   // ---- State 2: not found (after load) ----
   Widget _notFound(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppTheme.bg,
+      backgroundColor: AppTheme.lightSurface,
       appBar: AppBar(
-        // TODO(tab-deeplink): target the Trips tab once it's deep-linkable.
-        leading: BackButton(onPressed: () => context.go('/profile')),
+        backgroundColor: AppTheme.lightSurface,
+        leading: Center(
+          child: _HeaderIconBox(
+            icon: Icons.close,
+            onTap: () => _exitToItinerary(context),
+          ),
+        ),
       ),
       body: Center(
         child: Padding(
@@ -220,14 +271,14 @@ class _TripBuilderScreenState extends State<TripBuilderScreen> {
             mainAxisSize: MainAxisSize.min,
             children: [
               const Icon(Icons.map_outlined,
-                  color: AppTheme.textSecondary, size: 40),
+                  color: AppTheme.lightMute, size: 40),
               const SizedBox(height: 12),
               const Text("This trip doesn't exist or isn't yours.",
                   textAlign: TextAlign.center,
-                  style: TextStyle(color: AppTheme.textSecondary)),
+                  style: TextStyle(color: AppTheme.lightMute)),
               const SizedBox(height: 20),
               ElevatedButton(
-                onPressed: () => context.go('/profile'),
+                onPressed: () => _exitToItinerary(context),
                 child: const Text('Go to trips'),
               ),
             ],
@@ -258,19 +309,28 @@ class _TripBuilderHeader extends StatelessWidget implements PreferredSizeWidget 
     // trip vanished mid-frame, fall back to a bare bar rather than throwing.
     if (trip == null) {
       return AppBar(
-        backgroundColor: AppTheme.surface,
-        leading: BackButton(onPressed: () => context.go('/profile')),
+        backgroundColor: AppTheme.lightSurface,
+        leading: Center(
+          child: _HeaderIconBox(
+            icon: Icons.close,
+            onTap: () => _exitToItinerary(context, tripId: tripId),
+          ),
+        ),
       );
     }
     final spent = context.select<TripProvider, int>((p) => p.totalSpent(tripId));
 
     return AppBar(
-      backgroundColor: AppTheme.surface,
+      backgroundColor: AppTheme.lightSurface,
       surfaceTintColor: Colors.transparent,
       toolbarHeight: preferredSize.height,
       titleSpacing: 0,
-      // TODO(tab-deeplink): target the Trips tab once it's deep-linkable.
-      leading: BackButton(onPressed: () => context.go('/profile')),
+      leading: Center(
+        child: _HeaderIconBox(
+          icon: Icons.close,
+          onTap: () => _exitToItinerary(context, tripId: tripId),
+        ),
+      ),
       title: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisAlignment: MainAxisAlignment.center,
@@ -280,7 +340,7 @@ class _TripBuilderHeader extends StatelessWidget implements PreferredSizeWidget 
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: TextStyle(
-              color: AppTheme.textPrimary,
+              color: AppTheme.lightInk,
               fontSize: isMobile ? 16 : 18,
               fontWeight: FontWeight.w700,
             ),
@@ -292,7 +352,7 @@ class _TripBuilderHeader extends StatelessWidget implements PreferredSizeWidget 
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: const TextStyle(
-                  color: AppTheme.textSecondary, fontSize: 11),
+                  color: AppTheme.lightMute, fontSize: 11),
             ),
         ],
       ),
@@ -303,19 +363,20 @@ class _TripBuilderHeader extends StatelessWidget implements PreferredSizeWidget 
           const SizedBox(width: 10),
         ],
         _BudgetPill(budgetVnd: trip.budgetVnd, spent: spent),
-        IconButton(
-          icon: const Icon(Icons.share_outlined, color: AppTheme.textSecondary),
+        const SizedBox(width: 8),
+        _HeaderIconBox(
+          icon: Icons.share_outlined,
           tooltip: 'Share',
           // TODO(share): open the collaborator/share sheet once it lands.
-          onPressed: () => ScaffoldMessenger.of(context).showSnackBar(
+          onTap: () => ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('Share coming soon')),
           ),
         ),
-        const SizedBox(width: 4),
+        const SizedBox(width: 8),
       ],
       bottom: const PreferredSize(
         preferredSize: Size.fromHeight(1),
-        child: Divider(height: 1, color: AppTheme.divider),
+        child: Divider(height: 1, color: AppTheme.lightBorder),
       ),
     );
   }
@@ -336,20 +397,20 @@ class _DateChip extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       decoration: BoxDecoration(
-        color: AppTheme.surface2,
+        color: AppTheme.lightCard,
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: AppTheme.divider),
+        border: Border.all(color: AppTheme.lightBorder),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
           const Icon(Icons.calendar_today,
-              size: 14, color: AppTheme.textSecondary),
+              size: 14, color: AppTheme.lightMute),
           const SizedBox(width: 6),
           Text(
             '${Trip.formatDateRange(start, end)} · $nights ${nights == 1 ? 'night' : 'nights'}',
             style: const TextStyle(
-                color: AppTheme.textSecondary,
+                color: AppTheme.lightMute,
                 fontSize: 12,
                 fontWeight: FontWeight.w600),
           ),
@@ -387,12 +448,12 @@ class _BudgetPill extends StatelessWidget {
                 color: AppTheme.danger, fontWeight: FontWeight.w600))
         : TextSpan(
             text: ' of ₫${Trip.formatVnd(budgetVnd, short: true)}',
-            style: const TextStyle(color: AppTheme.textSecondary));
+            style: const TextStyle(color: AppTheme.lightMute));
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       decoration: BoxDecoration(
-        color: AppTheme.surface2,
+        color: AppTheme.lightCard,
         borderRadius: BorderRadius.circular(20),
         border: Border.all(color: accent),
       ),
