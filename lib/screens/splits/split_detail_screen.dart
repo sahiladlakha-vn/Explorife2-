@@ -84,7 +84,7 @@ class _SplitDetailScreenState extends State<SplitDetailScreen> {
                 final ok = await context.read<SplitsProvider>().addExpense(
                   groupId: widget.groupId,
                   paidBy: auth.user?.id ?? '',
-                  description: descCtrl.text.trim(),
+                  title: descCtrl.text.trim(),
                   amount: amt,
                 );
                 if (ok) _load();
@@ -233,7 +233,7 @@ class _ExpenseRow extends StatelessWidget {
       child: Row(children: [
         Expanded(
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(expense.description,
+            Text(expense.title,
                 style: GoogleFonts.dmSans(
                     fontSize: 14, fontWeight: FontWeight.w600,
                     color: AppTheme.textPrimary)),

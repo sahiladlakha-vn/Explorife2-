@@ -109,22 +109,116 @@ class SplitsProvider extends ChangeNotifier {
   Future<bool> addExpense({
     required String groupId,
     required String paidBy,
-    required String description,
+    required String title,
     required double amount,
     String currency = 'USD',
+    String? tripId,
+    String? category,
   }) async {
     try {
+      // 'title' — NOT 'description'. The live split_expenses table has no
+      // description column; this insert previously sent a key PostgREST
+      // rejected on every call, so every "Add expense" tap silently failed
+      // (addExpense caught the error and returned false with no user-facing
+      // message). Confirmed against information_schema.columns.
       await _db.from('split_expenses').insert({
         'group_id': groupId,
         'paid_by': paidBy,
-        'description': description,
+        'title': title,
         'amount': amount,
         'currency': currency,
+        if (tripId != null) 'trip_id': tripId,
+        if (category != null) 'category': category,
       });
       return true;
     } catch (e) {
       debugPrint('addExpense error: $e');
       return false;
     }
+  }
+
+  // ── Trip Dashboard ──────────────────────────────────────────────────────
+  // Caches keyed by tripId (mirrors BookingProvider/TripSetupProvider). Key
+  // present with an empty list == "fetched, none"; a MISSING key == "never
+  // fetched".
+  final Map<String, List<SplitExpense>> _expensesByTrip = {};
+  final Map<String, List<SplitExpenseShare>> _sharesByTrip = {};
+  final Map<String, List<SplitSettlement>> _settlementsByTrip = {};
+  final Map<String, bool> _dashboardLoadingByTrip = {};
+  final Map<String, String?> _dashboardErrorByTrip = {};
+
+  List<SplitExpense> expensesForTrip(String tripId) =>
+      _expensesByTrip[tripId] ?? const <SplitExpense>[];
+  List<SplitExpenseShare> sharesForTrip(String tripId) =>
+      _sharesByTrip[tripId] ?? const <SplitExpenseShare>[];
+  List<SplitSettlement> settlementsForTrip(String tripId) =>
+      _settlementsByTrip[tripId] ?? const <SplitSettlement>[];
+  bool isDashboardLoading(String tripId) =>
+      _dashboardLoadingByTrip[tripId] ?? false;
+  String? dashboardErrorFor(String tripId) => _dashboardErrorByTrip[tripId];
+  bool hasLoadedDashboard(String tripId) => _expensesByTrip.containsKey(tripId);
+
+  /// Loads everything the trip Dashboard needs: this trip's expenses, the
+  /// per-member shares recorded against them (usually empty — see
+  /// [SplitExpenseShare]'s doc comment), and settlements for whichever
+  /// group(s) those expenses belong to. Settlements have no trip_id of their
+  /// own (only group_id), so "this trip's settlements" means "settlements on
+  /// any group this trip's expenses reference" — an indirect but correct
+  /// lookup given the live schema.
+  Future<void> loadTripDashboard(String tripId, {bool force = false}) async {
+    if (!force &&
+        (hasLoadedDashboard(tripId) || (_dashboardLoadingByTrip[tripId] ?? false))) {
+      return;
+    }
+    _dashboardLoadingByTrip[tripId] = true;
+    _dashboardErrorByTrip[tripId] = null;
+    notifyListeners();
+
+    try {
+      final expenseRows = await _db
+          .from('split_expenses')
+          .select()
+          .eq('trip_id', tripId)
+          .order('expense_date', ascending: false);
+      final expenses =
+          (expenseRows as List).map((e) => SplitExpense.fromJson(e)).toList();
+      _expensesByTrip[tripId] = expenses;
+
+      final expenseIds = expenses.map((e) => e.id).toList();
+      _sharesByTrip[tripId] = expenseIds.isEmpty
+          ? []
+          : (await _db
+                  .from('split_expense_shares')
+                  .select()
+                  .inFilter('expense_id', expenseIds) as List)
+              .map((e) => SplitExpenseShare.fromJson(e))
+              .toList();
+
+      final groupIds =
+          expenses.map((e) => e.groupId).whereType<String>().toSet().toList();
+      _settlementsByTrip[tripId] = groupIds.isEmpty
+          ? []
+          : (await _db
+                  .from('split_settlements')
+                  .select()
+                  .inFilter('group_id', groupIds) as List)
+              .map((e) => SplitSettlement.fromJson(e))
+              .toList();
+    } catch (e) {
+      _dashboardErrorByTrip[tripId] = e.toString();
+    } finally {
+      _dashboardLoadingByTrip[tripId] = false;
+      notifyListeners();
+    }
+  }
+
+  void clear() {
+    _groups = [];
+    _expensesByTrip.clear();
+    _sharesByTrip.clear();
+    _settlementsByTrip.clear();
+    _dashboardLoadingByTrip.clear();
+    _dashboardErrorByTrip.clear();
+    notifyListeners();
   }
 }

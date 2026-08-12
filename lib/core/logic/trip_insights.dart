@@ -12,6 +12,7 @@
 
 import '../../models/trip_stop.dart';
 import '../../models/trip_booking.dart';
+import '../../models/gem.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Alerts
@@ -80,7 +81,11 @@ List<Alert> unbookedStopAlerts({
           severity: AlertSeverity.info,
           tripId: tripId,
           stopId: s.id,
-          payload: {'priceVnd': s.priceVnd},
+          // Display-only (not a sum) — the one consumer (overview_tab.dart's
+          // _alertCopy) already branches on `price > 0` and treats <= 0 as
+          // "nothing to show," so TBD and confirmed-free read identically
+          // here without needing payload's value type to go nullable.
+          payload: {'priceVnd': s.priceVnd ?? 0},
         ),
   ];
 }
@@ -245,7 +250,7 @@ Map<String, int> actualSpendByCategory({
   for (final s in stops) {
     if (superseded.contains(s.id)) continue;
     final cat = stopCategory(s);
-    out[cat] = (out[cat] ?? 0) + s.priceVnd;
+    out[cat] = (out[cat] ?? 0) + (s.priceVnd ?? 0); // null == TBD, excluded.
   }
   for (final b in bookings) {
     if (!b.hasKnownAmount) continue; // null == TBD, excluded (0 stays in).
@@ -338,7 +343,7 @@ TripPace computePace({
   // Rule 2: stop estimates up to and including today, minus superseded stops.
   for (final s in stops) {
     if (superseded.contains(s.id)) continue;
-    if (s.day <= dayToday) cumulative += s.priceVnd;
+    if (s.day <= dayToday) cumulative += (s.priceVnd ?? 0); // null == TBD.
   }
 
   // Rule 3: booking actuals, honoring status + date + the null-amount exclusion.
@@ -539,4 +544,98 @@ List<BadgeProgress> evaluateBadges({required Map<BadgeMetric, int> counts}) {
         );
       }(),
   ];
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Day rollup — Itinerary day-summary strip (planned time + planned cost)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Result of [dayRollup]: the Itinerary day-summary strip's numbers.
+/// Distance is deliberately NOT included — travel distance needs a real
+/// routing engine over the day's actual path, not a straight-line lat/lng
+/// guess; that's a later concern, not faked here.
+class DayRollup {
+  /// Sum of each stop's gem [Gem.estDurationMin] + each stop's own
+  /// [TripStop.transitDurationMin]. A stop/leg with no duration set
+  /// contributes nothing (excluded, not zero) — same null-excluded
+  /// discipline as every money sum in this file.
+  final int plannedMinutes;
+
+  /// Sum of each stop's resolved cost (see [tbdCount] for what "resolved"
+  /// means) + each stop's own [TripStop.transitCostVnd]. MONEY RULE: TBD
+  /// stops/legs are excluded here, never coalesced to 0.
+  final int plannedCostVnd;
+
+  /// Count of stops whose cost couldn't be resolved to a number at all —
+  /// [TripStop.priceVnd] is null AND either no booking is pinned to the stop
+  /// or the pinned booking's own amount is itself TBD. Surfaced separately
+  /// so the UI can show "+N TBD" rather than silently under-totaling. Scoped
+  /// to stop cost only — an unknown transit-leg cost isn't counted here (the
+  /// Itinerary's transit thread has no TBD affordance of its own; Phase 3
+  /// just omits the cost segment when it's null).
+  final int tbdCount;
+
+  const DayRollup({
+    required this.plannedMinutes,
+    required this.plannedCostVnd,
+    required this.tbdCount,
+  });
+}
+
+/// Pure planned-time/planned-cost rollup for one day's stops. Caller passes
+/// the day's stops already filtered (e.g. `TripProvider.stopsForDay`) and
+/// the trip's full booking list (for the cost fallback) plus a
+/// gem-resolving closure (for the duration lookup, mirroring the
+/// `resolveGem` closure `ItineraryCanvas`/`SummarySidebar` already build
+/// from `GemProvider.allGems`) — this function never touches a provider or
+/// BuildContext itself, so it's unit-testable with plain lists.
+///
+/// COST RESOLUTION per stop, in order: the stop's own [TripStop.priceVnd] if
+/// set; else the amountVnd of a booking pinned to this stop
+/// (`TripBooking.stopId == stop.id`) if one exists and has a known amount;
+/// else the stop counts toward [DayRollup.tbdCount] and contributes nothing
+/// to [DayRollup.plannedCostVnd]. This is the same stopId→booking
+/// relationship [unbookedStopAlerts] already uses for the "is this stop
+/// booked" question — a stop pinned to multiple bookings (unusual, not
+/// schema-prevented) resolves to whichever match is found first, same
+/// tie-break as that function.
+DayRollup dayRollup({
+  required List<TripStop> stops,
+  required List<TripBooking> bookings,
+  required Gem? Function(String gemId) resolveGem,
+}) {
+  final bookingByStopId = <String, TripBooking>{
+    for (final b in bookings)
+      if (b.stopId != null) b.stopId!: b,
+  };
+
+  var minutes = 0;
+  var costVnd = 0;
+  var tbdCount = 0;
+
+  for (final s in stops) {
+    // Duration: gem's estimate + this stop's own transit-in leg. A custom
+    // (non-gem) stop simply has no duration source and contributes 0 here —
+    // a real "unknown," not a modeling gap.
+    if (!s.isCustom) {
+      final duration = resolveGem(s.gemId!)?.estDurationMin;
+      if (duration != null) minutes += duration;
+    }
+    if (s.transitDurationMin != null) minutes += s.transitDurationMin!;
+
+    // Cost: own price, else a pinned booking's amount, else TBD.
+    final resolvedCost = s.priceVnd ?? bookingByStopId[s.id]?.amountVnd;
+    if (resolvedCost != null) {
+      costVnd += resolvedCost;
+    } else {
+      tbdCount += 1;
+    }
+    if (s.transitCostVnd != null) costVnd += s.transitCostVnd!;
+  }
+
+  return DayRollup(
+    plannedMinutes: minutes,
+    plannedCostVnd: costVnd,
+    tbdCount: tbdCount,
+  );
 }
