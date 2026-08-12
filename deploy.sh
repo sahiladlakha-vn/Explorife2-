@@ -21,6 +21,7 @@ echo "==> Building Flutter web (release)..."
 
 # Restore the link so the deploy is non-interactive.
 if [ -d "$LINK_BACKUP" ]; then
+  rm -rf "build/web/.vercel"
   cp -r "$LINK_BACKUP" "build/web/.vercel"
 fi
 
