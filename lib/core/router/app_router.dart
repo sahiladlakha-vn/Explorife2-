@@ -5,10 +5,10 @@ import '../../core/theme/app_theme.dart';
 import '../../providers/auth_provider.dart';
 import '../../screens/auth/auth_screen.dart';
 import '../../screens/home/home_screen.dart';
+import '../../screens/home/destination_landing_screen.dart';
 import '../../screens/explore/explore_screen.dart';
 import '../../screens/listings/listings_screen.dart';
 import '../../screens/listings/destination_detail_screen.dart';
-import '../../screens/search/search_screen.dart';
 import '../../screens/profile/profile_screen.dart';
 import '../../screens/gems/gem_detail_screen.dart';
 import '../../screens/gems/placement_screen.dart';
@@ -28,7 +28,14 @@ import '../../routes/trip_routes.dart';
 // linking or navigator-key-based tests are needed — see also trip_routes.dart.
 
 // Matched by startsWith, so '/trips' covers '/trips/new' and '/trips/:id/builder'.
-const _protectedRoutes = {'/profile', '/drop-gem', '/submit-story', '/log-hike', '/splits', '/trips'};
+const _protectedRoutes = {
+  '/profile',
+  '/drop-gem',
+  '/submit-story',
+  '/log-hike',
+  '/splits',
+  '/trips'
+};
 
 class AppRouter {
   /// Build the router with [authRefresh] wired to `refreshListenable` so that
@@ -38,96 +45,127 @@ class AppRouter {
   /// user stranded on the initial route (e.g. stuck on /onboarding) and firing
   /// stale imperative navigation as auth churns.
   static GoRouter create(Listenable authRefresh) => GoRouter(
-    refreshListenable: authRefresh,
-    initialLocation: '/onboarding',
-    redirect: (context, state) {
-      final auth = context.read<AuthProvider>();
-      final path = state.uri.path;
-      final isProtected = _protectedRoutes.any((r) => path.startsWith(r));
+        refreshListenable: authRefresh,
+        initialLocation: '/onboarding',
+        redirect: (context, state) {
+          final auth = context.read<AuthProvider>();
+          final path = state.uri.path;
+          final isProtected = _protectedRoutes.any((r) => path.startsWith(r));
 
-      if (auth.loading) return null;
-      // Skip onboarding if already authenticated
-      if (path == '/onboarding' && auth.isAuthenticated) return '/home';
-      if (isProtected && !auth.isAuthenticated) {
-        return '/auth?redirect=${Uri.encodeComponent(path)}';
-      }
-      if (path == '/auth' && auth.isAuthenticated) {
-        return state.uri.queryParameters['redirect'] ?? '/home';
-      }
-      return null;
-    },
-    routes: [
-      GoRoute(
-        path: '/auth',
-        builder: (context, state) => AuthScreen(
-          redirectTo: state.uri.queryParameters['redirect'],
-        ),
-      ),
-      GoRoute(
-        path: '/auth/callback',
-        builder: (context, state) => const _AuthCallbackScreen(),
-      ),
-      ShellRoute(
-        builder: (context, state, child) => AppShell(child: child),
+          if (auth.loading) return null;
+          // Skip onboarding if already authenticated
+          if (path == '/onboarding' && auth.isAuthenticated) return '/home';
+          if (isProtected && !auth.isAuthenticated) {
+            return '/auth?redirect=${Uri.encodeComponent(path)}';
+          }
+          if (path == '/auth' && auth.isAuthenticated) {
+            return state.uri.queryParameters['redirect'] ?? '/home';
+          }
+          return null;
+        },
         routes: [
-          GoRoute(path: '/home', builder: (_, __) => const HomeScreen()),
-          GoRoute(path: '/explore', builder: (_, __) => const ExploreScreen()),
           GoRoute(
-            path: '/listings',
-            builder: (_, __) => const ListingsScreen(),
+            path: '/auth',
+            builder: (context, state) => AuthScreen(
+              redirectTo: state.uri.queryParameters['redirect'],
+            ),
+          ),
+          GoRoute(
+            path: '/auth/callback',
+            builder: (context, state) => const _AuthCallbackScreen(),
+          ),
+          ShellRoute(
+            builder: (context, state, child) => AppShell(child: child),
             routes: [
+              GoRoute(path: '/home', builder: (_, __) => const HomeScreen()),
               GoRoute(
-                path: ':id',
-                builder: (context, state) => DestinationDetailScreen(
-                  id: state.pathParameters['id']!,
-                ),
+                // Opened when a city is tapped in Home's "Where to next?"
+                // destination browser — an intermediate browsing page before
+                // trip creation (see destination_landing_screen.dart).
+                path: '/destinations/explore',
+                builder: (_, state) {
+                  final q = state.uri.queryParameters;
+                  return DestinationLandingScreen(
+                    cityName: q['name'] ?? 'this destination',
+                    lat: double.tryParse(q['lat'] ?? ''),
+                    lng: double.tryParse(q['lng'] ?? ''),
+                  );
+                },
               ),
+              GoRoute(
+                  path: '/explore', builder: (_, __) => const ExploreScreen()),
+              GoRoute(
+                path: '/listings',
+                // Merged search/discovery screen — Home's search bar passes
+                // extra: true to land it focused on the search field instead of
+                // the default Browse view; every other entry point (SEE ALL,
+                // the bottom nav's compass tab) omits extra, same as before.
+                // Home's category chips pass ?category=<Gem.categories value>
+                // instead (a separate query param, not `extra` — the two never
+                // apply together) to land pre-filtered.
+                builder: (_, state) => ListingsScreen(
+                  autofocusSearch: state.extra == true,
+                  initialCategory: state.uri.queryParameters['category'],
+                ),
+                routes: [
+                  GoRoute(
+                    path: ':id',
+                    builder: (context, state) => DestinationDetailScreen(
+                      id: state.pathParameters['id']!,
+                    ),
+                  ),
+                ],
+              ),
+              GoRoute(
+                path: '/profile',
+                builder: (_, state) =>
+                    ProfileScreen(deepLink: state.extra as ProfileDeepLink?),
+              ),
+              GoRoute(
+                  path: '/stories', builder: (_, __) => const StoriesScreen()),
+              GoRoute(
+                path: '/gems/:id',
+                builder: (context, state) =>
+                    GemDetailScreen(id: state.pathParameters['id']!),
+              ),
+              GoRoute(
+                path: '/stories/:id',
+                builder: (context, state) =>
+                    StoryDetailScreen(id: state.pathParameters['id']!),
+              ),
+              // Nested here (unlike its sibling trip routes below) so it gets the
+              // shell's persistent bottom nav, matching every other screen.
+              tripBuilderRoute(),
             ],
           ),
-          GoRoute(path: '/search', builder: (_, __) => const SearchScreen()),
           GoRoute(
-            path: '/profile',
-            builder: (_, state) =>
-                ProfileScreen(deepLink: state.extra as ProfileDeepLink?),
+            path: '/drop-gem',
+            builder: (_, state) {
+              final extra = state.extra as Map?;
+              return PlacementScreen(
+                initialLat: (extra?['lat'] as num?)?.toDouble(),
+                initialLng: (extra?['lng'] as num?)?.toDouble(),
+              );
+            },
           ),
-          GoRoute(path: '/stories', builder: (_, __) => const StoriesScreen()),
           GoRoute(
-            path: '/gems/:id',
-            builder: (context, state) => GemDetailScreen(id: state.pathParameters['id']!),
+              path: '/submit-story',
+              builder: (_, __) => const SubmitStoryScreen()),
+          // Trip Builder feature routes (overlay the shell, like the siblings above).
+          ...tripRoutes(),
+          GoRoute(path: '/hikes', builder: (_, __) => const HikesScreen()),
+          GoRoute(path: '/log-hike', builder: (_, __) => const LogHikeScreen()),
+          GoRoute(path: '/splits', builder: (_, __) => const SplitsScreen()),
+          GoRoute(
+            path: '/splits/:id',
+            builder: (context, state) =>
+                SplitDetailScreen(groupId: state.pathParameters['id']!),
           ),
           GoRoute(
-            path: '/stories/:id',
-            builder: (context, state) => StoryDetailScreen(id: state.pathParameters['id']!),
-          ),
-          // Nested here (unlike its sibling trip routes below) so it gets the
-          // shell's persistent bottom nav, matching every other screen.
-          tripBuilderRoute(),
+              path: '/onboarding',
+              builder: (_, __) => const OnboardingScreen()),
         ],
-      ),
-      GoRoute(
-        path: '/drop-gem',
-        builder: (_, state) {
-          final extra = state.extra as Map?;
-          return PlacementScreen(
-            initialLat: (extra?['lat'] as num?)?.toDouble(),
-            initialLng: (extra?['lng'] as num?)?.toDouble(),
-          );
-        },
-      ),
-      GoRoute(path: '/submit-story', builder: (_, __) => const SubmitStoryScreen()),
-      // Trip Builder feature routes (overlay the shell, like the siblings above).
-      ...tripRoutes(),
-      GoRoute(path: '/hikes', builder: (_, __) => const HikesScreen()),
-      GoRoute(path: '/log-hike', builder: (_, __) => const LogHikeScreen()),
-      GoRoute(path: '/splits', builder: (_, __) => const SplitsScreen()),
-      GoRoute(
-        path: '/splits/:id',
-        builder: (context, state) =>
-            SplitDetailScreen(groupId: state.pathParameters['id']!),
-      ),
-      GoRoute(path: '/onboarding', builder: (_, __) => const OnboardingScreen()),
-    ],
-  );
+      );
 }
 
 class _AuthCallbackScreen extends StatefulWidget {
@@ -148,7 +186,7 @@ class _AuthCallbackScreenState extends State<_AuthCallbackScreen> {
   @override
   Widget build(BuildContext context) {
     return const Scaffold(
-      backgroundColor: AppTheme.bg,
+      backgroundColor: AppTheme.lightSurface,
       body: Center(child: CircularProgressIndicator(color: AppTheme.primary)),
     );
   }
