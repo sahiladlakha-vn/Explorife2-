@@ -3,12 +3,15 @@ import 'package:geolocator/geolocator.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
+import '../../core/constants/gem_categories.dart';
+import '../../core/layout/breakpoints.dart';
+import '../../core/layout/max_width_center.dart';
 import '../../core/theme/app_theme.dart';
-import '../../providers/destination_provider.dart';
 import '../../providers/gem_provider.dart';
 import '../../models/gem.dart';
 import '../../widgets/app_network_image.dart';
 import '../../widgets/state_views.dart';
+import 'destination_browser_sheet.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -18,28 +21,20 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  // Labels are paired with the category values used by DestinationProvider so
-  // selecting a pill actually filters the lists.
-  static const List<({String value, String label, IconData icon})> _cats = [
-    (value: 'All', label: 'All', icon: Icons.public),
-    (value: 'Beach', label: 'Beach', icon: Icons.beach_access),
-    (value: 'Mountains', label: 'Mountains', icon: Icons.terrain),
-    (value: 'City', label: 'City', icon: Icons.location_city),
-    (value: 'Jungle', label: 'Jungle', icon: Icons.forest),
-    (value: 'Desert', label: 'Desert', icon: Icons.wb_sunny),
-    (value: 'Cultural', label: 'Cultural', icon: Icons.account_balance),
-    (value: 'Adventure', label: 'Adventure', icon: Icons.hiking),
+  // value is one of Gem.categories (or 'all') — the same taxonomy
+  // ListingsScreen's own category bar filters by, so a chip tap is a real
+  // filter there instead of a plain-text search-query guess. Icons reuse
+  // GemCategories.iconFor so a category reads identically everywhere in the
+  // app (Explore, Listings, here).
+  static final List<({String value, String label, IconData icon})> _cats = [
+    (value: 'all', label: 'All', icon: Icons.public),
+    for (final c in Gem.categories)
+      (
+        value: c,
+        label: c[0].toUpperCase() + c.substring(1),
+        icon: GemCategories.iconFor(c),
+      ),
   ];
-
-  @override
-  void initState() {
-    super.initState();
-    // Kick off the first load after the frame so notifyListeners() never
-    // fires mid-build. No-ops if a load already ran.
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      context.read<DestinationProvider>().loadIfNeeded();
-    });
-  }
 
   // Saving gems isn't persisted yet (needs a gem_saves table) — surface that
   // honestly instead of faking a local toggle that vanishes on reload.
@@ -51,56 +46,54 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final provider = context.watch<DestinationProvider>();
-    final error = provider.hasError;
-    final selectedIndex =
-        _cats.indexWhere((c) => c.value == provider.selectedCategory);
-
     return Scaffold(
-      backgroundColor: AppTheme.bg,
-      body: RefreshIndicator(
-        color: AppTheme.primary,
-        backgroundColor: AppTheme.surface,
-        onRefresh: provider.load,
-        child: CustomScrollView(
-          // alwaysScrollable so pull-to-refresh works even when content is short
-          physics: const AlwaysScrollableScrollPhysics(),
-          slivers: [
-            // ── HERO ──
-            SliverToBoxAdapter(child: _Hero()),
+      backgroundColor: AppTheme.lightSurface,
+      body: MaxWidthCenter(
+        child: RefreshIndicator(
+          color: AppTheme.primary,
+          backgroundColor: AppTheme.lightCard,
+          onRefresh: () => context.read<GemProvider>().refresh(),
+          child: CustomScrollView(
+            // alwaysScrollable so pull-to-refresh works even when content is short
+            physics: const AlwaysScrollableScrollPhysics(),
+            slivers: [
+              // ── HERO ──
+              SliverToBoxAdapter(child: _Hero()),
 
-            // ── STATS BAR ──
-            SliverToBoxAdapter(child: _StatsBar()),
+              // ── STATS BAR ──
+              SliverToBoxAdapter(child: _StatsBar()),
 
-            // ── SEARCH + FILTERS (always visible chrome) ──
-            SliverPadding(
-              padding: const EdgeInsets.symmetric(horizontal: 20),
-              sliver: SliverList(
-                delegate: SliverChildListDelegate([
-                  const SizedBox(height: 16),
-                  _SearchBar(),
-                  const SizedBox(height: 16),
-                  _CategoryPills(
-                    cats: _cats.map((c) => (label: c.label, icon: c.icon)).toList(),
-                    selected: selectedIndex < 0 ? 0 : selectedIndex,
-                    onSelect: (i) => provider.selectCategory(_cats[i].value),
-                  ),
-                  const SizedBox(height: 20),
-                ]),
-              ),
-            ),
-
-            // ── CONTENT REGION ──
-            if (error)
-              SliverToBoxAdapter(
-                child: ErrorStateView(
-                  onRetry: provider.retry,
-                  message: provider.error,
+              // ── SEARCH + FILTERS (always visible chrome) ──
+              SliverPadding(
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                sliver: SliverList(
+                  delegate: SliverChildListDelegate([
+                    const SizedBox(height: 16),
+                    _SearchBar(),
+                    const SizedBox(height: 16),
+                    _CategoryPills(
+                      cats: _cats
+                          .map((c) => (label: c.label, icon: c.icon))
+                          .toList(),
+                      // No persistent selection: a tap is a shortcut straight
+                      // into ListingsScreen pre-filtered to that category —
+                      // same merged Discovery experience the search bar opens,
+                      // not a separate screen, so there's nothing to reflect
+                      // as "currently selected" back here on Home.
+                      selected: -1,
+                      onSelect: (i) {
+                        final cat = _cats[i].value;
+                        context.go(cat == 'all'
+                            ? '/listings'
+                            : '/listings?category=$cat');
+                      },
+                    ),
+                    const SizedBox(height: 20),
+                  ]),
                 ),
-              )
-            else ...[
-              // ── FEATURED (real gems via GemProvider; the rest of this region
-              // still rides DestinationProvider) ──
+              ),
+
+              // ── CONTENT REGION (real gems via GemProvider) ──
               SliverToBoxAdapter(
                 child: Consumer<GemProvider>(
                   builder: (context, gem, _) {
@@ -173,7 +166,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ),
             ],
-          ],
+          ),
         ),
       ),
     );
@@ -193,7 +186,8 @@ class _Hero extends StatelessWidget {
         children: [
           // Background image (decorative)
           const AppNetworkImage(
-            url: 'https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=800&q=80',
+            url:
+                'https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=800&q=80',
             fit: BoxFit.cover,
           ),
           // Gradient overlay
@@ -204,7 +198,7 @@ class _Hero extends StatelessWidget {
                 end: Alignment.bottomCenter,
                 colors: [
                   Colors.transparent,
-                  AppTheme.bg.withValues(alpha:0.7),
+                  AppTheme.bg.withValues(alpha: 0.7),
                   AppTheme.bg,
                 ],
                 stops: const [0.3, 0.75, 1.0],
@@ -217,7 +211,10 @@ class _Hero extends StatelessWidget {
               gradient: LinearGradient(
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
-                colors: [AppTheme.primary.withValues(alpha:0.15), Colors.transparent],
+                colors: [
+                  AppTheme.primary.withValues(alpha: 0.15),
+                  Colors.transparent
+                ],
               ),
             ),
           ),
@@ -234,16 +231,32 @@ class _Hero extends StatelessWidget {
                       Text(
                         'Explor',
                         style: GoogleFonts.audiowide(
-                          fontSize: 20, color: Colors.white, letterSpacing: 1,
+                          fontSize: 20,
+                          color: Colors.white,
+                          letterSpacing: 1,
                         ),
                       ),
                       Text(
                         'ife',
                         style: GoogleFonts.audiowide(
-                          fontSize: 20, color: AppTheme.primary, letterSpacing: 1,
+                          fontSize: 20,
+                          color: AppTheme.primary,
+                          letterSpacing: 1,
                         ),
                       ),
                       const Spacer(),
+                      // Desktop-only: RefreshIndicator's pull gesture isn't
+                      // discoverable with a mouse + scrollwheel the way it is
+                      // on touch, so this gives desktop an explicit way to
+                      // trigger the exact same GemProvider.refresh() call.
+                      if (Breakpoints.isDesktop(context)) ...[
+                        _CircleIconBtn(
+                          icon: Icons.refresh,
+                          semanticLabel: 'Refresh',
+                          onTap: () => context.read<GemProvider>().refresh(),
+                        ),
+                        const SizedBox(width: 10),
+                      ],
                       _CircleIconBtn(
                         icon: Icons.notifications_outlined,
                         semanticLabel: 'Notifications',
@@ -258,11 +271,13 @@ class _Hero extends StatelessWidget {
                         child: GestureDetector(
                           onTap: () => context.go('/profile'),
                           child: Container(
-                            width: 44, height: 44,
+                            width: 44,
+                            height: 44,
                             decoration: BoxDecoration(
                               shape: BoxShape.circle,
                               border: Border.all(
-                                  color: Colors.white.withValues(alpha:0.25), width: 1.5),
+                                  color: Colors.white.withValues(alpha: 0.25),
+                                  width: 1.5),
                             ),
                             child: const ClipOval(
                               child: AppNetworkImage(
@@ -283,24 +298,32 @@ class _Hero extends StatelessWidget {
                   const SizedBox(height: 10),
                   RichText(
                     text: TextSpan(
-                      style: GoogleFonts.bebasNeue(fontSize: 48, height: 0.95, letterSpacing: 1),
+                      style: GoogleFonts.bebasNeue(
+                          fontSize: 48, height: 0.95, letterSpacing: 1),
                       children: const [
-                        TextSpan(text: 'THE LIFE\nYOU WERE\nMEANT TO\n', style: TextStyle(color: Colors.white)),
-                        TextSpan(text: 'EXPLORE', style: TextStyle(color: AppTheme.primary)),
+                        TextSpan(
+                            text: 'THE LIFE\nYOU WERE\nMEANT TO\n',
+                            style: TextStyle(color: Colors.white)),
+                        TextSpan(
+                            text: 'EXPLORE',
+                            style: TextStyle(color: AppTheme.primary)),
                       ],
                     ),
                   ),
                   const SizedBox(height: 12),
                   Text(
                     'Discover hidden trails, connect with fellow adventurers',
-                    style: GoogleFonts.dmSans(fontSize: 13, color: Colors.white.withValues(alpha:0.75), height: 1.5),
+                    style: GoogleFonts.fredoka(
+                        fontSize: 13,
+                        color: Colors.white.withValues(alpha: 0.75),
+                        height: 1.5),
                   ),
                   const SizedBox(height: 20),
                   Row(
                     children: [
                       Expanded(
                         child: ElevatedButton(
-                          onPressed: () => context.go('/listings'),
+                          onPressed: () => showDestinationBrowserSheet(context),
                           child: const Text('Start Exploring'),
                         ),
                       ),
@@ -328,22 +351,26 @@ class _LiveBadge extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       decoration: BoxDecoration(
-        color: AppTheme.primary.withValues(alpha:0.2),
-        border: Border.all(color: AppTheme.primary.withValues(alpha:0.4)),
+        color: AppTheme.primary.withValues(alpha: 0.2),
+        border: Border.all(color: AppTheme.primary.withValues(alpha: 0.4)),
         borderRadius: BorderRadius.circular(20),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
           Container(
-            width: 6, height: 6,
-            decoration: const BoxDecoration(color: AppTheme.primary, shape: BoxShape.circle),
+            width: 6,
+            height: 6,
+            decoration: const BoxDecoration(
+                color: AppTheme.primary, shape: BoxShape.circle),
           ),
           const SizedBox(width: 6),
           Text(
             'LIVE ADVENTURE',
             style: GoogleFonts.jetBrainsMono(
-              fontSize: 10, color: AppTheme.primary, letterSpacing: 1,
+              fontSize: 10,
+              color: AppTheme.primary,
+              letterSpacing: 1,
             ),
           ),
         ],
@@ -356,7 +383,8 @@ class _CircleIconBtn extends StatelessWidget {
   final IconData icon;
   final VoidCallback? onTap;
   final String semanticLabel;
-  const _CircleIconBtn({required this.icon, required this.semanticLabel, this.onTap});
+  const _CircleIconBtn(
+      {required this.icon, required this.semanticLabel, this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -368,9 +396,9 @@ class _CircleIconBtn extends StatelessWidget {
         child: Container(
           width: 44, height: 44, // min 44dp tap target
           decoration: BoxDecoration(
-            color: Colors.white.withValues(alpha:0.12),
+            color: Colors.white.withValues(alpha: 0.12),
             shape: BoxShape.circle,
-            border: Border.all(color: Colors.white.withValues(alpha:0.15)),
+            border: Border.all(color: Colors.white.withValues(alpha: 0.15)),
           ),
           child: Icon(icon, size: 18, color: Colors.white),
         ),
@@ -383,7 +411,8 @@ class _GhostIconBtn extends StatelessWidget {
   final IconData icon;
   final VoidCallback onTap;
   final String semanticLabel;
-  const _GhostIconBtn({required this.icon, required this.onTap, required this.semanticLabel});
+  const _GhostIconBtn(
+      {required this.icon, required this.onTap, required this.semanticLabel});
 
   @override
   Widget build(BuildContext context) {
@@ -393,11 +422,12 @@ class _GhostIconBtn extends StatelessWidget {
       child: GestureDetector(
         onTap: onTap,
         child: Container(
-          width: 46, height: 46,
+          width: 46,
+          height: 46,
           decoration: BoxDecoration(
-            color: Colors.white.withValues(alpha:0.1),
+            color: Colors.white.withValues(alpha: 0.1),
             borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: Colors.white.withValues(alpha:0.2)),
+            border: Border.all(color: Colors.white.withValues(alpha: 0.2)),
           ),
           child: Icon(icon, color: Colors.white, size: 20),
         ),
@@ -411,31 +441,43 @@ class _GhostIconBtn extends StatelessWidget {
 // ─────────────────────────────────────────
 class _StatsBar extends StatelessWidget {
   final _stats = const [
-    ('12K+', 'TRAILS'), ('84K', 'EXPLORERS'), ('190+', 'COUNTRIES'), ('4.9★', 'RATED'),
+    ('12K+', 'TRAILS'),
+    ('84K', 'EXPLORERS'),
+    ('190+', 'COUNTRIES'),
+    ('4.9★', 'RATED'),
   ];
 
   @override
   Widget build(BuildContext context) {
     return Container(
       decoration: const BoxDecoration(
-        border: Border.symmetric(horizontal: BorderSide(color: AppTheme.divider)),
+        border: Border.symmetric(
+            horizontal: BorderSide(color: AppTheme.lightBorder)),
       ),
       child: Row(
         children: _stats.asMap().entries.map((e) {
-          final i = e.key; final s = e.value;
+          final i = e.key;
+          final s = e.value;
           return Expanded(
             child: Container(
               padding: const EdgeInsets.symmetric(vertical: 12),
               decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha:0.04),
+                color: AppTheme.lightCard,
                 border: i < _stats.length - 1
-                    ? const Border(right: BorderSide(color: AppTheme.divider))
+                    ? const Border(
+                        right: BorderSide(color: AppTheme.lightBorder))
                     : null,
               ),
               child: Column(
                 children: [
-                  Text(s.$1, style: GoogleFonts.bebasNeue(fontSize: 20, color: AppTheme.primary)),
-                  Text(s.$2, style: GoogleFonts.jetBrainsMono(fontSize: 9, color: AppTheme.textSecondary, letterSpacing: 0.5)),
+                  Text(s.$1,
+                      style: GoogleFonts.bebasNeue(
+                          fontSize: 20, color: AppTheme.primary)),
+                  Text(s.$2,
+                      style: GoogleFonts.jetBrainsMono(
+                          fontSize: 9,
+                          color: AppTheme.lightMute,
+                          letterSpacing: 0.5)),
                 ],
               ),
             ),
@@ -456,26 +498,31 @@ class _SearchBar extends StatelessWidget {
       button: true,
       label: 'Search destinations and trails',
       child: GestureDetector(
-        onTap: () => context.go('/search'),
+        // Merged into ListingsScreen (/listings) — extra: true lands it
+        // focused on the search field (Suggestions state) instead of the
+        // default Browse view every other entry point opens.
+        onTap: () => context.go('/listings', extra: true),
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
           decoration: BoxDecoration(
-            color: AppTheme.surface2,
+            color: AppTheme.lightCard,
             borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: AppTheme.divider),
+            border: Border.all(color: AppTheme.lightBorder),
           ),
           child: Row(
             children: [
-              const Icon(Icons.search, color: AppTheme.textSecondary, size: 18),
+              const Icon(Icons.search, color: AppTheme.lightMute, size: 18),
               const SizedBox(width: 10),
               Expanded(
                 child: Text(
                   'Search destinations, trails...',
-                  style: GoogleFonts.dmSans(color: AppTheme.textSecondary, fontSize: 14),
+                  style: GoogleFonts.fredoka(
+                      color: AppTheme.lightMute, fontSize: 14),
                 ),
               ),
               Container(
-                width: 34, height: 34,
+                width: 34,
+                height: 34,
                 decoration: BoxDecoration(
                   color: AppTheme.primary,
                   borderRadius: BorderRadius.circular(10),
@@ -497,7 +544,8 @@ class _CategoryPills extends StatelessWidget {
   final List<({String label, IconData icon})> cats;
   final int selected;
   final ValueChanged<int> onSelect;
-  const _CategoryPills({required this.cats, required this.selected, required this.onSelect});
+  const _CategoryPills(
+      {required this.cats, required this.selected, required this.onSelect});
 
   @override
   Widget build(BuildContext context) {
@@ -509,7 +557,7 @@ class _CategoryPills extends StatelessWidget {
         separatorBuilder: (_, __) => const SizedBox(width: 8),
         itemBuilder: (ctx, i) {
           final isSelected = i == selected;
-          final color = isSelected ? Colors.white : AppTheme.textSecondary;
+          final color = isSelected ? Colors.white : AppTheme.lightMute;
           return Semantics(
             button: true,
             selected: isSelected,
@@ -518,12 +566,13 @@ class _CategoryPills extends StatelessWidget {
               onTap: () => onSelect(i),
               child: AnimatedContainer(
                 duration: const Duration(milliseconds: 200),
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                 decoration: BoxDecoration(
-                  color: isSelected ? AppTheme.primary : AppTheme.surface2,
+                  color: isSelected ? AppTheme.primary : AppTheme.lightCard,
                   borderRadius: BorderRadius.circular(20),
                   border: Border.all(
-                    color: isSelected ? AppTheme.primary : AppTheme.divider,
+                    color: isSelected ? AppTheme.primary : AppTheme.lightBorder,
                   ),
                 ),
                 child: Row(
@@ -533,7 +582,7 @@ class _CategoryPills extends StatelessWidget {
                     const SizedBox(width: 6),
                     Text(
                       cats[i].label,
-                      style: GoogleFonts.dmSans(
+                      style: GoogleFonts.fredoka(
                         fontSize: 12,
                         fontWeight: FontWeight.w600,
                         color: color,
@@ -562,7 +611,9 @@ class _SectionHead extends StatelessWidget {
   Widget build(BuildContext context) {
     return Row(
       children: [
-        Text(title, style: GoogleFonts.bebasNeue(fontSize: 28, letterSpacing: 0.5, color: AppTheme.textPrimary)),
+        Text(title,
+            style: GoogleFonts.bebasNeue(
+                fontSize: 28, letterSpacing: 0.5, color: AppTheme.lightInk)),
         const Spacer(),
         if (onSeeAll != null)
           Semantics(
@@ -574,7 +625,8 @@ class _SectionHead extends StatelessWidget {
                 padding: const EdgeInsets.symmetric(vertical: 8),
                 child: Text(
                   'SEE ALL →',
-                  style: GoogleFonts.jetBrainsMono(fontSize: 11, color: AppTheme.primary),
+                  style: GoogleFonts.jetBrainsMono(
+                      fontSize: 11, color: AppTheme.primary),
                 ),
               ),
             ),
@@ -639,8 +691,12 @@ class _FeaturedGemCard extends StatelessWidget {
                 Container(
                   decoration: BoxDecoration(
                     gradient: LinearGradient(
-                      begin: Alignment.topCenter, end: Alignment.bottomCenter,
-                      colors: [Colors.transparent, Colors.black.withValues(alpha:0.85)],
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [
+                        Colors.transparent,
+                        Colors.black.withValues(alpha: 0.85)
+                      ],
                       stops: const [0.4, 1.0],
                     ),
                   ),
@@ -648,9 +704,11 @@ class _FeaturedGemCard extends StatelessWidget {
                 // Trending badge
                 if (isTrending)
                   Positioned(
-                    top: 12, left: 12,
+                    top: 12,
+                    left: 12,
                     child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 4),
                       decoration: BoxDecoration(
                         color: AppTheme.primary,
                         borderRadius: BorderRadius.circular(6),
@@ -658,18 +716,22 @@ class _FeaturedGemCard extends StatelessWidget {
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          const Icon(Icons.local_fire_department, size: 11, color: Colors.white),
+                          const Icon(Icons.local_fire_department,
+                              size: 11, color: Colors.white),
                           const SizedBox(width: 4),
                           Text('TRENDING',
                               style: GoogleFonts.jetBrainsMono(
-                                  fontSize: 9, color: Colors.white, fontWeight: FontWeight.w700)),
+                                  fontSize: 9,
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w700)),
                         ],
                       ),
                     ),
                   ),
                 // Save btn (not persisted yet → onSave shows a coming-soon hint)
                 Positioned(
-                  top: 8, right: 8,
+                  top: 8,
+                  right: 8,
                   child: Semantics(
                     button: true,
                     label: 'Save ${gem.gemName}',
@@ -679,9 +741,10 @@ class _FeaturedGemCard extends StatelessWidget {
                         width: 44, height: 44, // min tap target
                         alignment: Alignment.center,
                         child: Container(
-                          width: 32, height: 32,
+                          width: 32,
+                          height: 32,
                           decoration: BoxDecoration(
-                            color: Colors.black.withValues(alpha:0.4),
+                            color: Colors.black.withValues(alpha: 0.4),
                             shape: BoxShape.circle,
                           ),
                           child: const Icon(Icons.bookmark_outline,
@@ -693,36 +756,65 @@ class _FeaturedGemCard extends StatelessWidget {
                 ),
                 // Info
                 Positioned(
-                  bottom: 0, left: 0, right: 0,
+                  bottom: 0,
+                  left: 0,
+                  right: 0,
                   child: Padding(
                     padding: const EdgeInsets.all(16),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(
-                          '${gem.emoji}  ${gem.displayCategory.toUpperCase()}',
-                          style: GoogleFonts.jetBrainsMono(fontSize: 9, color: AppTheme.primary, letterSpacing: 1.5),
+                        // Tag pill — same primary-tinted "tag" convention used
+                        // on _GemTrailRow's card below and the itinerary stop
+                        // cards, at a slightly higher alpha so it still pops
+                        // against this card's dark photo scrim (not the light
+                        // page background the other cards sit on).
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 7, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: AppTheme.primary.withValues(alpha: 0.2),
+                            border: Border.all(
+                                color: AppTheme.primary.withValues(alpha: 0.4)),
+                            borderRadius: BorderRadius.circular(5),
+                          ),
+                          child: Text(
+                            '${gem.emoji}  ${gem.displayCategory.toUpperCase()}',
+                            style: GoogleFonts.jetBrainsMono(
+                                fontSize: 9,
+                                color: AppTheme.primary,
+                                letterSpacing: 1.5),
+                          ),
                         ),
                         const SizedBox(height: 4),
                         Text(gem.gemName.toUpperCase(),
-                            maxLines: 1, overflow: TextOverflow.ellipsis,
-                            style: GoogleFonts.bebasNeue(fontSize: 22, color: Colors.white, height: 1)),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: GoogleFonts.bebasNeue(
+                                fontSize: 22, color: Colors.white, height: 1)),
                         if (hasLoc)
                           Text(loc,
-                              maxLines: 1, overflow: TextOverflow.ellipsis,
-                              style: GoogleFonts.dmSans(fontSize: 11, color: Colors.white.withValues(alpha:0.65))),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: GoogleFonts.fredoka(
+                                  fontSize: 11,
+                                  color: Colors.white.withValues(alpha: 0.65))),
                         const SizedBox(height: 8),
                         Row(
                           children: [
                             if (diff != null) ...[
                               Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 8, vertical: 3),
                                 decoration: BoxDecoration(
-                                  color: diff.color.withValues(alpha:0.15),
+                                  color: diff.color.withValues(alpha: 0.15),
                                   borderRadius: BorderRadius.circular(6),
                                 ),
                                 child: Text(diff.label,
-                                    style: GoogleFonts.jetBrainsMono(fontSize: 10, color: diff.color, letterSpacing: 0.5)),
+                                    style: GoogleFonts.jetBrainsMono(
+                                        fontSize: 10,
+                                        color: diff.color,
+                                        letterSpacing: 0.5)),
                               ),
                               const SizedBox(width: 8),
                             ],
@@ -731,12 +823,18 @@ class _FeaturedGemCard extends StatelessWidget {
                                 child: Row(
                                   children: [
                                     Icon(Icons.schedule,
-                                        size: 12, color: Colors.white.withValues(alpha:0.7)),
+                                        size: 12,
+                                        color: Colors.white
+                                            .withValues(alpha: 0.7)),
                                     const SizedBox(width: 4),
                                     Expanded(
                                       child: Text(bestTime,
-                                          maxLines: 1, overflow: TextOverflow.ellipsis,
-                                          style: GoogleFonts.dmSans(fontSize: 11, color: Colors.white.withValues(alpha:0.7))),
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: GoogleFonts.fredoka(
+                                              fontSize: 11,
+                                              color: Colors.white
+                                                  .withValues(alpha: 0.7))),
                                     ),
                                   ],
                                 ),
@@ -772,34 +870,39 @@ class _CommunityRow extends StatelessWidget {
           child: Stack(
             children: [
               ...avatars.asMap().entries.map((e) => Positioned(
-                left: e.key * 22.0,
-                child: Container(
-                  width: 36, height: 36,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    border: Border.all(color: AppTheme.bg, width: 2),
-                  ),
-                  child: ClipOval(
-                    child: AppNetworkImage(
-                      url: 'https://picsum.photos/seed/${e.value}/80/80',
-                      fit: BoxFit.cover,
+                    left: e.key * 22.0,
+                    child: Container(
+                      width: 36,
+                      height: 36,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        border:
+                            Border.all(color: AppTheme.lightSurface, width: 2),
+                      ),
+                      child: ClipOval(
+                        child: AppNetworkImage(
+                          url: 'https://picsum.photos/seed/${e.value}/80/80',
+                          fit: BoxFit.cover,
+                        ),
+                      ),
                     ),
-                  ),
-                ),
-              )),
+                  )),
               Positioned(
                 left: avatars.length * 22.0,
                 child: Container(
-                  width: 36, height: 36,
+                  width: 36,
+                  height: 36,
                   decoration: BoxDecoration(
                     color: AppTheme.primary,
                     shape: BoxShape.circle,
-                    border: Border.all(color: AppTheme.bg, width: 2),
+                    border: Border.all(color: AppTheme.lightSurface, width: 2),
                   ),
                   child: Center(
                     child: Text('+84K',
-                        style: GoogleFonts.dmSans(
-                            color: Colors.white, fontSize: 9, fontWeight: FontWeight.w700)),
+                        style: GoogleFonts.fredoka(
+                            color: Colors.white,
+                            fontSize: 9,
+                            fontWeight: FontWeight.w700)),
                   ),
                 ),
               ),
@@ -810,9 +913,13 @@ class _CommunityRow extends StatelessWidget {
         Expanded(
           child: RichText(
             text: TextSpan(
-              style: GoogleFonts.dmSans(fontSize: 12, color: AppTheme.textSecondary, height: 1.5),
+              style: GoogleFonts.fredoka(
+                  fontSize: 12, color: AppTheme.lightMute, height: 1.5),
               children: const [
-                TextSpan(text: '84,000+ adventurers ', style: TextStyle(color: AppTheme.textPrimary, fontWeight: FontWeight.w600)),
+                TextSpan(
+                    text: '84,000+ adventurers ',
+                    style: TextStyle(
+                        color: AppTheme.lightInk, fontWeight: FontWeight.w600)),
                 TextSpan(text: 'are exploring right now. Join the tribe.'),
               ],
             ),
@@ -910,7 +1017,7 @@ class _GemTrailRow extends StatelessWidget {
       case 'hard':
         return (color: AppTheme.primary, label: 'HARD');
       default:
-        return (color: AppTheme.textSecondary, label: d.toUpperCase());
+        return (color: AppTheme.lightMute, label: d.toUpperCase());
     }
   }
 
@@ -927,15 +1034,17 @@ class _GemTrailRow extends StatelessWidget {
           margin: const EdgeInsets.only(bottom: 10),
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
-            color: AppTheme.surface,
+            color: AppTheme.lightCard,
             borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: AppTheme.divider),
+            border: Border.all(color: AppTheme.lightBorder),
           ),
           child: Row(
             children: [
               AppNetworkImage(
                 url: gem.photoUrl ?? '',
-                width: 72, height: 72, fit: BoxFit.cover,
+                width: 72,
+                height: 72,
+                fit: BoxFit.cover,
                 borderRadius: BorderRadius.circular(12),
               ),
               const SizedBox(width: 14),
@@ -944,29 +1053,42 @@ class _GemTrailRow extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(gem.gemName,
-                        maxLines: 1, overflow: TextOverflow.ellipsis,
-                        style: GoogleFonts.dmSans(fontSize: 14, fontWeight: FontWeight.w600, color: AppTheme.textPrimary)),
-                    if (gem.gemLocation != null && gem.gemLocation!.isNotEmpty) ...[
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: GoogleFonts.fredoka(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                            color: AppTheme.lightInk)),
+                    if (gem.gemLocation != null &&
+                        gem.gemLocation!.isNotEmpty) ...[
                       const SizedBox(height: 2),
                       Row(children: [
-                        const Icon(Icons.location_on, size: 12, color: AppTheme.textSecondary),
+                        const Icon(Icons.location_on,
+                            size: 12, color: AppTheme.lightMute),
                         Expanded(
                           child: Text(gem.gemLocation!,
-                              maxLines: 1, overflow: TextOverflow.ellipsis,
-                              style: GoogleFonts.dmSans(fontSize: 11, color: AppTheme.textSecondary)),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: GoogleFonts.fredoka(
+                                  fontSize: 11, color: AppTheme.lightMute)),
                         ),
                       ]),
                     ],
                     const SizedBox(height: 6),
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 7, vertical: 3),
                       decoration: BoxDecoration(
-                        color: AppTheme.primary.withValues(alpha:0.12),
-                        border: Border.all(color: AppTheme.primary.withValues(alpha:0.2)),
+                        color: AppTheme.primary.withValues(alpha: 0.12),
+                        border: Border.all(
+                            color: AppTheme.primary.withValues(alpha: 0.2)),
                         borderRadius: BorderRadius.circular(5),
                       ),
                       child: Text(gem.displayCategory.toUpperCase(),
-                          style: GoogleFonts.jetBrainsMono(fontSize: 9, color: AppTheme.primary, letterSpacing: 0.5)),
+                          style: GoogleFonts.jetBrainsMono(
+                              fontSize: 9,
+                              color: AppTheme.primary,
+                              letterSpacing: 0.5)),
                     ),
                   ],
                 ),
@@ -977,18 +1099,25 @@ class _GemTrailRow extends StatelessWidget {
                 children: [
                   if (diff != null)
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 3),
                       decoration: BoxDecoration(
-                        color: diff.color.withValues(alpha:0.15),
+                        color: diff.color.withValues(alpha: 0.15),
                         borderRadius: BorderRadius.circular(6),
                       ),
                       child: Text(diff.label,
-                          style: GoogleFonts.jetBrainsMono(fontSize: 10, color: diff.color, letterSpacing: 0.5)),
+                          style: GoogleFonts.jetBrainsMono(
+                              fontSize: 10,
+                              color: diff.color,
+                              letterSpacing: 0.5)),
                     ),
                   if (distanceKm != null) ...[
                     const SizedBox(height: 6),
                     Text('${distanceKm!.toStringAsFixed(1)} km',
-                        style: GoogleFonts.jetBrainsMono(fontSize: 12, color: AppTheme.primary, fontWeight: FontWeight.w700)),
+                        style: GoogleFonts.jetBrainsMono(
+                            fontSize: 12,
+                            color: AppTheme.primary,
+                            fontWeight: FontWeight.w700)),
                   ],
                 ],
               ),
@@ -1014,7 +1143,8 @@ class _BannerCard extends StatelessWidget {
           fit: StackFit.expand,
           children: [
             const AppNetworkImage(
-              url: 'https://images.unsplash.com/photo-1501854140801-50d01698950b?w=800&q=80',
+              url:
+                  'https://images.unsplash.com/photo-1501854140801-50d01698950b?w=800&q=80',
               fit: BoxFit.cover,
             ),
             Container(
@@ -1022,7 +1152,10 @@ class _BannerCard extends StatelessWidget {
                 gradient: LinearGradient(
                   begin: Alignment.centerLeft,
                   end: Alignment.centerRight,
-                  colors: [Colors.black.withValues(alpha:0.75), Colors.transparent],
+                  colors: [
+                    Colors.black.withValues(alpha: 0.75),
+                    Colors.transparent
+                  ],
                 ),
               ),
             ),
@@ -1035,16 +1168,20 @@ class _BannerCard extends StatelessWidget {
                   Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      const Icon(Icons.backpack, size: 12, color: AppTheme.primary),
+                      const Icon(Icons.backpack,
+                          size: 12, color: AppTheme.primary),
                       const SizedBox(width: 5),
                       Text('COMMUNITY',
                           style: GoogleFonts.jetBrainsMono(
-                              fontSize: 9, color: AppTheme.primary, letterSpacing: 2)),
+                              fontSize: 9,
+                              color: AppTheme.primary,
+                              letterSpacing: 2)),
                     ],
                   ),
                   const SizedBox(height: 6),
                   Text('JOIN THE\nTRIBE',
-                      style: GoogleFonts.bebasNeue(fontSize: 24, color: Colors.white, height: 1)),
+                      style: GoogleFonts.bebasNeue(
+                          fontSize: 24, color: Colors.white, height: 1)),
                   const SizedBox(height: 8),
                   Semantics(
                     button: true,
@@ -1052,13 +1189,17 @@ class _BannerCard extends StatelessWidget {
                     child: GestureDetector(
                       onTap: () => context.go('/stories'),
                       child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 14, vertical: 8),
                         decoration: BoxDecoration(
                           color: AppTheme.primary,
                           borderRadius: BorderRadius.circular(8),
                         ),
                         child: Text('Connect Now',
-                            style: GoogleFonts.dmSans(fontSize: 11, color: Colors.white, fontWeight: FontWeight.w600)),
+                            style: GoogleFonts.fredoka(
+                                fontSize: 11,
+                                color: Colors.white,
+                                fontWeight: FontWeight.w600)),
                       ),
                     ),
                   ),
