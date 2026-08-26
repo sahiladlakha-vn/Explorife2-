@@ -58,9 +58,7 @@ class _ExplorIfeAppState extends State<ExplorIfeApp> {
         ChangeNotifierProvider(create: (_) => SplitsProvider()),
         // Plain provider (no proxy): reads are scoped by trip_id and enforced by
         // RLS, so it needs no userId/AuthProvider. clear() is called at sign-out.
-        ChangeNotifierProvider(
-          create: (_) => BookingProvider(supabase: Supabase.instance.client),
-        ),
+        ChangeNotifierProvider(create: (_) => BookingProvider()),
         // Same shape as BookingProvider, same reasoning: trip_documents /
         // trip_packing_items RLS scopes reads by trip_id, no userId needed here.
         ChangeNotifierProvider(
