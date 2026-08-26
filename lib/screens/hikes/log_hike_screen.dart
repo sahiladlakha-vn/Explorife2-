@@ -46,23 +46,23 @@ class _LogHikeScreenState extends State<LogHikeScreen> {
     setState(() => _submitting = true);
     final durationSecs = (_hours * 3600) + (_minutes * 60);
     final ok = await context.read<HikeProvider>().logHike(
-      userId: auth.user!.id,
-      title: _titleCtrl.text.trim(),
-      activityType: _activityType,
-      distanceKm: double.tryParse(_distCtrl.text),
-      durationSeconds: durationSecs > 0 ? durationSecs : null,
-      elevationGainM: double.tryParse(_eleCtrl.text),
-    );
+          userId: auth.user!.id,
+          title: _titleCtrl.text.trim(),
+          activityType: _activityType,
+          distanceKm: double.tryParse(_distCtrl.text),
+          durationSeconds: durationSecs > 0 ? durationSecs : null,
+          elevationGainM: double.tryParse(_eleCtrl.text),
+        );
 
     if (mounted) {
       setState(() => _submitting = false);
       if (ok) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Hike logged! 🥾')));
+        ScaffoldMessenger.of(context)
+            .showSnackBar(const SnackBar(content: Text('Hike logged! 🥾')));
         context.go('/hikes');
       } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Failed to log hike')));
+        ScaffoldMessenger.of(context)
+            .showSnackBar(const SnackBar(content: Text('Failed to log hike')));
       }
     }
   }
@@ -70,9 +70,9 @@ class _LogHikeScreenState extends State<LogHikeScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppTheme.bg,
+      backgroundColor: AppTheme.lightSurface,
       appBar: AppBar(
-        backgroundColor: AppTheme.bg,
+        backgroundColor: AppTheme.lightSurface,
         leading: IconButton(
             icon: const Icon(Icons.arrow_back),
             onPressed: () =>
@@ -84,27 +84,31 @@ class _LogHikeScreenState extends State<LogHikeScreen> {
         padding: const EdgeInsets.all(20),
         child: Form(
           key: _formKey,
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          child:
+              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             _Label('ACTIVITY TYPE'),
             const SizedBox(height: 10),
             Wrap(
-              spacing: 8, runSpacing: 8,
+              spacing: 8,
+              runSpacing: 8,
               children: _activities.map((a) {
                 final sel = _activityType == a.$1;
                 return GestureDetector(
                   onTap: () => setState(() => _activityType = a.$1),
                   child: AnimatedContainer(
                     duration: const Duration(milliseconds: 150),
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 14, vertical: 10),
                     decoration: BoxDecoration(
-                      color: sel ? AppTheme.primary : AppTheme.surface,
+                      color: sel ? AppTheme.primary : AppTheme.lightCard,
                       borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: sel ? AppTheme.primary : AppTheme.divider),
+                      border: Border.all(
+                          color: sel ? AppTheme.primary : AppTheme.lightBorder),
                     ),
                     child: Text('${a.$2}  ${a.$3}',
-                        style: GoogleFonts.dmSans(
+                        style: GoogleFonts.fredoka(
                           fontSize: 13,
-                          color: sel ? Colors.white : AppTheme.textSecondary,
+                          color: sel ? Colors.white : AppTheme.lightMute,
                           fontWeight: sel ? FontWeight.w600 : FontWeight.w400,
                         )),
                   ),
@@ -112,77 +116,83 @@ class _LogHikeScreenState extends State<LogHikeScreen> {
               }).toList(),
             ),
             const SizedBox(height: 20),
-
             _Label('TITLE *'),
             const SizedBox(height: 8),
             TextFormField(
               controller: _titleCtrl,
-              style: GoogleFonts.dmSans(color: AppTheme.textPrimary),
+              style: GoogleFonts.fredoka(color: AppTheme.lightInk),
               decoration: _deco('e.g. Morning trail up Fansipan'),
               validator: (v) =>
                   v == null || v.trim().isEmpty ? 'Required' : null,
             ),
             const SizedBox(height: 16),
-
             _Label('DISTANCE (km)'),
             const SizedBox(height: 8),
             TextFormField(
               controller: _distCtrl,
-              keyboardType: const TextInputType.numberWithOptions(decimal: true),
-              style: GoogleFonts.dmSans(color: AppTheme.textPrimary),
+              keyboardType:
+                  const TextInputType.numberWithOptions(decimal: true),
+              style: GoogleFonts.fredoka(color: AppTheme.lightInk),
               decoration: _deco('e.g. 12.5'),
             ),
             const SizedBox(height: 16),
-
             _Label('DURATION'),
             const SizedBox(height: 8),
             Row(children: [
               Expanded(
-                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text('Hours', style: GoogleFonts.dmSans(
-                      fontSize: 12, color: AppTheme.textSecondary)),
-                  const SizedBox(height: 4),
-                  DropdownButtonFormField<int>(
-                    value: _hours,
-                    dropdownColor: AppTheme.surface,
-                    style: GoogleFonts.dmSans(color: AppTheme.textPrimary),
-                    decoration: _deco('0'),
-                    items: List.generate(24, (i) => DropdownMenuItem(
-                        value: i, child: Text('$i h'))),
-                    onChanged: (v) => setState(() => _hours = v ?? 0),
-                  ),
-                ]),
+                child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Hours',
+                          style: GoogleFonts.fredoka(
+                              fontSize: 12, color: AppTheme.lightMute)),
+                      const SizedBox(height: 4),
+                      DropdownButtonFormField<int>(
+                        initialValue: _hours,
+                        dropdownColor: AppTheme.lightCard,
+                        style: GoogleFonts.fredoka(color: AppTheme.lightInk),
+                        decoration: _deco('0'),
+                        items: List.generate(
+                            24,
+                            (i) => DropdownMenuItem(
+                                value: i, child: Text('$i h'))),
+                        onChanged: (v) => setState(() => _hours = v ?? 0),
+                      ),
+                    ]),
               ),
               const SizedBox(width: 12),
               Expanded(
-                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text('Minutes', style: GoogleFonts.dmSans(
-                      fontSize: 12, color: AppTheme.textSecondary)),
-                  const SizedBox(height: 4),
-                  DropdownButtonFormField<int>(
-                    value: _minutes,
-                    dropdownColor: AppTheme.surface,
-                    style: GoogleFonts.dmSans(color: AppTheme.textPrimary),
-                    decoration: _deco('0'),
-                    items: [0, 5, 10, 15, 20, 30, 45].map((m) =>
-                        DropdownMenuItem(value: m, child: Text('$m min'))).toList(),
-                    onChanged: (v) => setState(() => _minutes = v ?? 0),
-                  ),
-                ]),
+                child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Minutes',
+                          style: GoogleFonts.fredoka(
+                              fontSize: 12, color: AppTheme.lightMute)),
+                      const SizedBox(height: 4),
+                      DropdownButtonFormField<int>(
+                        initialValue: _minutes,
+                        dropdownColor: AppTheme.lightCard,
+                        style: GoogleFonts.fredoka(color: AppTheme.lightInk),
+                        decoration: _deco('0'),
+                        items: [0, 5, 10, 15, 20, 30, 45]
+                            .map((m) => DropdownMenuItem(
+                                value: m, child: Text('$m min')))
+                            .toList(),
+                        onChanged: (v) => setState(() => _minutes = v ?? 0),
+                      ),
+                    ]),
               ),
             ]),
             const SizedBox(height: 16),
-
             _Label('ELEVATION GAIN (m)'),
             const SizedBox(height: 8),
             TextFormField(
               controller: _eleCtrl,
               keyboardType: TextInputType.number,
-              style: GoogleFonts.dmSans(color: AppTheme.textPrimary),
+              style: GoogleFonts.fredoka(color: AppTheme.lightInk),
               decoration: _deco('e.g. 450'),
             ),
             const SizedBox(height: 32),
-
             SizedBox(
               width: double.infinity,
               height: 52,
@@ -210,17 +220,15 @@ class _LogHikeScreenState extends State<LogHikeScreen> {
 
   InputDecoration _deco(String hint) => InputDecoration(
         hintText: hint,
-        hintStyle: GoogleFonts.dmSans(
-            fontSize: 14,
-            color: AppTheme.textSecondary.withValues(alpha: 0.5)),
+        hintStyle: GoogleFonts.fredoka(fontSize: 14, color: AppTheme.lightMute),
         filled: true,
-        fillColor: AppTheme.surface,
+        fillColor: AppTheme.lightCard,
         border: OutlineInputBorder(
             borderRadius: BorderRadius.circular(12),
-            borderSide: BorderSide(color: AppTheme.divider)),
+            borderSide: BorderSide(color: AppTheme.lightBorder)),
         enabledBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(12),
-            borderSide: BorderSide(color: AppTheme.divider)),
+            borderSide: BorderSide(color: AppTheme.lightBorder)),
         focusedBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(12),
             borderSide: const BorderSide(color: AppTheme.primary)),
@@ -235,5 +243,5 @@ class _Label extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Text(text,
       style: GoogleFonts.jetBrainsMono(
-          fontSize: 10, color: AppTheme.textSecondary, letterSpacing: 0.8));
+          fontSize: 10, color: AppTheme.lightMute, letterSpacing: 0.8));
 }
