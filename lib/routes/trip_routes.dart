@@ -22,11 +22,10 @@ List<RouteBase> tripRoutes() => [
         builder: (context, state) => const TripsListScreen(),
       ),
       GoRoute(
-        // ?location=&lat=&lng= seeds Step 1's destination field — e.g. Home's
-        // "Where to next?" destination browser jumping straight into trip
-        // creation for a tapped city (see destination_browser_sheet.dart).
-        // Every other call site omits these and gets the same blank draft
-        // as before.
+        // ?location=&lat=&lng= seeds Step 1's destination field — e.g.
+        // Destination Detail's own "+ Plan a trip" button carrying its city
+        // straight in. Every other call site omits these and gets the same
+        // blank draft as before.
         path: '/trips/new',
         pageBuilder: (context, state) {
           final q = state.uri.queryParameters;

@@ -8,10 +8,13 @@ import '../../widgets/gems/category_chip_row.dart';
 import '../../widgets/state_views.dart';
 import '../listings/listings_screen.dart' show GemResultCard, PoiResultCard;
 
-/// Destination Detail — opened when a city is selected, either from Home's
-/// "Where to next?" browser (destination_browser_sheet.dart) or from
-/// ListingsScreen's Destinations search tab. Both entry points resolve real
-/// coordinates first and land here the same way.
+/// Destination Detail — opened when a city is selected, either from a
+/// destination-scoped card in Home's "Explore Ideas" rail
+/// (curated_collections.dart) or from ListingsScreen's Destinations search
+/// tab. Both entry points resolve real coordinates first and land here the
+/// same way. (Formerly also reached from Home's "Where to next?"
+/// DestinationBrowserSheet modal, retired in Phase 2 of the unified search
+/// funnel in favor of the Explore Ideas rail.)
 ///
 /// City header + "Plan a trip" CTA stay unchanged. The body used to be its
 /// own standalone tab row (Explore / Things to do / Transport / Hotels,

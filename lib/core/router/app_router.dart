@@ -80,11 +80,11 @@ class AppRouter {
             routes: [
               GoRoute(path: '/home', builder: (_, __) => const HomeScreen()),
               GoRoute(
-                // Destination Detail — opened when a city is tapped in
-                // Home's "Where to next?" destination browser, or selected
-                // from ListingsScreen's search-results Destinations tab.
-                // Both entry points resolve real coordinates first and land
-                // here the same way (see destination_landing_screen.dart).
+                // Destination Detail — opened from a destination-scoped card
+                // in Home's "Explore Ideas" rail, or from ListingsScreen's
+                // search-results Destinations tab. Both entry points resolve
+                // real coordinates first and land here the same way (see
+                // destination_landing_screen.dart).
                 path: '/destinations/explore',
                 builder: (_, state) {
                   final q = state.uri.queryParameters;

@@ -33,7 +33,7 @@ class _BrowseItem {
 /// curated_destinations.dart) whose name contains the current search query.
 /// [photoUrl] is only ever set for a country's "top" cities; its secondary
 /// chip-only cities (moreCities) carry no photo, same as
-/// DestinationBrowserSheet's own treatment of that list.
+/// curated_destinations.dart's own top/more-cities split.
 class _DestinationMatch {
   final String cityName;
   final String countryName;
@@ -66,12 +66,12 @@ class _DestinationMatch {
 ///                 unchanged from what this screen always showed.
 ///
 /// Destinations tab: queries the same curated country/city list
-/// (curated_destinations.dart) that Home's "Start Exploring" browser
-/// (destination_browser_sheet.dart) already uses — no new destination data
-/// source for this. Selecting one resolves real coordinates via
-/// [GeocodingService] (same call `DestinationBrowserSheet._openTripFor`
-/// makes) and lands on the same `/destinations/explore` destination detail
-/// screen either entry point has always used.
+/// (curated_destinations.dart) Home's "Explore Ideas" destination-scoped
+/// collection cards use (curated_collections.dart) — no new destination
+/// data source for this. Selecting one resolves real coordinates via
+/// [GeocodingService] (same geocode-then-navigate pattern every city-tap
+/// flow in this app shares) and lands on the same `/destinations/explore`
+/// destination detail screen either entry point uses.
 ///
 /// The "All Gems" grid (Browse, and Results when category = 'all') merges in
 /// real nearby places from [MapboxTilequeryService] alongside this app's own
@@ -123,9 +123,8 @@ class _ListingsScreenState extends State<ListingsScreen> {
   int _resultTab = 1;
 
   // Guards double-tap while a tapped destination's real coordinates are
-  // being resolved — same pattern DestinationBrowserSheet uses for the same
-  // reason (Where to next? isn't touched by this change, but the tap here
-  // does the identical geocode-then-navigate work).
+  // being resolved — same geocode-then-navigate pattern _CollectionCard
+  // (home_screen.dart) uses for the same reason.
   bool _resolvingDestination = false;
 
   // Fetched once per screen visit (not re-fetched per keystroke/category
@@ -228,10 +227,9 @@ class _ListingsScreenState extends State<ListingsScreen> {
   }
 
   /// [_query], matched against the same curated country/city list
-  /// (curated_destinations.dart) DestinationBrowserSheet uses — substring,
-  /// case-insensitive, matching gemMatchesSearch's own convention elsewhere
-  /// in this app. Returns both a country's top (photo) cities and its
-  /// secondary (no-photo) chip cities.
+  /// (curated_destinations.dart) — substring, case-insensitive, matching
+  /// gemMatchesSearch's own convention elsewhere in this app. Returns both a
+  /// country's top (photo) cities and its secondary (no-photo) chip cities.
   List<_DestinationMatch> _matchingDestinations(String query) {
     final q = query.trim().toLowerCase();
     if (q.isEmpty) return const [];
@@ -257,12 +255,12 @@ class _ListingsScreenState extends State<ListingsScreen> {
     return out;
   }
 
-  /// Resolves [cityName]'s real coordinates (same [GeocodingService] call
-  /// DestinationBrowserSheet._openTripFor makes) then pushes the same
-  /// `/destinations/explore` route that entry point already uses — one
-  /// destination detail screen, reached the same way from either path. Falls
-  /// back to the bare city name with no coordinates if geocoding fails
-  /// rather than blocking navigation over a network hiccup.
+  /// Resolves [cityName]'s real coordinates via [GeocodingService] then
+  /// pushes the same `/destinations/explore` route every destination-tap
+  /// flow in this app uses — one destination detail screen, reached the
+  /// same way from either path. Falls back to the bare city name with no
+  /// coordinates if geocoding fails rather than blocking navigation over a
+  /// network hiccup.
   Future<void> _openDestination(BuildContext context, String cityName) async {
     if (_resolvingDestination) return;
     setState(() => _resolvingDestination = true);

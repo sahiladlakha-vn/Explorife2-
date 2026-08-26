@@ -3,15 +3,17 @@ import 'package:geolocator/geolocator.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
+import '../../core/constants/curated_collections.dart';
 import '../../core/constants/gem_categories.dart';
 import '../../core/layout/breakpoints.dart';
 import '../../core/layout/max_width_center.dart';
+import '../../core/services/geocoding_service.dart';
 import '../../core/theme/app_theme.dart';
 import '../../providers/gem_provider.dart';
 import '../../models/gem.dart';
 import '../../widgets/app_network_image.dart';
+import '../../widgets/common/photo_info_card.dart';
 import '../../widgets/state_views.dart';
-import 'destination_browser_sheet.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -92,6 +94,32 @@ class _HomeScreenState extends State<HomeScreen> {
                   ]),
                 ),
               ),
+
+              // ── EXPLORE IDEAS (curated collections rail) ──
+              // Replaces Start Exploring / DestinationBrowserSheet. Runs no
+              // retrieval of its own beyond the static collection list —
+              // every card navigates straight into Search Results or
+              // Destination Detail, the same screens the search bar above
+              // already opens. See _CollectionCard.
+              const SliverPadding(
+                padding: EdgeInsets.symmetric(horizontal: 20),
+                sliver: SliverToBoxAdapter(
+                  child: _SectionHead(title: 'EXPLORE IDEAS'),
+                ),
+              ),
+              SliverToBoxAdapter(
+                child: SizedBox(
+                  height: 290,
+                  child: ListView.builder(
+                    scrollDirection: Axis.horizontal,
+                    padding: const EdgeInsets.symmetric(horizontal: 20),
+                    itemCount: CuratedCollections.all.length,
+                    itemBuilder: (ctx, i) =>
+                        _CollectionCard(collection: CuratedCollections.all[i]),
+                  ),
+                ),
+              ),
+              const SliverPadding(padding: EdgeInsets.only(top: 20)),
 
               // ── CONTENT REGION (real gems via GemProvider) ──
               SliverToBoxAdapter(
@@ -319,15 +347,13 @@ class _Hero extends StatelessWidget {
                         height: 1.5),
                   ),
                   const SizedBox(height: 20),
+                  // Start Exploring (DestinationBrowserSheet) retired in
+                  // favor of the "EXPLORE IDEAS" rail below — see build()'s
+                  // curated-collections section. That rail feeds the same
+                  // Search Results / Destination Detail surface the search
+                  // bar above already opens, instead of a separate modal.
                   Row(
                     children: [
-                      Expanded(
-                        child: ElevatedButton(
-                          onPressed: () => showDestinationBrowserSheet(context),
-                          child: const Text('Start Exploring'),
-                        ),
-                      ),
-                      const SizedBox(width: 10),
                       _GhostIconBtn(
                         icon: Icons.explore_outlined,
                         semanticLabel: 'Open map',
@@ -670,185 +696,187 @@ class _FeaturedGemCard extends StatelessWidget {
     final loc = gem.gemLocation;
     final hasLoc = loc != null && loc.isNotEmpty;
     final bestTime = gem.bestTimeToVisit;
-    return Semantics(
-      button: true,
-      label: hasLoc ? '${gem.gemName}, $loc' : gem.gemName,
-      explicitChildNodes: true,
-      child: GestureDetector(
-        onTap: () => context.push('/gems/${gem.id}'),
-        child: Container(
-          width: 225,
-          margin: const EdgeInsets.only(right: 14),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(20),
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                // Empty url → AppNetworkImage renders ImageFallback; the photo-
-                // biased ranking keeps these rare.
-                AppNetworkImage(url: gem.photoUrl ?? '', fit: BoxFit.cover),
-                // Gradient
-                Container(
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: [
-                        Colors.transparent,
-                        Colors.black.withValues(alpha: 0.85)
-                      ],
-                      stops: const [0.4, 1.0],
-                    ),
-                  ),
-                ),
-                // Trending badge
-                if (isTrending)
-                  Positioned(
-                    top: 12,
-                    left: 12,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 8, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: AppTheme.primary,
-                        borderRadius: BorderRadius.circular(6),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const Icon(Icons.local_fire_department,
-                              size: 11, color: Colors.white),
-                          const SizedBox(width: 4),
-                          Text('TRENDING',
-                              style: GoogleFonts.jetBrainsMono(
-                                  fontSize: 9,
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.w700)),
-                        ],
-                      ),
-                    ),
-                  ),
-                // Save btn (not persisted yet → onSave shows a coming-soon hint)
-                Positioned(
-                  top: 8,
-                  right: 8,
-                  child: Semantics(
-                    button: true,
-                    label: 'Save ${gem.gemName}',
-                    child: GestureDetector(
-                      onTap: onSave,
-                      child: Container(
-                        width: 44, height: 44, // min tap target
-                        alignment: Alignment.center,
-                        child: Container(
-                          width: 32,
-                          height: 32,
-                          decoration: BoxDecoration(
-                            color: Colors.black.withValues(alpha: 0.4),
-                            shape: BoxShape.circle,
-                          ),
-                          child: const Icon(Icons.bookmark_outline,
-                              color: Colors.white, size: 18),
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-                // Info
-                Positioned(
-                  bottom: 0,
-                  left: 0,
-                  right: 0,
-                  child: Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        // Tag pill — same primary-tinted "tag" convention used
-                        // on _GemTrailRow's card below and the itinerary stop
-                        // cards, at a slightly higher alpha so it still pops
-                        // against this card's dark photo scrim (not the light
-                        // page background the other cards sit on).
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 7, vertical: 3),
-                          decoration: BoxDecoration(
-                            color: AppTheme.primary.withValues(alpha: 0.2),
-                            border: Border.all(
-                                color: AppTheme.primary.withValues(alpha: 0.4)),
-                            borderRadius: BorderRadius.circular(5),
-                          ),
-                          child: Text(
-                            '${gem.emoji}  ${gem.displayCategory.toUpperCase()}',
-                            style: GoogleFonts.jetBrainsMono(
-                                fontSize: 9,
-                                color: AppTheme.primary,
-                                letterSpacing: 1.5),
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(gem.gemName.toUpperCase(),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: GoogleFonts.bebasNeue(
-                                fontSize: 22, color: Colors.white, height: 1)),
-                        if (hasLoc)
-                          Text(loc,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: GoogleFonts.fredoka(
-                                  fontSize: 11,
-                                  color: Colors.white.withValues(alpha: 0.65))),
-                        const SizedBox(height: 8),
-                        Row(
-                          children: [
-                            if (diff != null) ...[
-                              Container(
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 8, vertical: 3),
-                                decoration: BoxDecoration(
-                                  color: diff.color.withValues(alpha: 0.15),
-                                  borderRadius: BorderRadius.circular(6),
-                                ),
-                                child: Text(diff.label,
-                                    style: GoogleFonts.jetBrainsMono(
-                                        fontSize: 10,
-                                        color: diff.color,
-                                        letterSpacing: 0.5)),
-                              ),
-                              const SizedBox(width: 8),
-                            ],
-                            if (bestTime != null && bestTime.isNotEmpty)
-                              Expanded(
-                                child: Row(
-                                  children: [
-                                    Icon(Icons.schedule,
-                                        size: 12,
-                                        color: Colors.white
-                                            .withValues(alpha: 0.7)),
-                                    const SizedBox(width: 4),
-                                    Expanded(
-                                      child: Text(bestTime,
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis,
-                                          style: GoogleFonts.fredoka(
-                                              fontSize: 11,
-                                              color: Colors.white
-                                                  .withValues(alpha: 0.7))),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ],
+    return PhotoInfoCard(
+      imageUrl: gem.photoUrl ?? '',
+      onTap: () => context.push('/gems/${gem.id}'),
+      semanticLabel: hasLoc ? '${gem.gemName}, $loc' : gem.gemName,
+      topLeft: isTrending
+          ? Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: AppTheme.primary,
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.local_fire_department,
+                      size: 11, color: Colors.white),
+                  const SizedBox(width: 4),
+                  Text('TRENDING',
+                      style: GoogleFonts.jetBrainsMono(
+                          fontSize: 9,
+                          color: Colors.white,
+                          fontWeight: FontWeight.w700)),
+                ],
+              ),
+            )
+          : null,
+      // Save btn (not persisted yet → onSave shows a coming-soon hint)
+      topRight: Semantics(
+        button: true,
+        label: 'Save ${gem.gemName}',
+        child: GestureDetector(
+          onTap: onSave,
+          child: Container(
+            width: 44, height: 44, // min tap target
+            alignment: Alignment.center,
+            child: Container(
+              width: 32,
+              height: 32,
+              decoration: BoxDecoration(
+                color: Colors.black.withValues(alpha: 0.4),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.bookmark_outline,
+                  color: Colors.white, size: 18),
             ),
           ),
         ),
+      ),
+      bottom: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Tag pill — same primary-tinted "tag" convention used on
+          // _GemTrailRow's card below and the itinerary stop cards, at a
+          // slightly higher alpha so it still pops against this card's dark
+          // photo scrim (not the light page background the other cards sit
+          // on).
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+            decoration: BoxDecoration(
+              color: AppTheme.primary.withValues(alpha: 0.2),
+              border:
+                  Border.all(color: AppTheme.primary.withValues(alpha: 0.4)),
+              borderRadius: BorderRadius.circular(5),
+            ),
+            child: Text(
+              '${gem.emoji}  ${gem.displayCategory.toUpperCase()}',
+              style: GoogleFonts.jetBrainsMono(
+                  fontSize: 9, color: AppTheme.primary, letterSpacing: 1.5),
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(gem.gemName.toUpperCase(),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: GoogleFonts.bebasNeue(
+                  fontSize: 22, color: Colors.white, height: 1)),
+          if (hasLoc)
+            Text(loc,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: GoogleFonts.fredoka(
+                    fontSize: 11, color: Colors.white.withValues(alpha: 0.65))),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              if (diff != null) ...[
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: diff.color.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Text(diff.label,
+                      style: GoogleFonts.jetBrainsMono(
+                          fontSize: 10, color: diff.color, letterSpacing: 0.5)),
+                ),
+                const SizedBox(width: 8),
+              ],
+              if (bestTime != null && bestTime.isNotEmpty)
+                Expanded(
+                  child: Row(
+                    children: [
+                      Icon(Icons.schedule,
+                          size: 12, color: Colors.white.withValues(alpha: 0.7)),
+                      const SizedBox(width: 4),
+                      Expanded(
+                        child: Text(bestTime,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: GoogleFonts.fredoka(
+                                fontSize: 11,
+                                color: Colors.white.withValues(alpha: 0.7))),
+                      ),
+                    ],
+                  ),
+                ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// One card in Home's "EXPLORE IDEAS" rail — a real, curated collection
+/// (curated_collections.dart), not a synthetic Gem, but built on the exact
+/// same [PhotoInfoCard] shell _FeaturedGemCard uses above. Tapping navigates
+/// straight into the same Search Results / Destination Detail screens Phase
+/// 1 built; this card runs no query/retrieval logic of its own.
+class _CollectionCard extends StatelessWidget {
+  const _CollectionCard({required this.collection});
+
+  final CuratedCollection collection;
+
+  /// Destination scope: resolves the city's real coordinates (same
+  /// GeocodingService call every other city-tap flow in this app makes) and
+  /// lands on Destination Detail directly — a single place, so there's no
+  /// intermediate results list to show. Category scope: routes into
+  /// ListingsScreen pre-filtered, the same deep link Home's category chips
+  /// above already use.
+  Future<void> _open(BuildContext context) async {
+    final scope = collection.scope;
+    if (!scope.isDestination) {
+      context.go(scope.value == 'all' ? '/listings' : '/listings?category=${scope.value}');
+      return;
+    }
+    final results = await GeocodingService().search(scope.value);
+    if (!context.mounted) return;
+    final place = results.isNotEmpty ? results.first : null;
+    final label =
+        (place != null && place.fullName.isNotEmpty) ? place.fullName : scope.value;
+    final uri = Uri(path: '/destinations/explore', queryParameters: {
+      'name': label,
+      if (place?.lat != null) 'lat': '${place!.lat}',
+      if (place?.lng != null) 'lng': '${place!.lng}',
+    });
+    if (context.mounted) context.push(uri.toString());
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return PhotoInfoCard(
+      imageUrl: collection.coverImageUrl,
+      onTap: () => _open(context),
+      semanticLabel: collection.title,
+      bottom: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(collection.title.toUpperCase(),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: GoogleFonts.bebasNeue(
+                  fontSize: 22, color: Colors.white, height: 1)),
+          const SizedBox(height: 4),
+          Text(collection.subtitle,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: GoogleFonts.fredoka(
+                  fontSize: 11, color: Colors.white.withValues(alpha: 0.65))),
+        ],
       ),
     );
   }

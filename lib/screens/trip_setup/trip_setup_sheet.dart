@@ -23,9 +23,9 @@ class TripSetupSheet extends StatefulWidget {
     this.initialLng,
   });
 
-  /// Pre-fills Step 1's "Where to?" field — e.g. the Home "Where to next?"
-  /// destination browser jumping straight into trip creation for a tapped
-  /// city. Implements the `/trips/new` route's own `?location=` param (see
+  /// Pre-fills Step 1's "Where to?" field — e.g. Destination Detail's own
+  /// "+ Plan a trip" button carrying its city straight into trip creation.
+  /// Implements the `/trips/new` route's own `?location=` param (see
   /// trip_routes.dart); null for every other, still-blank entry point.
   final String? initialLocation;
   final double? initialLat;

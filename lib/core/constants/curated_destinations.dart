@@ -1,11 +1,14 @@
-/// Editorial "popular destinations" content for the Home screen's "Where to
-/// next?" browser (destination_browser_sheet.dart). Deliberately NOT dynamic
-/// data: Mapbox's Search Box / Tilequery / Geocoding APIs are all
+/// Editorial "popular destinations" content — sourced by ListingsScreen's
+/// Destinations search tab (listings_screen.dart) and by curated_collections
+/// .dart's destination-scoped collection cards. Formerly the sole source for
+/// Home's "Where to next?" browser (DestinationBrowserSheet), retired in
+/// Phase 2 of the unified search funnel. Deliberately NOT dynamic data:
+/// Mapbox's Search Box / Tilequery / Geocoding APIs are all
 /// query-or-coordinate-triggered with no "top destinations in a country"
 /// browse mode (confirmed before building this — see the investigation this
 /// shipped alongside), so a country→city grouping like this has no dynamic
 /// source and has to be a maintained list. What's NOT faked: when a user
-/// taps a city here, its coordinates are resolved for real via
+/// taps a city sourced from here, its coordinates are resolved for real via
 /// GeocodingService.search() (the exact same service backing the "Where to?"
 /// autocomplete in trip setup) — nothing here is a stand-in coordinate.
 ///
