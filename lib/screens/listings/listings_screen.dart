@@ -593,7 +593,7 @@ class _FeaturedGemCard extends StatelessWidget {
       button: true,
       label: gem.gemName,
       child: GestureDetector(
-        onTap: () => context.go('/gems/${gem.id}'),
+        onTap: () => context.push('/gems/${gem.id}'),
         child: Container(
           width: 225,
           margin: const EdgeInsets.only(right: 12),
@@ -705,7 +705,7 @@ class _GemCard extends StatelessWidget {
       button: true,
       label: gem.gemName,
       child: GestureDetector(
-        onTap: () => context.go('/gems/${gem.id}'),
+        onTap: () => context.push('/gems/${gem.id}'),
         child: Container(
           decoration: BoxDecoration(
             color: AppTheme.lightCard,

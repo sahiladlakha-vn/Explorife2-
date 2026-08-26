@@ -675,7 +675,7 @@ class _FeaturedGemCard extends StatelessWidget {
       label: hasLoc ? '${gem.gemName}, $loc' : gem.gemName,
       explicitChildNodes: true,
       child: GestureDetector(
-        onTap: () => context.go('/gems/${gem.id}'),
+        onTap: () => context.push('/gems/${gem.id}'),
         child: Container(
           width: 225,
           margin: const EdgeInsets.only(right: 14),
@@ -1029,7 +1029,7 @@ class _GemTrailRow extends StatelessWidget {
       label: gem.gemName,
       explicitChildNodes: true,
       child: GestureDetector(
-        onTap: () => context.go('/gems/${gem.id}'),
+        onTap: () => context.push('/gems/${gem.id}'),
         child: Container(
           margin: const EdgeInsets.only(bottom: 10),
           padding: const EdgeInsets.all(12),
