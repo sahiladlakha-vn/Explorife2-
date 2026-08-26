@@ -3,19 +3,21 @@ import 'package:geolocator/geolocator.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 import '../../core/theme/app_theme.dart';
-import '../../core/constants/app_constants.dart';
+import '../../core/constants/curated_destinations.dart';
+import '../../core/services/geocoding_service.dart';
 import '../../core/services/mapbox_tilequery_service.dart';
 import '../../providers/gem_provider.dart';
 import '../../models/gem.dart';
 import '../../widgets/app_network_image.dart';
+import '../../widgets/gems/category_chip_row.dart';
 import '../../widgets/state_views.dart';
 
 /// One card in the merged browse/results grid — either a real, app-curated
 /// [Gem] or a generic real place from [MapboxTilequeryService]. Kept as a
 /// thin either/or wrapper rather than forcing both into one shape, so each
-/// renders with its own card ([_GemCard] vs [_PoiCard]) and the "GEM" badge
-/// stays an honest, visible distinction rather than a guess from shared
-/// fields.
+/// renders with its own card ([GemResultCard] vs [PoiResultCard]) and the
+/// "GEM" badge stays an honest, visible distinction rather than a guess from
+/// shared fields.
 class _BrowseItem {
   final Gem? gem;
   final NearbyPoi? poi;
@@ -25,6 +27,19 @@ class _BrowseItem {
   const _BrowseItem.poi(NearbyPoi p)
       : gem = null,
         poi = p;
+}
+
+/// One match in the Destinations tab — a curated city (see
+/// curated_destinations.dart) whose name contains the current search query.
+/// [photoUrl] is only ever set for a country's "top" cities; its secondary
+/// chip-only cities (moreCities) carry no photo, same as
+/// DestinationBrowserSheet's own treatment of that list.
+class _DestinationMatch {
+  final String cityName;
+  final String countryName;
+  final String? photoUrl;
+  const _DestinationMatch(
+      {required this.cityName, required this.countryName, this.photoUrl});
 }
 
 /// Unified gem search/discovery screen — merges what used to be two separate
@@ -37,7 +52,12 @@ class _BrowseItem {
 /// Three states, mutually exclusive, driven by query/category/focus:
 ///  - Results:     query non-empty OR a category is picked — one filtered
 ///                 grid (former Screen A's list and this screen's grid are
-///                 now the same _GemCard grid presentation).
+///                 now the same GemResultCard grid presentation). When the query
+///                 is non-empty, results also split into a Destinations /
+///                 Gems tab pair (see [_ResultTabBar]) — a query can match a
+///                 place name, a gem/venue name, or both at once, and each
+///                 tab surfaces its own matches independently rather than
+///                 one search silently picking a winner.
 ///  - Suggestions: search field focused, query empty, category = all —
 ///                 Popular Searches chips (categories are already visible in
 ///                 the persistent bar above, so no second categories grid).
@@ -45,12 +65,20 @@ class _BrowseItem {
 ///                 category = all) — Featured Gems rail + All Gems grid,
 ///                 unchanged from what this screen always showed.
 ///
+/// Destinations tab: queries the same curated country/city list
+/// (curated_destinations.dart) that Home's "Start Exploring" browser
+/// (destination_browser_sheet.dart) already uses — no new destination data
+/// source for this. Selecting one resolves real coordinates via
+/// [GeocodingService] (same call `DestinationBrowserSheet._openTripFor`
+/// makes) and lands on the same `/destinations/explore` destination detail
+/// screen either entry point has always used.
+///
 /// The "All Gems" grid (Browse, and Results when category = 'all') merges in
 /// real nearby places from [MapboxTilequeryService] alongside this app's own
 /// curated [Gem]s — added because the gems table can be sparse or briefly
 /// empty (e.g. right after a data cleanup) and this screen shouldn't go
 /// blank just because there's nothing curated yet. Gems render with a "GEM"
-/// badge ([_GemCard]); Mapbox places don't ([_PoiCard], no bookmark button
+/// badge ([GemResultCard]); Mapbox places don't ([PoiResultCard], no bookmark button
 /// either — saving one would mean creating a real gem from it, which isn't
 /// wired up). Picking a specific category narrows to gems only: Mapbox's POI
 /// categories don't map onto this app's fixed 8-category taxonomy, so
@@ -85,6 +113,20 @@ class _ListingsScreenState extends State<ListingsScreen> {
   // reasoning both predecessor screens already documented.
   String _query = '';
   late String _selectedCat = widget.initialCategory ?? 'all';
+
+  // 0 = Destinations, 1 = Gems. Only consulted when the query is non-empty
+  // (destinations don't apply to a bare category filter). Recomputed on every
+  // query change in [_setQuery] so a fresh search always gets a sensible
+  // default; a user's manual tap sticks until the next keystroke, unless the
+  // tab they're on empties out (handled by the effectiveTab computation in
+  // build()).
+  int _resultTab = 1;
+
+  // Guards double-tap while a tapped destination's real coordinates are
+  // being resolved — same pattern DestinationBrowserSheet uses for the same
+  // reason (Where to next? isn't touched by this change, but the tap here
+  // does the identical geocode-then-navigate work).
+  bool _resolvingDestination = false;
 
   // Fetched once per screen visit (not re-fetched per keystroke/category
   // tap — see _matchingNearby, which filters this cached list locally
@@ -158,11 +200,86 @@ class _ListingsScreenState extends State<ListingsScreen> {
     return _nearby.where((p) => p.name.toLowerCase().contains(q)).toList();
   }
 
-  void _setQuery(String value) => setState(() => _query = value);
+  void _setQuery(String value) => setState(() {
+        _query = value;
+        _resultTab = _defaultTabFor(value);
+      });
 
   void _clearQuery() {
     _controller.clear();
-    setState(() => _query = '');
+    setState(() {
+      _query = '';
+      _resultTab = 1;
+    });
+  }
+
+  /// Destinations wins the default tab only on a confident (exact place
+  /// name) match — e.g. typing "Hanoi" in full. Anything less certain
+  /// defaults to Gems, matching this screen's existing default before
+  /// Destinations existed. Either default can still be overridden at build
+  /// time if the chosen tab turns out to have zero results — see
+  /// [_effectiveTab].
+  int _defaultTabFor(String query) {
+    final q = query.trim().toLowerCase();
+    if (q.isEmpty) return 1;
+    final exactMatch =
+        _matchingDestinations(query).any((d) => d.cityName.toLowerCase() == q);
+    return exactMatch ? 0 : 1;
+  }
+
+  /// [_query], matched against the same curated country/city list
+  /// (curated_destinations.dart) DestinationBrowserSheet uses — substring,
+  /// case-insensitive, matching gemMatchesSearch's own convention elsewhere
+  /// in this app. Returns both a country's top (photo) cities and its
+  /// secondary (no-photo) chip cities.
+  List<_DestinationMatch> _matchingDestinations(String query) {
+    final q = query.trim().toLowerCase();
+    if (q.isEmpty) return const [];
+    final out = <_DestinationMatch>[];
+    for (final region in CuratedDestinations.regions) {
+      for (final country in region.countries) {
+        for (final city in country.topCities) {
+          if (city.name.toLowerCase().contains(q)) {
+            out.add(_DestinationMatch(
+                cityName: city.name,
+                countryName: country.name,
+                photoUrl: city.photoUrl));
+          }
+        }
+        for (final more in country.moreCities) {
+          if (more.toLowerCase().contains(q)) {
+            out.add(_DestinationMatch(
+                cityName: more, countryName: country.name, photoUrl: null));
+          }
+        }
+      }
+    }
+    return out;
+  }
+
+  /// Resolves [cityName]'s real coordinates (same [GeocodingService] call
+  /// DestinationBrowserSheet._openTripFor makes) then pushes the same
+  /// `/destinations/explore` route that entry point already uses — one
+  /// destination detail screen, reached the same way from either path. Falls
+  /// back to the bare city name with no coordinates if geocoding fails
+  /// rather than blocking navigation over a network hiccup.
+  Future<void> _openDestination(BuildContext context, String cityName) async {
+    if (_resolvingDestination) return;
+    setState(() => _resolvingDestination = true);
+    final results = await GeocodingService().search(cityName);
+    if (!mounted) return;
+    setState(() => _resolvingDestination = false);
+
+    final place = results.isNotEmpty ? results.first : null;
+    final label =
+        (place != null && place.fullName.isNotEmpty) ? place.fullName : cityName;
+
+    final uri = Uri(path: '/destinations/explore', queryParameters: {
+      'name': label,
+      if (place?.lat != null) 'lat': '${place!.lat}',
+      if (place?.lng != null) 'lng': '${place!.lng}',
+    });
+    if (context.mounted) context.push(uri.toString());
   }
 
   void _applyChip(String term) {
@@ -218,93 +335,151 @@ class _ListingsScreenState extends State<ListingsScreen> {
     ];
     final nearbyStillLoading = includeNearby && _nearbyLoading;
 
+    // Destinations/Gems tab split — only meaningful once there's a query to
+    // match a place name against; a bare category filter (e.g. tapping
+    // "Hiking" with an empty search field) has no destination side to show,
+    // so it stays exactly what this screen already did before this tab
+    // existed: one Gems grid, no tabs.
+    final showDestTabs = _query.trim().isNotEmpty;
+    final destMatches =
+        showDestTabs ? _matchingDestinations(_query) : const <_DestinationMatch>[];
+    var effectiveTab = _resultTab;
+    if (showDestTabs) {
+      final gemsEmpty = items.isEmpty && !nearbyStillLoading;
+      final destEmpty = destMatches.isEmpty;
+      // The active tab having nothing to show, while the other one does,
+      // shows the populated tab instead of a dead-empty screen — but never
+      // flips away from Gems while nearby POIs are still loading, or it'd
+      // flash to Destinations and flip straight back once they land.
+      if (effectiveTab == 1 && gemsEmpty && !destEmpty) effectiveTab = 0;
+      if (effectiveTab == 0 && destEmpty && !gemsEmpty) effectiveTab = 1;
+    }
+    // Category chips only apply to Gems — hide them while Destinations is
+    // the tab actually on screen so there's no filter control sitting there
+    // that visibly does nothing.
+    final showGemChips = !showDestTabs || effectiveTab == 1;
+
     return Scaffold(
       backgroundColor: AppTheme.lightSurface,
-      body: CustomScrollView(
-        slivers: [
-          SliverAppBar(
-            backgroundColor: AppTheme.lightSurface,
-            foregroundColor: AppTheme.lightInk,
-            floating: true,
-            // Explicit filled/fillColor/borders below — the app-wide
-            // inputDecorationTheme is `filled` with a DARK surface (see
-            // explore_screen.dart's search field for the same fix/comment),
-            // which is why this rendered as a stark black bar before. Style
-            // matches the Add Stop sheet's search field / the New Trip
-            // wizard's location field exactly — one canonical light-input
-            // look, reused rather than redefined here.
-            title: TextField(
-              controller: _controller,
-              focusNode: _focusNode,
-              autofocus: widget.autofocusSearch,
-              onChanged: _setQuery,
-              style: const TextStyle(color: AppTheme.lightInk, fontSize: 15),
-              decoration: InputDecoration(
-                isDense: true,
-                hintText: 'Search gems, places…',
-                hintStyle:
-                    const TextStyle(color: AppTheme.lightMute, fontSize: 15),
-                prefixIcon: const Icon(Icons.search,
-                    color: AppTheme.lightMute, size: 20),
-                filled: true,
-                fillColor: AppTheme.lightCard,
-                contentPadding: const EdgeInsets.symmetric(vertical: 10),
-                enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: const BorderSide(color: AppTheme.lightBorder),
-                ),
-                focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide:
-                      const BorderSide(color: AppTheme.primary, width: 2),
-                ),
-                suffixIcon: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    if (_query.isNotEmpty)
-                      IconButton(
-                        icon: const Icon(Icons.clear,
-                            color: AppTheme.lightMute, size: 20),
-                        onPressed: _clearQuery,
-                      ),
-                    // Same honest "coming soon" mic placeholder the Explore
-                    // map screen's search bar already uses — no real
-                    // speech-to-text plugin wired up yet on either screen.
-                    IconButton(
-                      icon: const Icon(Icons.mic_none_rounded,
-                          color: AppTheme.lightMute, size: 20),
-                      onPressed: () => _startVoiceSearch(context),
+      body: Stack(
+        children: [
+          CustomScrollView(
+            slivers: [
+              SliverAppBar(
+                backgroundColor: AppTheme.lightSurface,
+                foregroundColor: AppTheme.lightInk,
+                floating: true,
+                // Explicit filled/fillColor/borders below — the app-wide
+                // inputDecorationTheme is `filled` with a DARK surface (see
+                // explore_screen.dart's search field for the same fix/comment),
+                // which is why this rendered as a stark black bar before. Style
+                // matches the Add Stop sheet's search field / the New Trip
+                // wizard's location field exactly — one canonical light-input
+                // look, reused rather than redefined here.
+                title: TextField(
+                  controller: _controller,
+                  focusNode: _focusNode,
+                  autofocus: widget.autofocusSearch,
+                  onChanged: _setQuery,
+                  style: const TextStyle(color: AppTheme.lightInk, fontSize: 15),
+                  decoration: InputDecoration(
+                    isDense: true,
+                    hintText: 'Search places, activities, gems…',
+                    hintStyle:
+                        const TextStyle(color: AppTheme.lightMute, fontSize: 15),
+                    prefixIcon: const Icon(Icons.search,
+                        color: AppTheme.lightMute, size: 20),
+                    filled: true,
+                    fillColor: AppTheme.lightCard,
+                    contentPadding: const EdgeInsets.symmetric(vertical: 10),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: const BorderSide(color: AppTheme.lightBorder),
                     ),
-                  ],
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide:
+                          const BorderSide(color: AppTheme.primary, width: 2),
+                    ),
+                    suffixIcon: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (_query.isNotEmpty)
+                          IconButton(
+                            icon: const Icon(Icons.clear,
+                                color: AppTheme.lightMute, size: 20),
+                            onPressed: _clearQuery,
+                          ),
+                        // Same honest "coming soon" mic placeholder the Explore
+                        // map screen's search bar already uses — no real
+                        // speech-to-text plugin wired up yet on either screen.
+                        IconButton(
+                          icon: const Icon(Icons.mic_none_rounded,
+                              color: AppTheme.lightMute, size: 20),
+                          onPressed: () => _startVoiceSearch(context),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                bottom: PreferredSize(
+                  preferredSize: Size.fromHeight(
+                      (showDestTabs ? 44 : 0) + (showGemChips ? 56 : 0)),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (showDestTabs)
+                        _ResultTabBar(
+                          active: effectiveTab,
+                          destCount: destMatches.length,
+                          gemCount: items.length,
+                          onSelect: (t) => setState(() => _resultTab = t),
+                        ),
+                      if (showGemChips)
+                        CategoryChipRow(
+                          selected: _selectedCat,
+                          onSelect: (cat) => setState(() => _selectedCat = cat),
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+              if (showSuggestions)
+                _SuggestionsSlivers(
+                    popular: gem.popularTerms, onChip: _applyChip)
+              else if (showDestTabs && effectiveTab == 0)
+                _DestinationResultsSlivers(
+                  matches: destMatches,
+                  query: _query,
+                  onTap: (cityName) => _openDestination(context, cityName),
+                )
+              else if (hasFilter)
+                _ResultsSlivers(
+                  gem: gem,
+                  items: items,
+                  nearbyLoading: nearbyStillLoading,
+                  onSave: _comingSoonSave,
+                )
+              else
+                _BrowseSlivers(
+                  gem: gem,
+                  featured: featured,
+                  items: items,
+                  nearbyLoading: nearbyStillLoading,
+                  onSave: _comingSoonSave,
+                ),
+              const SliverPadding(padding: EdgeInsets.only(bottom: 24)),
+            ],
+          ),
+          if (_resolvingDestination)
+            Positioned.fill(
+              child: Container(
+                color: Colors.black.withValues(alpha: 0.15),
+                child: const Center(
+                  child: CircularProgressIndicator(color: AppTheme.primary),
                 ),
               ),
             ),
-            bottom: PreferredSize(
-              preferredSize: const Size.fromHeight(56),
-              child: _CategoryBar(
-                selected: _selectedCat,
-                onSelect: (cat) => setState(() => _selectedCat = cat),
-              ),
-            ),
-          ),
-          if (showSuggestions)
-            _SuggestionsSlivers(popular: gem.popularTerms, onChip: _applyChip)
-          else if (hasFilter)
-            _ResultsSlivers(
-              gem: gem,
-              items: items,
-              nearbyLoading: nearbyStillLoading,
-              onSave: _comingSoonSave,
-            )
-          else
-            _BrowseSlivers(
-              gem: gem,
-              featured: featured,
-              items: items,
-              nearbyLoading: nearbyStillLoading,
-              onSave: _comingSoonSave,
-            ),
-          const SliverPadding(padding: EdgeInsets.only(bottom: 24)),
         ],
       ),
     );
@@ -313,7 +488,7 @@ class _ListingsScreenState extends State<ListingsScreen> {
 
 /// Suggestions state: just the Popular Searches chips — the category grid
 /// Screen A used to show here is gone, since the same categories are already
-/// one persistent bar above (_CategoryBar), not worth showing twice.
+/// one persistent bar above ([CategoryChipRow]), not worth showing twice.
 class _SuggestionsSlivers extends StatelessWidget {
   const _SuggestionsSlivers({required this.popular, required this.onChip});
 
@@ -504,8 +679,8 @@ class _ItemGridSliver extends StatelessWidget {
           (ctx, i) {
             final item = items[i];
             return item.gem != null
-                ? _GemCard(gem: item.gem!, onSave: () => onSave(ctx))
-                : _PoiCard(poi: item.poi!);
+                ? GemResultCard(gem: item.gem!, onSave: () => onSave(ctx))
+                : PoiResultCard(poi: item.poi!);
           },
           childCount: items.length,
         ),
@@ -525,55 +700,162 @@ class _ItemGridSliver extends StatelessWidget {
   }
 }
 
-class _CategoryBar extends StatelessWidget {
-  const _CategoryBar({required this.selected, required this.onSelect});
+/// Destinations / Gems tab strip — only shown once there's a query to match
+/// a place name against (see [_ListingsScreenState.build]). Counts are shown
+/// on both tabs always, including 0, so a de-emphasized "Gems 0" reads as "I
+/// checked, there's nothing here" rather than a second empty-state screen —
+/// the active tab auto-switches to whichever side actually has results (see
+/// the effectiveTab computation in build()), so a 0 badge should only ever
+/// appear on the *inactive* tab in practice.
+class _ResultTabBar extends StatelessWidget {
+  const _ResultTabBar({
+    required this.active,
+    required this.destCount,
+    required this.gemCount,
+    required this.onSelect,
+  });
 
-  final String selected;
-  final ValueChanged<String> onSelect;
+  final int active; // 0 = Destinations, 1 = Gems
+  final int destCount;
+  final int gemCount;
+  final ValueChanged<int> onSelect;
 
   @override
   Widget build(BuildContext context) {
-    // 'all' first (primary reset), then the gem categories.
-    final cats = <String>['all', ...Gem.categories];
+    return Container(
+      height: 44,
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 6),
+      child: Row(
+        children: [
+          Expanded(
+              child: _tab(context, 0, 'Destinations', destCount)),
+          const SizedBox(width: 8),
+          Expanded(child: _tab(context, 1, 'Gems', gemCount)),
+        ],
+      ),
+    );
+  }
 
-    return SizedBox(
-      height: 48,
-      child: ListView.builder(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-        itemCount: cats.length,
-        itemBuilder: (ctx, i) {
-          final cat = cats[i];
-          final isAll = cat == 'all';
-          final isSelected = selected == cat;
-          final icon =
-              isAll ? Icons.public : AppConstants.gemCategoryIcons[cat]!;
-          final label = isAll ? 'All' : cat[0].toUpperCase() + cat.substring(1);
-          return Padding(
-            padding: const EdgeInsets.only(right: 8),
-            child: FilterChip(
-              avatar: Icon(
-                icon,
-                size: 18,
-                color: isSelected ? Colors.white : AppTheme.lightInk,
+  Widget _tab(BuildContext context, int index, String label, int count) {
+    final isActive = active == index;
+    final emphasize = count > 0 || isActive;
+    return GestureDetector(
+      onTap: () => onSelect(index),
+      child: Container(
+        height: 38,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: isActive ? AppTheme.lightInk : AppTheme.lightCard,
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Text(
+          '$label $count',
+          style: TextStyle(
+            fontSize: 12.5,
+            fontWeight: FontWeight.w700,
+            color: isActive
+                ? Colors.white
+                : (emphasize ? AppTheme.lightInk : AppTheme.lightMute),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Destinations tab body — one match per curated city whose name contains
+/// the query (see [_ListingsScreenState._matchingDestinations]).
+class _DestinationResultsSlivers extends StatelessWidget {
+  const _DestinationResultsSlivers({
+    required this.matches,
+    required this.query,
+    required this.onTap,
+  });
+
+  final List<_DestinationMatch> matches;
+  final String query;
+  final ValueChanged<String> onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    if (matches.isEmpty) {
+      return SliverToBoxAdapter(
+        child: EmptyStateView(
+          text: 'No destinations match "$query".',
+          icon: Icons.map_outlined,
+        ),
+      );
+    }
+    return SliverPadding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      sliver: SliverList.separated(
+        itemCount: matches.length,
+        separatorBuilder: (_, __) => const SizedBox(height: 10),
+        itemBuilder: (context, i) =>
+            _DestinationRow(match: matches[i], onTap: onTap),
+      ),
+    );
+  }
+}
+
+class _DestinationRow extends StatelessWidget {
+  const _DestinationRow({required this.match, required this.onTap});
+
+  final _DestinationMatch match;
+  final ValueChanged<String> onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      button: true,
+      label: '${match.cityName}, ${match.countryName}',
+      child: GestureDetector(
+        onTap: () => onTap(match.cityName),
+        child: Container(
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(
+            color: AppTheme.lightCard,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: AppTheme.lightBorder),
+          ),
+          child: Row(
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(10),
+                child: SizedBox(
+                  width: 52,
+                  height: 52,
+                  child: match.photoUrl != null
+                      ? AppNetworkImage(url: match.photoUrl!, fit: BoxFit.cover)
+                      : Container(
+                          color: AppTheme.primary.withValues(alpha: 0.1),
+                          alignment: Alignment.center,
+                          child: const Icon(Icons.location_city,
+                              color: AppTheme.primary, size: 22),
+                        ),
+                ),
               ),
-              label: Text(label),
-              selected: isSelected,
-              onSelected: (_) => onSelect(cat),
-              selectedColor: AppTheme.primary,
-              backgroundColor: AppTheme.lightCard,
-              labelStyle: TextStyle(
-                color: isSelected ? Colors.white : AppTheme.lightInk,
-                fontWeight: FontWeight.w500,
-                fontSize: 13,
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(match.cityName,
+                        style: const TextStyle(
+                            fontWeight: FontWeight.w700,
+                            fontSize: 15,
+                            color: AppTheme.lightInk)),
+                    const SizedBox(height: 2),
+                    Text(match.countryName,
+                        style: const TextStyle(
+                            color: AppTheme.lightMute, fontSize: 12)),
+                  ],
+                ),
               ),
-              side: BorderSide(
-                color: isSelected ? Colors.transparent : AppTheme.lightBorder,
-              ),
-              showCheckmark: false,
-            ),
-          );
-        },
+              const Icon(Icons.chevron_right, color: AppTheme.lightMute),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -675,8 +957,8 @@ class _FeaturedGemCard extends StatelessWidget {
   }
 }
 
-class _GemCard extends StatelessWidget {
-  const _GemCard({required this.gem, required this.onSave});
+class GemResultCard extends StatelessWidget {
+  const GemResultCard({super.key, required this.gem, required this.onSave});
 
   final Gem gem;
   final VoidCallback onSave;
@@ -753,7 +1035,7 @@ class _GemCard extends StatelessWidget {
                           borderRadius: BorderRadius.circular(8),
                         ),
                         // "GEM · " prefix is the visible distinction from
-                        // _PoiCard's plain category pill — this is a real,
+                        // PoiResultCard's plain category pill — this is a real,
                         // app-curated spot, not a generic Mapbox place.
                         child: Text('GEM · ${gem.displayCategory}',
                             style: const TextStyle(
@@ -823,14 +1105,14 @@ class _GemCard extends StatelessWidget {
   }
 }
 
-/// A real nearby place from Mapbox Tilequery — same card shape as [_GemCard]
+/// A real nearby place from Mapbox Tilequery — same card shape as [GemResultCard]
 /// so the merged grid reads as one consistent layout, but deliberately
 /// simpler: no bookmark (saving one would mean creating a real gem from it,
 /// not wired up), no photo (Tilequery doesn't return one, so a plain icon
 /// tile substitutes), and a neutral grey category pill instead of the
 /// orange "GEM · " one — the visible tell that this isn't app-curated.
-class _PoiCard extends StatelessWidget {
-  const _PoiCard({required this.poi});
+class PoiResultCard extends StatelessWidget {
+  const PoiResultCard({super.key, required this.poi});
 
   final NearbyPoi poi;
 

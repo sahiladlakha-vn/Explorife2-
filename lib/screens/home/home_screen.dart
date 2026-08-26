@@ -496,7 +496,7 @@ class _SearchBar extends StatelessWidget {
   Widget build(BuildContext context) {
     return Semantics(
       button: true,
-      label: 'Search destinations and trails',
+      label: 'Search places, activities, and gems',
       child: GestureDetector(
         // Merged into ListingsScreen (/listings) — extra: true lands it
         // focused on the search field (Suggestions state) instead of the
@@ -515,7 +515,7 @@ class _SearchBar extends StatelessWidget {
               const SizedBox(width: 10),
               Expanded(
                 child: Text(
-                  'Search destinations, trails...',
+                  'Search places, activities, gems…',
                   style: GoogleFonts.fredoka(
                       color: AppTheme.lightMute, fontSize: 14),
                 ),

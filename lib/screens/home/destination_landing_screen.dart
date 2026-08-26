@@ -1,21 +1,36 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:provider/provider.dart';
 import '../../core/services/mapbox_tilequery_service.dart';
 import '../../core/theme/app_theme.dart';
+import '../../providers/gem_provider.dart';
+import '../../widgets/gems/category_chip_row.dart';
+import '../../widgets/state_views.dart';
+import '../listings/listings_screen.dart' show GemResultCard, PoiResultCard;
 
-/// Opened when a city is tapped in the "Where to next?" destination browser
-/// (destination_browser_sheet.dart) — an intermediate browsing page before
-/// trip creation, not a jump straight into the wizard anymore.
+/// Destination Detail — opened when a city is selected, either from Home's
+/// "Where to next?" browser (destination_browser_sheet.dart) or from
+/// ListingsScreen's Destinations search tab. Both entry points resolve real
+/// coordinates first and land here the same way.
 ///
-/// Content is real Mapbox Tilequery data (name, category, real distance)
-/// with NO price/rating/review-count/deal chrome — none of that exists
-/// anywhere in this app (confirmed before building: no affiliate/booking
-/// partner integration, Mapbox has no commerce data). Faking those numbers
-/// the way `explore_screen_widgets.dart`'s hash-derived rating placeholder
-/// does was explicitly ruled out. "Things to do" vs "Attractions" is a
-/// best-effort local split on Mapbox's own POI category string — there's no
-/// authoritative "this is a tourist attraction" flag to key off, so treat
-/// the grouping as a reasonable heuristic, not a guarantee.
+/// City header + "Plan a trip" CTA stay unchanged. The body used to be its
+/// own standalone tab row (Explore / Things to do / Transport / Hotels,
+/// sourced from Mapbox Tilequery) with no connection to this app's Gem
+/// taxonomy — Phase 1 of the unified search funnel replaces that with a
+/// single Gems feed scoped to this city, filtered by the exact same
+/// [CategoryChipRow] instance ListingsScreen's Gems tab uses (same state
+/// model, order, styling — not a fork).
+///
+/// "Scoped to this city" is a text match against each Gem's `gemLocation`
+/// (via [GemProvider.search], the same substring match every other screen's
+/// search already uses) — there's no per-gem geo-radius query in this app
+/// yet, and adding one is out of scope for reusing existing data. Real
+/// nearby Mapbox places still merge in via [MapboxTilequeryService] exactly
+/// as this screen already fetched them, unified under the same card
+/// presentation ([GemResultCard]/[PoiResultCard]) rather than their own
+/// separate "Top things to do"/"Top attractions" rails — a presentation
+/// merge only; curated Gems and Mapbox POIs remain two distinct data
+/// sources, still rendered with their own honest "GEM" vs. plain badge.
 class DestinationLandingScreen extends StatefulWidget {
   const DestinationLandingScreen({
     super.key,
@@ -33,20 +48,9 @@ class DestinationLandingScreen extends StatefulWidget {
       _DestinationLandingScreenState();
 }
 
-enum _DestTab { explore, thingsToDo, transport, hotels }
-
-extension on _DestTab {
-  String get label => switch (this) {
-        _DestTab.explore => 'Explore',
-        _DestTab.thingsToDo => 'Things to do',
-        _DestTab.transport => 'Transport',
-        _DestTab.hotels => 'Hotels',
-      };
-}
-
 class _DestinationLandingScreenState extends State<DestinationLandingScreen> {
   final MapboxTilequeryService _tilequery = MapboxTilequeryService();
-  _DestTab _tab = _DestTab.explore;
+  String _selectedCat = 'all';
   List<NearbyPoi> _pois = [];
   bool _loading = true;
 
@@ -60,7 +64,7 @@ class _DestinationLandingScreenState extends State<DestinationLandingScreen> {
     final lat = widget.lat, lng = widget.lng;
     if (lat == null || lng == null) {
       // No resolved coordinates (geocoding failed upstream) — nothing to
-      // query nearby; show the empty state rather than erroring.
+      // query nearby; the scoped Gems feed still works off the city name.
       setState(() => _loading = false);
       return;
     }
@@ -73,32 +77,6 @@ class _DestinationLandingScreenState extends State<DestinationLandingScreen> {
       });
   }
 
-  // Best-effort local split on Mapbox's own category string — see class doc.
-  static bool _looksLikeAttraction(String? category) {
-    if (category == null) return false;
-    final c = category.toLowerCase();
-    const attractionHints = [
-      'historic',
-      'landmark',
-      'museum',
-      'park',
-      'monument',
-      'memorial',
-      'place_of_worship',
-      'viewpoint',
-      'zoo',
-      'aquarium',
-      'art',
-      'temple',
-    ];
-    return attractionHints.any(c.contains);
-  }
-
-  List<NearbyPoi> get _attractions =>
-      _pois.where((p) => _looksLikeAttraction(p.category)).toList();
-  List<NearbyPoi> get _thingsToDo =>
-      _pois.where((p) => !_looksLikeAttraction(p.category)).toList();
-
   void _planTrip(BuildContext context) {
     final uri = Uri(path: '/trips/new', queryParameters: {
       'location': widget.cityName,
@@ -108,8 +86,32 @@ class _DestinationLandingScreenState extends State<DestinationLandingScreen> {
     context.push(uri.toString());
   }
 
+  void _dropGem(BuildContext context) {
+    context.push('/drop-gem', extra: {
+      if (widget.lat != null) 'lat': widget.lat,
+      if (widget.lng != null) 'lng': widget.lng,
+    });
+  }
+
+  void _comingSoonSave(BuildContext context) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Saving gems is coming soon')),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    final gem = context.watch<GemProvider>();
+    final gemMatches = gem.search(query: widget.cityName, category: _selectedCat);
+    // Same rule ListingsScreen uses: a specific category narrows to gems
+    // only, since Mapbox's POI categories don't map onto this app's fixed
+    // 8-category taxonomy — merging them into a category-filtered view
+    // would be a false match, not a real one.
+    final includeNearby = _selectedCat == 'all';
+    final nearby = includeNearby ? _pois : const <NearbyPoi>[];
+    final nearbyStillLoading = includeNearby && _loading;
+    final hasAny = gemMatches.isNotEmpty || nearby.isNotEmpty;
+
     return Scaffold(
       backgroundColor: AppTheme.lightSurface,
       appBar: AppBar(
@@ -118,17 +120,72 @@ class _DestinationLandingScreenState extends State<DestinationLandingScreen> {
         elevation: 0,
         title: Text(widget.cityName),
         bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(44),
-          child: _TabRow(
-            active: _tab,
-            cityName: widget.cityName,
-            onSelect: (t) => setState(() => _tab = t),
+          preferredSize: const Size.fromHeight(56),
+          child: CategoryChipRow(
+            selected: _selectedCat,
+            onSelect: (cat) => setState(() => _selectedCat = cat),
           ),
         ),
       ),
-      body: _tab == _DestTab.explore
-          ? _buildExplore(context)
-          : _buildComingSoon(),
+      body: CustomScrollView(
+        slivers: [
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+              child: Text('Gems in ${widget.cityName}',
+                  style: const TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w700,
+                      color: AppTheme.lightInk)),
+            ),
+          ),
+          if (gem.loading || (gemMatches.isEmpty && nearbyStillLoading))
+            const SliverToBoxAdapter(
+              child: Padding(
+                padding: EdgeInsets.symmetric(horizontal: 16),
+                child: TrailListSkeleton(),
+              ),
+            )
+          else if (gem.error != null)
+            SliverToBoxAdapter(
+              child: ErrorStateView(onRetry: gem.refresh, message: gem.error),
+            )
+          else if (!hasAny)
+            SliverToBoxAdapter(
+              child: EmptyStateView(
+                text: 'No gems in ${widget.cityName} yet.',
+                icon: Icons.diamond_outlined,
+                actionLabel: 'Drop the first gem',
+                onAction: () => _dropGem(context),
+              ),
+            )
+          else
+            SliverPadding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              sliver: SliverGrid(
+                delegate: SliverChildBuilderDelegate(
+                  (ctx, i) {
+                    if (i < gemMatches.length) {
+                      return GemResultCard(
+                        gem: gemMatches[i],
+                        onSave: () => _comingSoonSave(ctx),
+                      );
+                    }
+                    return PoiResultCard(poi: nearby[i - gemMatches.length]);
+                  },
+                  childCount: gemMatches.length + nearby.length,
+                ),
+                gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+                  maxCrossAxisExtent: 230,
+                  childAspectRatio: 0.78,
+                  crossAxisSpacing: 12,
+                  mainAxisSpacing: 12,
+                ),
+              ),
+            ),
+          const SliverPadding(padding: EdgeInsets.only(bottom: 24)),
+        ],
+      ),
       bottomNavigationBar: SafeArea(
         child: Padding(
           padding: const EdgeInsets.fromLTRB(20, 12, 20, 12),
@@ -148,260 +205,6 @@ class _DestinationLandingScreenState extends State<DestinationLandingScreen> {
                       fontSize: 15, fontWeight: FontWeight.w700)),
             ),
           ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildComingSoon() {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(Icons.hourglass_empty,
-                size: 36, color: AppTheme.lightMute),
-            const SizedBox(height: 12),
-            Text('${_tab.label} for ${widget.cityName} is coming soon.',
-                textAlign: TextAlign.center,
-                style: const TextStyle(color: AppTheme.lightMute)),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildExplore(BuildContext context) {
-    if (_loading) {
-      return const Center(
-          child: CircularProgressIndicator(color: AppTheme.primary));
-    }
-    if (_pois.isEmpty) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Text('No places found near ${widget.cityName} yet.',
-              textAlign: TextAlign.center,
-              style: const TextStyle(color: AppTheme.lightMute)),
-        ),
-      );
-    }
-    return ListView(
-      padding: const EdgeInsets.only(bottom: 24),
-      children: [
-        if (_thingsToDo.isNotEmpty)
-          _PoiSection(
-            title: 'Top things to do in ${widget.cityName}',
-            seeAllLabel:
-                'See ${_thingsToDo.length} things to do in ${widget.cityName}',
-            pois: _thingsToDo.take(10).toList(),
-          ),
-        if (_attractions.isNotEmpty)
-          _PoiSection(
-            title: 'Top attractions in ${widget.cityName}',
-            seeAllLabel:
-                'See ${_attractions.length} attractions in ${widget.cityName}',
-            pois: _attractions.take(10).toList(),
-          ),
-      ],
-    );
-  }
-}
-
-class _TabRow extends StatelessWidget {
-  const _TabRow(
-      {required this.active, required this.cityName, required this.onSelect});
-
-  final _DestTab active;
-  final String cityName;
-  final ValueChanged<_DestTab> onSelect;
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      height: 44,
-      child: ListView(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 16),
-        children: [
-          for (final t in _DestTab.values)
-            Padding(
-              padding: const EdgeInsets.only(right: 20),
-              child: GestureDetector(
-                onTap: () => onSelect(t),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Text(
-                      t == _DestTab.explore ? 'Explore $cityName' : t.label,
-                      style: TextStyle(
-                        fontSize: 14,
-                        fontWeight:
-                            active == t ? FontWeight.w700 : FontWeight.w500,
-                        color: active == t
-                            ? AppTheme.lightInk
-                            : AppTheme.lightMute,
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    Container(
-                      height: 2,
-                      width: 24,
-                      color:
-                          active == t ? AppTheme.primary : Colors.transparent,
-                    ),
-                  ],
-                ),
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-}
-
-class _PoiSection extends StatelessWidget {
-  const _PoiSection(
-      {required this.title, required this.seeAllLabel, required this.pois});
-
-  final String title;
-  final String seeAllLabel;
-  final List<NearbyPoi> pois;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(top: 20),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Text(title,
-                style: const TextStyle(
-                    fontSize: 17,
-                    fontWeight: FontWeight.w700,
-                    color: AppTheme.lightInk)),
-          ),
-          const SizedBox(height: 12),
-          SizedBox(
-            height: 190,
-            child: ListView.separated(
-              scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              itemCount: pois.length,
-              separatorBuilder: (_, __) => const SizedBox(width: 12),
-              itemBuilder: (context, i) => _PoiCard(poi: pois[i]),
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
-            child: Text(seeAllLabel,
-                style: const TextStyle(
-                    color: AppTheme.primary,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600)),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _PoiCard extends StatelessWidget {
-  const _PoiCard({required this.poi});
-
-  final NearbyPoi poi;
-
-  void _comingSoonSave(BuildContext context) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Saving places is coming soon')),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: () => context.push('/gems/poi', extra: poi),
-      child: Container(
-        width: 160,
-        decoration: BoxDecoration(
-          color: AppTheme.lightCard,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: AppTheme.lightBorder),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Expanded(
-              child: Stack(
-                children: [
-                  Positioned.fill(
-                    child: ClipRRect(
-                      borderRadius:
-                          const BorderRadius.vertical(top: Radius.circular(16)),
-                      // Mapbox's POI data has no photo field at all (confirmed
-                      // against the raw Tilequery response) — a category-specific
-                      // icon on a tinted tile stands in, using Mapbox's own
-                      // `maki` glyph name to pick something more specific than a
-                      // generic pin.
-                      child: Container(
-                        color: AppTheme.primary.withValues(alpha: 0.08),
-                        alignment: Alignment.center,
-                        child: Icon(NearbyPoi.iconForMaki(poi.maki),
-                            size: 30, color: AppTheme.primary),
-                      ),
-                    ),
-                  ),
-                  Positioned(
-                    top: 6,
-                    right: 6,
-                    child: GestureDetector(
-                      onTap: () => _comingSoonSave(context),
-                      child: Container(
-                        padding: const EdgeInsets.all(5),
-                        decoration: const BoxDecoration(
-                            color: Colors.white, shape: BoxShape.circle),
-                        child: const Icon(Icons.favorite_border,
-                            size: 14, color: AppTheme.lightMute),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.all(10),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  if (poi.category != null)
-                    Text(poi.category!.toUpperCase(),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                            color: AppTheme.primary,
-                            fontSize: 10,
-                            fontWeight: FontWeight.w700)),
-                  const SizedBox(height: 2),
-                  Text(poi.name,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                          fontWeight: FontWeight.w600,
-                          fontSize: 13,
-                          color: AppTheme.lightInk)),
-                  if (poi.distanceMeters != null) ...[
-                    const SizedBox(height: 4),
-                    Text('${poi.distanceMeters!.round()}m away',
-                        style: const TextStyle(
-                            color: AppTheme.lightMute, fontSize: 11)),
-                  ],
-                ],
-              ),
-            ),
-          ],
         ),
       ),
     );
