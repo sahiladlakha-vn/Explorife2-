@@ -1,0 +1,11 @@
+-- Full wipe of saved_gems, per explicit user confirmation — this removes
+-- every remaining row, including the 9 previously-kept legitimate entries
+-- (Bánh căn Cô Hiếu, Cafe, Café, Thi cafe, Rooftop cafe, saigon night view,
+-- evening view, saigon, Banh mi Madam) left after the two prior cleanup
+-- passes (20260815000300, 20260815000400). Discovery ends up completely
+-- empty after this runs.
+--
+-- Safe to run: gem_saves cascades on delete (20260618000100), and
+-- trip_stops.gem_id sets null rather than blocking or cascading
+-- (20260630000000) — no orphaned/blocked references.
+delete from public.saved_gems;
