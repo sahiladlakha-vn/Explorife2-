@@ -8,6 +8,13 @@ class Gem {
   final String? tagline;
   final String? description;
   final String? photoUrl;
+
+  /// Full ordered photo set for the detail screen's gallery. Empty for every
+  /// gem dropped before multi-photo support existed (and for every
+  /// Mapbox-sourced place, which has no photos at all) — callers needing "all
+  /// photos, however many there are" should use [allPhotos] rather than this
+  /// directly.
+  final List<String> photoUrls;
   final String? difficulty;
   final String? bestTimeToVisit;
 
@@ -25,6 +32,19 @@ class Gem {
   /// profile or the join was omitted. Read-only — never written back.
   final String? dropperHandle;
 
+  /// Mapbox's own Maki icon name (e.g. 'town-hall', 'parking') — set ONLY on
+  /// a transient, in-memory Gem built from a [NearbyPoi] (see
+  /// GemDetailScreen's poi-based constructor), never on a real saved_gems
+  /// row and never persisted. Lets the detail screen's "no photo" fallback
+  /// show the same specific icon the POI's own card already uses instead of
+  /// the generic pin/food-etc. emoji.
+  final String? maki;
+
+  /// True only for a transient Gem built from a Mapbox POI rather than a
+  /// real saved_gems row — there is no gem_saves row to create for it, so a
+  /// bookmark tap can't attempt a real save (see GemDetailScreen).
+  final bool isFromPoi;
+
   const Gem({
     required this.id,
     required this.gemName,
@@ -35,12 +55,15 @@ class Gem {
     this.tagline,
     this.description,
     this.photoUrl,
+    this.photoUrls = const [],
     this.difficulty,
     this.bestTimeToVisit,
     this.estDurationMin,
     required this.savedAt,
     this.userId,
     this.dropperHandle,
+    this.maki,
+    this.isFromPoi = false,
   });
 
   factory Gem.fromJson(Map<String, dynamic> json) {
@@ -75,10 +98,12 @@ class Gem {
       tagline: json['tagline'] as String?,
       description: json['description'] as String?,
       photoUrl: json['photo_url'] as String?,
+      photoUrls: (json['photo_urls'] as List?)?.cast<String>() ?? const [],
       difficulty: json['difficulty'] as String?,
       bestTimeToVisit: json['best_time_to_visit'] as String?,
       estDurationMin: (json['est_duration_min'] as num?)?.toInt(),
-      savedAt: DateTime.tryParse(json['saved_at'] as String? ?? '') ?? DateTime.now(),
+      savedAt: DateTime.tryParse(json['saved_at'] as String? ?? '') ??
+          DateTime.now(),
       userId: json['user_id'] as String?,
       dropperHandle: dropperHandle,
     );
@@ -97,6 +122,7 @@ class Gem {
         'tagline': tagline,
         'description': description,
         'photo_url': photoUrl,
+        'photo_urls': photoUrls,
         'difficulty': difficulty,
         'best_time_to_visit': bestTimeToVisit,
         'est_duration_min': estDurationMin,
@@ -115,7 +141,14 @@ class Gem {
   };
 
   static const List<String> categories = [
-    'hiking', 'camping', 'viewpoint', 'food', 'temple', 'cave', 'coastal', 'nature',
+    'hiking',
+    'camping',
+    'viewpoint',
+    'food',
+    'temple',
+    'cave',
+    'coastal',
+    'nature',
   ];
 
   String get emoji => categoryEmoji[category] ?? '📍';
@@ -123,4 +156,11 @@ class Gem {
       ? category![0].toUpperCase() + category!.substring(1)
       : 'Unknown';
   bool get hasCoords => latitude != null && longitude != null;
+
+  /// Every photo for this gem, cover first. Falls back to [photoUrl] alone
+  /// when [photoUrls] is empty (every gem dropped before multi-photo support,
+  /// and every Mapbox-sourced place) — never both, since [photoUrls] already
+  /// includes the cover when it's populated.
+  List<String> get allPhotos =>
+      photoUrls.isNotEmpty ? photoUrls : (photoUrl != null ? [photoUrl!] : []);
 }

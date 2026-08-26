@@ -83,13 +83,21 @@ class _PlacementScreenState extends State<PlacementScreen> {
     final hasCoord = _lat != null && _lng != null;
 
     return Scaffold(
-      backgroundColor: AppTheme.bg,
+      backgroundColor: AppTheme.lightSurface,
       body: Stack(
         children: [
           // ── Live map ──
           MapEngineView(
             markers: _markersFor(gems),
-            styleId: 'dark-v11',
+            // Standard Style only renders through a real Mapbox GL runtime
+            // (web); native's flutter_map raster fallback can't (see
+            // explore_screen.dart's _autoStyle for the confirmed reason), so
+            // it keeps the original flat 'dark-v11'. Fixed 'night' preset,
+            // no picker — this is a single-purpose "drop a pin" screen, not
+            // a place to browse lighting options, and 'night' is the closest
+            // match to dark-v11's original low-chrome mood.
+            styleId: kIsWeb ? 'standard' : 'dark-v11',
+            lightPreset: 'night',
             token: _token,
             onMarkerTap: (_) {},
             onReady: (c) {
@@ -181,7 +189,7 @@ class _PlacementScreenState extends State<PlacementScreen> {
                         Flexible(
                           child: Text(
                             'Drag the map to position your gem',
-                            style: GoogleFonts.dmSans(
+                            style: GoogleFonts.fredoka(
                               fontSize: 13,
                               fontWeight: FontWeight.w600,
                               color: const Color(0xFF993C1D),
@@ -218,14 +226,14 @@ class _PlacementScreenState extends State<PlacementScreen> {
                         padding: const EdgeInsets.symmetric(
                             horizontal: 12, vertical: 6),
                         decoration: BoxDecoration(
-                          color: AppTheme.surface,
+                          color: AppTheme.lightCard,
                           borderRadius: BorderRadius.circular(20),
-                          border: Border.all(color: AppTheme.divider),
+                          border: Border.all(color: AppTheme.lightBorder),
                         ),
                         child: Text(
                           '${_lat!.toStringAsFixed(4)}, ${_lng!.toStringAsFixed(4)}',
                           style: GoogleFonts.jetBrainsMono(
-                              fontSize: 11, color: AppTheme.textSecondary),
+                              fontSize: 11, color: AppTheme.lightMute),
                         ),
                       ),
                     SizedBox(
@@ -241,7 +249,7 @@ class _PlacementScreenState extends State<PlacementScreen> {
                               borderRadius: BorderRadius.circular(14)),
                         ),
                         child: Text('Confirm location',
-                            style: GoogleFonts.dmSans(
+                            style: GoogleFonts.fredoka(
                                 fontSize: 16,
                                 fontWeight: FontWeight.w700,
                                 color: Colors.white)),

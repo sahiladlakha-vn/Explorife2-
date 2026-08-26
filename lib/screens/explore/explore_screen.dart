@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:ui' as ui;
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:geolocator/geolocator.dart';
@@ -32,7 +33,10 @@ class ExploreScreen extends StatefulWidget {
   State<ExploreScreen> createState() => _ExploreScreenState();
 }
 
-enum _MapStyle { outdoors, dark, satellite }
+// Native-only (outdoors/dark) and web-only (standard) members coexist here —
+// see _autoStyle and _showLayers for how each platform's picker filters this
+// down to the styles it can actually render.
+enum _MapStyle { standard, outdoors, dark, satellite }
 
 /// Where a gem selection originated, so the one [_selectGem] codepath knows which
 /// side effects to run without duplicating selection flags. Two derived booleans
@@ -44,8 +48,14 @@ enum _SelectSource { deckSwipe, pinTap, listTap }
 class _ExploreScreenState extends State<ExploreScreen> {
   MapEngineController? _engine;
   late _MapStyle _style;
+  late String _lightPreset; // 'dawn' | 'day' | 'dusk' | 'night' — see _autoLightPreset
   double? _userLat, _userLng;
   String? _city;
+
+  /// 3D terrain tilt toggle — pitch 60° (relief visible) vs. flat pitch 0°.
+  /// Web only in effect (see MapEngineController.setTilted); harmless no-op
+  /// on native.
+  bool _tilted = false;
 
   /// One-shot launch gate: true until the FIRST city/area resolve settles. While
   /// set, the loading overlay stays up so the sheet never flashes the global gem
@@ -107,19 +117,44 @@ class _ExploreScreenState extends State<ExploreScreen> {
   final GeocodingService _geo = GeocodingService();
 
   // Pick day vs. night based on the device's local clock (reflects the user's
-  // time zone). Daytime → outdoors (light); night → dark.
+  // time zone). Daytime → outdoors (light); night → dark. Native-only default
+  // now (see _autoStyle) — web defaults to Standard Style, which has its own,
+  // finer-grained time-of-day system (_autoLightPreset below).
   static bool get _isDaytime {
     final h = DateTime.now().hour;
     return h >= 6 && h < 18;
   }
 
-  static _MapStyle get _autoStyle =>
-      _isDaytime ? _MapStyle.outdoors : _MapStyle.dark;
+  // Standard Style (3D buildings/landmarks/lighting) only renders through a
+  // real Mapbox GL runtime — confirmed by hitting Mapbox's Static Images and
+  // Raster Tiles endpoints directly with styleId=standard; both reject it
+  // ("Unsupported rasterarray tileset format"). Web has that runtime (Mapbox
+  // GL JS); native's flutter_map fallback (flat raster tiles) does not and
+  // has no path to it short of adopting Mapbox's native SDK, a separate
+  // project. So Standard is web's default and native keeps the pre-existing
+  // flat outdoors/dark auto-switch — kIsWeb branches every style decision
+  // below, not just this one.
+  static _MapStyle get _autoStyle => kIsWeb
+      ? _MapStyle.standard
+      : (_isDaytime ? _MapStyle.outdoors : _MapStyle.dark);
+
+  // Dawn/day/dusk/night boundaries approximate real sunrise/sunset timing
+  // closely enough for a "does this look right for the time of day" default;
+  // exact astronomical timing isn't worth the complexity here. Only
+  // meaningful when _style is _MapStyle.standard (web only) — see _styleId.
+  static String get _autoLightPreset {
+    final h = DateTime.now().hour;
+    if (h >= 5 && h < 7) return 'dawn';
+    if (h >= 7 && h < 17) return 'day';
+    if (h >= 17 && h < 19) return 'dusk';
+    return 'night';
+  }
 
   @override
   void initState() {
     super.initState();
     _style = _autoStyle;
+    _lightPreset = _autoLightPreset;
     _searchFocus.addListener(() {
       if (_searchFocus.hasFocus && !_searchFocused) {
         setState(() => _searchFocused = true);
@@ -147,6 +182,14 @@ class _ExploreScreenState extends State<ExploreScreen> {
         return 'satellite-streets-v12';
       case _MapStyle.outdoors:
         return 'outdoors-v12';
+      // Mapbox's GL JS v3 "Standard" style — real 3D buildings, landmark
+      // icons, and trees baked into the style itself (unlike the terrain
+      // toggle, which layers elevation relief on top of any style via a
+      // separate DEM source). Web's default (see _autoStyle) — just another
+      // style id through the exact same plumbing everything else here
+      // already uses.
+      case _MapStyle.standard:
+        return 'standard';
     }
   }
 
@@ -204,42 +247,53 @@ class _ExploreScreenState extends State<ExploreScreen> {
       body: Stack(
         children: [
           // ── MAP (Mapbox GL globe on web; flutter_map fallback on native) ──
-          MapEngineView(
-            markers: _markersFor(gems),
-            styleId: _styleId,
-            token: _token,
-            userLat: _userLat,
-            userLng: _userLng,
-            // Tapping a pin SELECTS its gem (scrolls the deck to it + highlights
-            // the pin) rather than opening the detail outright — the deck is the
-            // browse surface now. Detail opens by tapping the deck card.
-            onMarkerTap: (id) => _selectGem(id, _SelectSource.pinTap),
-            // Camera settled → store the viewport bounds so the deck re-clips to
-            // the gems now on screen (centre is ignored here; the deck derives
-            // its anchor from the bounds when location is unknown).
-            onCameraIdle: _onCameraIdle,
-            // Track the live bearing so the compass control can reveal itself
-            // only when the map is actually rotated off north.
-            onBearingChanged: (b) {
-              // Treat sub-degree wobble as north so the compass doesn't flicker.
-              final rotated = b.abs() > 1.0;
-              final wasRotated = _bearing.abs() > 1.0;
-              if (rotated != wasRotated || (rotated && b != _bearing)) {
-                setState(() => _bearing = b);
-              }
-            },
-            onReady: (c) {
-              _engine = c;
-              // Re-apply the current sheet coverage: the engine may mount after
-              // the sheet has already reported its first pixel extent.
-              c.setSheetCoverage(_sheetExtentPx.value);
-              // Lay the overlay shields too: the engine may mount after the
-              // chips/deck have already laid out, so re-push their bands now.
-              _pushOverlayShields();
-              // On open, centre on the user's current location. Falls back to
-              // fitting all gem markers if permission is denied/unavailable.
-              _locateMe();
-            },
+          // Positioned.fill is load-bearing, not decorative: a platform view
+          // (HtmlElementView on web) has no size of its own — it always takes
+          // whatever constraints its parent hands it. Every other child of
+          // this Stack is explicitly Positioned/Positioned.fill; this was the
+          // one bare child with no defensive floor, and the one place a
+          // transient zero-height layout pass would actually be visible (the
+          // web engine sizes the platform view's DOM slot straight from this
+          // RenderBox's computed size in pixels).
+          Positioned.fill(
+            child: MapEngineView(
+              markers: _markersFor(gems),
+              styleId: _styleId,
+              lightPreset: _lightPreset,
+              token: _token,
+              userLat: _userLat,
+              userLng: _userLng,
+              // Tapping a pin SELECTS its gem (scrolls the deck to it + highlights
+              // the pin) rather than opening the detail outright — the deck is the
+              // browse surface now. Detail opens by tapping the deck card.
+              onMarkerTap: (id) => _selectGem(id, _SelectSource.pinTap),
+              // Camera settled → store the viewport bounds so the deck re-clips to
+              // the gems now on screen (centre is ignored here; the deck derives
+              // its anchor from the bounds when location is unknown).
+              onCameraIdle: _onCameraIdle,
+              // Track the live bearing so the compass control can reveal itself
+              // only when the map is actually rotated off north.
+              onBearingChanged: (b) {
+                // Treat sub-degree wobble as north so the compass doesn't flicker.
+                final rotated = b.abs() > 1.0;
+                final wasRotated = _bearing.abs() > 1.0;
+                if (rotated != wasRotated || (rotated && b != _bearing)) {
+                  setState(() => _bearing = b);
+                }
+              },
+              onReady: (c) {
+                _engine = c;
+                // Re-apply the current sheet coverage: the engine may mount after
+                // the sheet has already reported its first pixel extent.
+                c.setSheetCoverage(_sheetExtentPx.value);
+                // Lay the overlay shields too: the engine may mount after the
+                // chips/deck have already laid out, so re-push their bands now.
+                _pushOverlayShields();
+                // On open, centre on the user's current location. Falls back to
+                // fitting all gem markers if permission is denied/unavailable.
+                _locateMe();
+              },
+            ),
           ),
 
           // ── RIGHT CONTROL CLUSTER (top-right, below the filter chips) ──
@@ -286,20 +340,45 @@ class _ExploreScreenState extends State<ExploreScreen> {
                           onTap: _locateMe,
                         ),
                         _ctrlDivider(),
+                        // Quick day/night flip — on web this cycles Standard's
+                        // light preset (day <-> night, skipping past dawn/dusk;
+                        // the full four-preset picker lives in _showLayers);
+                        // on native, which has no lighting concept, it keeps
+                        // its original job of flipping the outdoors/dark style.
                         _IconHit(
-                          icon: _style == _MapStyle.dark
+                          icon: (kIsWeb
+                                  ? (_lightPreset == 'night' || _lightPreset == 'dusk')
+                                  : _style == _MapStyle.dark)
                               ? Icons.wb_sunny_outlined
                               : Icons.dark_mode_outlined,
                           color: const Color(0xFF4FC3F7),
-                          onTap: () => setState(() => _style =
-                              _style == _MapStyle.dark
+                          onTap: () => setState(() {
+                            if (kIsWeb) {
+                              _lightPreset =
+                                  (_lightPreset == 'night' || _lightPreset == 'dusk')
+                                      ? 'day'
+                                      : 'night';
+                            } else {
+                              _style = _style == _MapStyle.dark
                                   ? _MapStyle.outdoors
-                                  : _MapStyle.dark),
+                                  : _MapStyle.dark;
+                            }
+                          }),
                         ),
                         _ctrlDivider(),
                         _IconHit(
                           icon: Icons.layers_outlined,
                           onTap: () => _showLayers(context),
+                        ),
+                        _ctrlDivider(),
+                        _IconHit(
+                          icon: Icons.terrain,
+                          color: _tilted ? AppTheme.primary : Colors.white,
+                          onTap: () {
+                            final next = !_tilted;
+                            setState(() => _tilted = next);
+                            _engine?.setTilted(next);
+                          },
                         ),
                       ],
                     ),
@@ -355,7 +434,7 @@ class _ExploreScreenState extends State<ExploreScreen> {
                       const SizedBox(width: 8),
                       Text(
                         'Drop a gem',
-                        style: GoogleFonts.dmSans(
+                        style: GoogleFonts.fredoka(
                           fontSize: 14,
                           fontWeight: FontWeight.w700,
                           color: Colors.white,
@@ -421,9 +500,9 @@ class _ExploreScreenState extends State<ExploreScreen> {
                       height: 40,
                       padding: const EdgeInsets.symmetric(horizontal: 16),
                       decoration: BoxDecoration(
-                        color: AppTheme.surface,
+                        color: AppTheme.lightCard,
                         borderRadius: BorderRadius.circular(20),
-                        border: Border.all(color: AppTheme.divider),
+                        border: Border.all(color: AppTheme.lightBorder),
                         boxShadow: [
                           BoxShadow(
                             color: Colors.black.withValues(alpha: 0.18),
@@ -440,10 +519,10 @@ class _ExploreScreenState extends State<ExploreScreen> {
                           const SizedBox(width: 8),
                           Text(
                             'Search this area',
-                            style: GoogleFonts.dmSans(
+                            style: GoogleFonts.fredoka(
                               fontSize: 13.5,
                               fontWeight: FontWeight.w700,
-                              color: AppTheme.textPrimary,
+                              color: AppTheme.lightInk,
                             ),
                           ),
                         ],
@@ -616,7 +695,7 @@ class _ExploreScreenState extends State<ExploreScreen> {
                 },
                 textInputAction: TextInputAction.search,
                 cursorColor: AppTheme.primary,
-                style: GoogleFonts.dmSans(
+                style: GoogleFonts.fredoka(
                   fontSize: 15,
                   color: AppTheme.sheetInk,
                 ),
@@ -631,7 +710,7 @@ class _ExploreScreenState extends State<ExploreScreen> {
                   enabledBorder: InputBorder.none,
                   focusedBorder: InputBorder.none,
                   hintText: 'Search gems, cities, vibes…',
-                  hintStyle: GoogleFonts.dmSans(
+                  hintStyle: GoogleFonts.fredoka(
                     fontSize: 15,
                     color: AppTheme.sheetSubInk,
                   ),
@@ -676,10 +755,11 @@ class _ExploreScreenState extends State<ExploreScreen> {
       SnackBar(
         content: Text(
           'Voice search is coming soon — type to search for now.',
-          style: GoogleFonts.dmSans(fontSize: 13.5),
+          style: GoogleFonts.fredoka(fontSize: 13.5),
         ),
         behavior: SnackBarBehavior.floating,
         duration: const Duration(seconds: 2),
+        margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
       ),
     );
   }
@@ -750,7 +830,7 @@ class _ExploreScreenState extends State<ExploreScreen> {
                       padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
                       child: Text(
                         'Start typing to find hidden gems, cities and vibes…',
-                        style: GoogleFonts.dmSans(
+                        style: GoogleFonts.fredoka(
                           fontSize: 13.5,
                           color: const Color(0xFF8A8A8A),
                         ),
@@ -782,7 +862,7 @@ class _ExploreScreenState extends State<ExploreScreen> {
         padding: const EdgeInsets.fromLTRB(16, 6, 16, 10),
         child: Text(
           text,
-          style: GoogleFonts.dmSans(fontSize: 13, color: const Color(0xFF8A8A8A)),
+          style: GoogleFonts.fredoka(fontSize: 13, color: const Color(0xFF8A8A8A)),
         ),
       );
 
@@ -821,7 +901,7 @@ class _ExploreScreenState extends State<ExploreScreen> {
                   term,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: GoogleFonts.dmSans(
+                  style: GoogleFonts.fredoka(
                     fontSize: 15,
                     fontWeight: FontWeight.w600,
                     color: const Color(0xFF222222),
@@ -850,7 +930,7 @@ class _ExploreScreenState extends State<ExploreScreen> {
                       g.gemName,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: GoogleFonts.dmSans(
+                      style: GoogleFonts.fredoka(
                         fontSize: 15,
                         fontWeight: FontWeight.w700,
                         color: const Color(0xFF111111),
@@ -861,7 +941,7 @@ class _ExploreScreenState extends State<ExploreScreen> {
                         g.gemLocation!,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: GoogleFonts.dmSans(
+                        style: GoogleFonts.fredoka(
                           fontSize: 12,
                           color: const Color(0xFF8A8A8A),
                         ),
@@ -912,7 +992,7 @@ class _ExploreScreenState extends State<ExploreScreen> {
                     r.name,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: GoogleFonts.dmSans(
+                    style: GoogleFonts.fredoka(
                       fontSize: 15,
                       fontWeight: FontWeight.w700,
                       color: const Color(0xFF111111),
@@ -923,7 +1003,7 @@ class _ExploreScreenState extends State<ExploreScreen> {
                       secondary,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: GoogleFonts.dmSans(
+                      style: GoogleFonts.fredoka(
                         fontSize: 12,
                         color: const Color(0xFF8A8A8A),
                       ),
@@ -1199,7 +1279,7 @@ class _ExploreScreenState extends State<ExploreScreen> {
                 ),
                 title: Text(
                   s == GemSort.recent ? 'Most recent' : 'Name (A–Z)',
-                  style: GoogleFonts.dmSans(
+                  style: GoogleFonts.fredoka(
                     color: prov.sort == s
                         ? AppTheme.primary
                         : const Color(0xFF111111),
@@ -1221,6 +1301,11 @@ class _ExploreScreenState extends State<ExploreScreen> {
     );
   }
 
+  // Intentionally left on the dark token: this divider sits inside the
+  // translucent dark frosted-glass _MapControl pill (explore_screen_widgets),
+  // which stays dark-on-any-basemap for legibility over light/dark/satellite
+  // tiles alike — it is map-adjacent chrome, not page chrome, so it's exempt
+  // from the light re-theme.
   Widget _ctrlDivider() =>
       Container(width: 26, height: 1, color: AppTheme.divider);
 
@@ -1393,58 +1478,114 @@ class _ExploreScreenState extends State<ExploreScreen> {
     });
   }
 
+  // Web can render Standard (3D buildings/landmarks/trees + Mapbox's own
+  // dynamic lighting) since it runs real Mapbox GL JS; native's flutter_map
+  // raster fallback can't (verified against Mapbox's own endpoints — see
+  // _autoStyle), so 3D Basemap is simply never offered there rather than
+  // being selectable and silently breaking (the sheet used to list it
+  // unconditionally on every platform). Native keeps its original
+  // Outdoors/Dark/Satellite choices, which Standard has no bearing on.
+  List<_MapStyle> get _selectableStyles => kIsWeb
+      ? const [_MapStyle.standard, _MapStyle.satellite]
+      : const [_MapStyle.outdoors, _MapStyle.dark, _MapStyle.satellite];
+
   void _showLayers(BuildContext context) {
     showModalBottomSheet(
       context: context,
-      backgroundColor: AppTheme.surface,
+      backgroundColor: AppTheme.lightCard,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
-      builder: (_) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const SizedBox(height: 12),
-            Container(
-              width: 40,
-              height: 4,
-              decoration: BoxDecoration(
-                color: AppTheme.divider,
-                borderRadius: BorderRadius.circular(2),
-              ),
-            ),
-            const SizedBox(height: 8),
-            for (final s in _MapStyle.values)
-              ListTile(
-                leading: Icon(
-                  s == _MapStyle.outdoors
-                      ? Icons.terrain
-                      : s == _MapStyle.dark
-                          ? Icons.dark_mode
-                          : Icons.satellite_alt,
-                  color: _style == s ? AppTheme.primary : AppTheme.textSecondary,
+      // StatefulBuilder (not a plain builder) because picking Standard reveals
+      // the lighting-preset row below it without closing the sheet — the
+      // sheet no longer auto-dismisses on a style tap, so there's a second
+      // choice to make right there instead of reopening it.
+      builder: (_) => StatefulBuilder(
+        builder: (context, setSheetState) => SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const SizedBox(height: 12),
+              Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: AppTheme.lightBorder,
+                  borderRadius: BorderRadius.circular(2),
                 ),
-                title: Text(
-                  s == _MapStyle.outdoors
-                      ? 'Outdoors'
-                      : s == _MapStyle.dark
-                          ? 'Dark'
-                          : 'Satellite',
-                  style: GoogleFonts.dmSans(
-                    color: _style == s ? AppTheme.primary : AppTheme.textPrimary,
-                    fontWeight: FontWeight.w600,
+              ),
+              const SizedBox(height: 8),
+              for (final s in _selectableStyles)
+                ListTile(
+                  leading: Icon(
+                    s == _MapStyle.outdoors
+                        ? Icons.terrain
+                        : s == _MapStyle.dark
+                            ? Icons.dark_mode
+                            : s == _MapStyle.satellite
+                                ? Icons.satellite_alt
+                                : Icons.location_city,
+                    color: _style == s ? AppTheme.primary : AppTheme.lightMute,
+                  ),
+                  title: Text(
+                    s == _MapStyle.outdoors
+                        ? 'Outdoors'
+                        : s == _MapStyle.dark
+                            ? 'Dark'
+                            : s == _MapStyle.satellite
+                                ? 'Satellite'
+                                : '3D Basemap',
+                    style: GoogleFonts.fredoka(
+                      color: _style == s ? AppTheme.primary : AppTheme.lightInk,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  subtitle: s == _MapStyle.standard
+                      ? Text('Real buildings, landmarks, and trees',
+                          style: GoogleFonts.fredoka(
+                              color: AppTheme.lightMute, fontSize: 12))
+                      : null,
+                  trailing: _style == s
+                      ? const Icon(Icons.check, color: AppTheme.primary, size: 18)
+                      : null,
+                  onTap: () {
+                    setState(() => _style = s);
+                    setSheetState(() {});
+                  },
+                ),
+              if (_style == _MapStyle.standard) ...[
+                const Divider(height: 1),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+                  child: Text('LIGHTING',
+                      style: GoogleFonts.fredoka(
+                          color: AppTheme.lightMute,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 0.5)),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
+                  child: Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      for (final p in const ['dawn', 'day', 'dusk', 'night'])
+                        _LightPresetChip(
+                          preset: p,
+                          selected: _lightPreset == p,
+                          onTap: () {
+                            setState(() => _lightPreset = p);
+                            setSheetState(() {});
+                          },
+                        ),
+                    ],
                   ),
                 ),
-                trailing: _style == s
-                    ? const Icon(Icons.check, color: AppTheme.primary, size: 18)
-                    : null,
-                onTap: () {
-                  setState(() => _style = s);
-                  Navigator.pop(context);
-                },
-              ),
-            const SizedBox(height: 12),
-          ],
+              ],
+              const SizedBox(height: 12),
+            ],
+          ),
         ),
       ),
     );

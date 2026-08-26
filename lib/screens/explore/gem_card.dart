@@ -226,7 +226,7 @@ class GemCard extends StatelessWidget {
       gem.displayCategory.toUpperCase(),
       maxLines: 1,
       overflow: TextOverflow.ellipsis,
-      style: GoogleFonts.dmSans(
+      style: GoogleFonts.fredoka(
         fontSize: 11,
         fontWeight: FontWeight.w700,
         letterSpacing: 0.5,
@@ -338,7 +338,7 @@ class GemCard extends StatelessWidget {
             const SizedBox(width: 5),
             Text(
               gem.displayCategory,
-              style: GoogleFonts.dmSans(
+              style: GoogleFonts.fredoka(
                 fontSize: 11,
                 fontWeight: FontWeight.w600,
                 color: Colors.white,
@@ -386,7 +386,7 @@ class GemCard extends StatelessWidget {
           const SizedBox(width: 3),
           Text(
             distanceLabel!,
-            style: GoogleFonts.dmSans(
+            style: GoogleFonts.fredoka(
               fontSize: 11,
               fontWeight: FontWeight.w700,
               color: const Color(0xFF0C0C0C),
@@ -402,7 +402,7 @@ class GemCard extends StatelessWidget {
       gem.gemName,
       maxLines: 1,
       overflow: TextOverflow.ellipsis,
-      style: GoogleFonts.dmSans(
+      style: GoogleFonts.fredoka(
         fontSize: variant == GemCardVariant.full ? 17 : 15,
         fontWeight: FontWeight.w700,
         color: AppTheme.sheetInk,
@@ -423,7 +423,7 @@ class GemCard extends StatelessWidget {
               tagline,
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
-              style: GoogleFonts.dmSans(
+              style: GoogleFonts.fredoka(
                 fontSize: _taglineFontSize,
                 height: _taglineLineHeight,
                 fontStyle: FontStyle.italic,
@@ -448,7 +448,7 @@ class GemCard extends StatelessWidget {
           const SizedBox(width: 2),
           Text(
             rating!.toStringAsFixed(1),
-            style: GoogleFonts.dmSans(
+            style: GoogleFonts.fredoka(
               fontSize: 12,
               fontWeight: FontWeight.w700,
               color: AppTheme.sheetInk,
@@ -489,14 +489,14 @@ class GemCard extends StatelessWidget {
         text,
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
-        style: GoogleFonts.dmSans(fontSize: 12, color: AppTheme.sheetSubInk),
+        style: GoogleFonts.fredoka(fontSize: 12, color: AppTheme.sheetSubInk),
       );
 
   Widget _dot() => Padding(
         padding: const EdgeInsets.symmetric(horizontal: 6),
         child: Text(
           '·',
-          style: GoogleFonts.dmSans(fontSize: 12, color: AppTheme.sheetSubInk),
+          style: GoogleFonts.fredoka(fontSize: 12, color: AppTheme.sheetSubInk),
         ),
       );
 
@@ -508,7 +508,7 @@ class GemCard extends StatelessWidget {
         ),
         child: Text(
           'New',
-          style: GoogleFonts.dmSans(
+          style: GoogleFonts.fredoka(
             fontSize: 11,
             fontWeight: FontWeight.w700,
             color: AppTheme.primary,

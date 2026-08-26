@@ -111,9 +111,16 @@ class GeocodingService {
   /// live map widget, so it's cacheable through the same AppNetworkImage/
   /// cached_network_image path every other network image in the app already
   /// uses. Distinct from [search]/[reverse]: this doesn't hit the network
-  /// itself, it just builds the URL a caller hands to an image widget. Style
-  /// matches the Explore map's default (`outdoors-v12`, see
-  /// explore_screen.dart's `_MapStyle.outdoors`) for visual consistency.
+  /// itself, it just builds the URL a caller hands to an image widget.
+  ///
+  /// [styleId] MUST stay a classic flat style (default `outdoors-v12`) — NOT
+  /// `standard`. Confirmed by calling this exact endpoint with
+  /// `styleId=standard`: it 400s with `"Unsupported rasterarray tileset
+  /// format: mapbox.mapbox-landmark-icons-v1"`. Standard Style's 3D
+  /// buildings/landmarks/dynamic lighting are computed client-side by a real
+  /// Mapbox GL runtime (see explore_screen.dart's web vs. native styles) —
+  /// there is no server-side flat render of it, so this thumbnail can never
+  /// move to Standard no matter how the interactive maps evolve.
   /// Returns null when no token is configured, so callers can fall back to
   /// a placeholder rather than requesting a URL that will 401.
   ///
@@ -136,7 +143,8 @@ class GeocodingService {
   }) {
     final token = dotenv.env['MAPBOX_TOKEN'] ?? '';
     if (token.isEmpty) return null;
-    final overlaySegment = (overlay != null && overlay.isNotEmpty) ? '$overlay/' : '';
+    final overlaySegment =
+        (overlay != null && overlay.isNotEmpty) ? '$overlay/' : '';
     final position = autoFit ? 'auto' : '$lng,$lat,$zoom';
     return 'https://api.mapbox.com/styles/v1/mapbox/$styleId/static/'
         '$overlaySegment$position/${width}x$height@2x?access_token=$token';
@@ -147,20 +155,26 @@ class GeocodingService {
   /// static-images overlay syntax. Pure string building, no network call.
   ///
   /// [pins]' `label` must be an integer 0–99 or a lowercase a–z (Mapbox's
-  /// documented pin-label alphabet) — callers own picking a valid label,
-  /// e.g. the Overview map card's day.stopIndex labels. Each pin and route
-  /// carries its own `color` (6-digit hex, no '#' — see [hexFromArgb]) so a
-  /// multi-day trip renders one distinct color per day; a single-day trip
-  /// just passes the same color for everything. A route with fewer than 2
-  /// points draws nothing, since a line needs at least two ends. The static
-  /// API has no equivalent of the interactive map's direction arrows or day
-  /// chips — this is the deliberately simplified thumbnail rendering.
+  /// documented pin-label alphabet), OR an empty string for a plain unlabeled
+  /// pin (e.g. a single gem's location, where a letter/number would be
+  /// meaningless) — callers own picking a valid label, e.g. the Overview map
+  /// card's day.stopIndex labels. An empty label omits the `-{label}` segment
+  /// entirely rather than emitting it blank, since `pin-s-+color(...)` 422s.
+  /// Each pin and route carries its own `color` (6-digit hex, no '#' — see
+  /// [hexFromArgb]) so a multi-day trip renders one distinct color per day; a
+  /// single-day trip just passes the same color for everything. A route with
+  /// fewer than 2 points draws nothing, since a line needs at least two ends.
+  /// The static API has no equivalent of the interactive map's direction
+  /// arrows or day chips — this is the deliberately simplified thumbnail
+  /// rendering.
   static String buildStaticMapOverlay({
     required List<({double lat, double lng, String label, String color})> pins,
-    List<({List<({double lat, double lng})> points, String color})> routes = const [],
+    List<({List<({double lat, double lng})> points, String color})> routes =
+        const [],
   }) {
     final parts = <String>[
-      for (final p in pins) 'pin-s-${p.label}+${p.color}(${p.lng},${p.lat})',
+      for (final p in pins)
+        'pin-s${p.label.isEmpty ? '' : '-${p.label}'}+${p.color}(${p.lng},${p.lat})',
       for (final r in routes)
         if (r.points.length >= 2)
           'path-3+${r.color}-0.85(${Uri.encodeComponent(_encodePolyline(r.points))})',

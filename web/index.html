@@ -37,29 +37,24 @@
   <script src="https://api.mapbox.com/mapbox-gl-js/v3.7.0/mapbox-gl.js"></script>
   <script src="mapbox_globe.js"></script>
   <style>
+    /* Shared behavior only — NOT shape. Shape/background/border/box-shadow
+       live on the two concrete variants below (.ex-numbered / .ex-photopin)
+       since they now differ (plain circle vs. gradient teardrop). */
     .ex-gem {
-      width: 44px; height: 44px; border-radius: 50%;
-      background: #1c1c1c; border: 2px solid #14e08a;
-      box-shadow: 0 0 14px 4px rgba(20, 224, 138, 0.55);
       display: flex; align-items: center; justify-content: center;
       font-size: 20px; line-height: 1; cursor: pointer;
       transition: transform 0.15s ease;
     }
     .ex-gem:hover { transform: scale(1.12); }
-    /* Selected pin: scale up + brand glow so the active gem reads at a glance. */
-    .ex-gem.selected {
-      background: #ff6a2b; border-color: #ffffff;
-      box-shadow: 0 0 18px 6px rgba(255, 106, 43, 0.6);
-      transform: scale(1.22);
-      z-index: 2;
-    }
     /* Non-selected pins dim back while a selection is active, so the deck's
        current card and its pin stand out from the rest. */
     .ex-gem.dimmed { opacity: 0.45; }
     /* Numbered trip-route pin (Overview map card / full-screen trip map) —
-       dark circle + bold white number, distinct from the green gem-glow
-       treatment above since these mark itinerary order, not saved places. */
+       dark circle + bold white number, distinct from the gradient photo-pin
+       treatment below since these mark itinerary order, not saved places
+       (sequence legibility matters more here than a photo). */
     .ex-gem.ex-numbered {
+      width: 44px; height: 44px; border-radius: 50%;
       background: #1a1a1a; border: 2px solid #ffffff;
       box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
       /* 12px (not the base 20px) — "day.index" labels like "1.2"/"10.3" are
@@ -68,11 +63,94 @@
       font-family: -apple-system, BlinkMacSystemFont, sans-serif;
     }
     .ex-gem.ex-numbered.selected {
+      transform: scale(1.22);
       border-color: #ffffff; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
-      /* Unlike the plain gem pin, a numbered pin's background is its day
+      z-index: 2;
+      /* Unlike the photo pin, a numbered pin's background is its day
          color (set inline per-marker) — selection doesn't override it to
          brand orange, that would erase the day-color coding this pin exists
          to show. */
+    }
+    /* Plain gem-browsing pin: teardrop silhouette (circular head + a
+       rotated-square tail peeking out below it) with an orange-to-yellow
+       gradient border. `.ex-photopin-wrap` (the actual Mapbox marker
+       element) is a plain, correctly-sized positioning box — NOT the
+       circle itself — so the marker's anchor:'bottom' option (see
+       mapbox_globe.js) points the pin's real visual tip at the coordinate,
+       not some inner element's center. Tail and head are two plain sibling
+       divs in DOM order (tail first, so it paints behind the head via
+       ordinary stacking — deliberately not a z-index trick, which was
+       confirmed live to escape this marker's own context and paint behind
+       the map canvas instead, since Mapbox gives the marker
+       position:absolute but no z-index of its own). Head -> .ex-photopin-gap
+       -> .ex-photopin-photo nest to form the gradient ring/white gap/photo
+       layering; mirrors PhotoPinMarker in map_engine_native.dart so native
+       and web read the same. */
+    .ex-gem.ex-photopin-wrap {
+      width: 42px; height: 54px;
+      /* Deliberately NOT setting position here. Mapbox's own stylesheet
+         already gives every marker element position:absolute (required —
+         that's what makes its lngLat->pixel transform an absolute pin
+         rather than a flow-relative nudge); this selector
+         (.ex-gem.ex-photopin-wrap, two chained classes) has higher
+         specificity than Mapbox's single-class .mapboxgl-marker rule, so
+         a position:relative here silently overrode it. Confirmed live:
+         every photo-pin's computed position was "relative", so it stayed
+         in normal document flow and stacked block-by-block under its
+         predecessors, with Mapbox's transform only applying as a small
+         secondary shift on top of that already-wrong stacked position —
+         exactly the vertical "staircase" bug reported. position:absolute
+         (from Mapbox) is just as valid a containing block for this
+         wrapper's absolutely-positioned tail/head children, so removing
+         this line fixes real positioning without losing anything. */
+      box-sizing: border-box;
+    }
+    .ex-photopin-tail {
+      position: absolute;
+      left: 50%; top: 30px;
+      width: 14px; height: 14px;
+      background: linear-gradient(135deg, #ff8a00, #ffc542);
+      transform: translateX(-50%) rotate(45deg);
+      border-radius: 2px;
+      box-sizing: border-box;
+    }
+    .ex-photopin {
+      position: absolute;
+      top: 0; left: 1px;
+      width: 40px; height: 40px; border-radius: 50%;
+      background: linear-gradient(135deg, #ff8a00, #ffc542);
+      box-shadow: 0 3px 6px rgba(0, 0, 0, 0.35);
+      padding: 3px;
+      display: flex; align-items: center; justify-content: center;
+      /* Without this, the padding below ADDS to the 40px instead of being
+         included in it (browser default is content-box) — confirmed live:
+         the head rendered at 46x46, big enough to swallow almost the
+         entire tail behind it. */
+      box-sizing: border-box;
+    }
+    .ex-photopin-gap {
+      width: 100%; height: 100%; border-radius: 50%;
+      background: #ffffff;
+      padding: 2px;
+      display: flex; align-items: center; justify-content: center;
+      box-sizing: border-box;
+    }
+    .ex-photopin-photo {
+      width: 100%; height: 100%; border-radius: 50%;
+      background-color: #fff3e0; background-size: cover;
+      background-position: center;
+      display: flex; align-items: center; justify-content: center;
+      box-sizing: border-box;
+      font-size: 16px;
+    }
+    /* Selected photo pin: scale + glow, but keep the gradient/photo intact
+       (unlike the numbered pin, there's no solid color to swap to here). */
+    .ex-gem.ex-photopin-wrap.selected {
+      transform: scale(1.22);
+      z-index: 2;
+    }
+    .ex-gem.ex-photopin-wrap.selected .ex-photopin {
+      box-shadow: 0 0 14px 4px rgba(255, 138, 0, 0.55);
     }
     /* Direction arrow along a day's route segment (trip route map only) —
        small, non-interactive, colored to match its day; rotated inline per

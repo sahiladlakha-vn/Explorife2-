@@ -206,10 +206,10 @@ class GemProvider extends ChangeNotifier {
         .toList();
     final anchor = deckAnchor(userLat: userLat, userLng: userLng);
     if (anchor != null) {
-      inBounds.sort((a, b) => _distanceMeters(
-              anchor.$1, anchor.$2, a.latitude!, a.longitude!)
-          .compareTo(_distanceMeters(
-              anchor.$1, anchor.$2, b.latitude!, b.longitude!)));
+      inBounds.sort((a, b) =>
+          _distanceMeters(anchor.$1, anchor.$2, a.latitude!, a.longitude!)
+              .compareTo(_distanceMeters(
+                  anchor.$1, anchor.$2, b.latitude!, b.longitude!)));
     }
     return inBounds;
   }
@@ -272,7 +272,8 @@ class GemProvider extends ChangeNotifier {
   /// when known, else the active-area centre. Null only when neither is known.
   (double, double)? feedAnchor({double? userLat, double? userLng}) {
     if (userLat != null && userLng != null) return (userLat, userLng);
-    if (hasActiveArea) return ((_areaS! + _areaN!) / 2, (_areaW! + _areaE!) / 2);
+    if (hasActiveArea)
+      return ((_areaS! + _areaN!) / 2, (_areaW! + _areaE!) / 2);
     return null;
   }
 
@@ -292,14 +293,13 @@ class GemProvider extends ChangeNotifier {
   /// The sheet's list: area-scoped, category-filtered, sorted, coords-only, then
   /// re-ordered nearest-first off [feedAnchor] so the closest gem leads.
   List<Gem> feedGems({double? userLat, double? userLng}) {
-    final list =
-        _sortAndFilter(_feedScoped).where((g) => g.hasCoords).toList();
+    final list = _sortAndFilter(_feedScoped).where((g) => g.hasCoords).toList();
     final anchor = feedAnchor(userLat: userLat, userLng: userLng);
     if (anchor != null) {
-      list.sort((a, b) => _distanceMeters(
-              anchor.$1, anchor.$2, a.latitude!, a.longitude!)
-          .compareTo(_distanceMeters(
-              anchor.$1, anchor.$2, b.latitude!, b.longitude!)));
+      list.sort((a, b) =>
+          _distanceMeters(anchor.$1, anchor.$2, a.latitude!, a.longitude!)
+              .compareTo(_distanceMeters(
+                  anchor.$1, anchor.$2, b.latitude!, b.longitude!)));
     }
     return list;
   }
@@ -549,27 +549,25 @@ class GemProvider extends ChangeNotifier {
   Future<List<Gem>> fetchRelated(String category, String excludeId) =>
       _repo.fetchRelated(category, excludeId);
 
-  /// Publishes an approved [draft]: uploads the optional photo, inserts the
-  /// row, and optimistically adds the persisted gem to the list (the realtime
-  /// echo is deduped by [_upsert]). Never throws — failures come back in the
+  /// Publishes an approved [draft]: uploads whichever [photos] were chosen
+  /// (any number, in order — the first becomes the cover), inserts the row,
+  /// and optimistically adds the persisted gem to the list (the realtime echo
+  /// is deduped by [_upsert]). Never throws — failures come back in the
   /// returned [GemPublishResult].
   Future<GemPublishResult> publish(
     GemDraft draft, {
     required String userId,
-    XFile? photo,
+    List<XFile> photos = const [],
   }) async {
     try {
       var photoFailed = false;
-      String? photoUrl;
-      if (photo != null) {
-        final urls = await _repo.uploadPhotos(userId, [photo]);
-        if (urls.isEmpty) {
-          photoFailed = true;
-        } else {
-          photoUrl = urls.first;
-        }
+      var photoUrls = const <String>[];
+      if (photos.isNotEmpty) {
+        photoUrls = await _repo.uploadPhotos(userId, photos);
+        if (photoUrls.isEmpty) photoFailed = true;
       }
-      final gem = await _repo.create(draft, userId: userId, photoUrl: photoUrl);
+      final gem =
+          await _repo.create(draft, userId: userId, photoUrls: photoUrls);
       _upsert(gem);
       return GemPublishResult(
           success: true, photoFailed: photoFailed, gem: gem);

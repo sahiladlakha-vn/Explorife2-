@@ -11,7 +11,7 @@ import 'gem_card.dart';
 /// so a fast fetch flashes it briefly and a slow one holds it until the future
 /// completes.
 ///
-/// Layout mirrors the live map it replaces: a brand-dark canvas with a pulsing
+/// Layout mirrors the live map it replaces: a light canvas with a pulsing
 /// location beacon, and a bottom card whose skeleton is built from the same
 /// [GemCard] deck constants as the real cards, so any card-shape change stays in
 /// one place.
@@ -56,10 +56,10 @@ class _MapLoadingOverlayState extends State<MapLoadingOverlay>
   Widget build(BuildContext context) {
     return SizedBox.expand(
       child: Material(
-        color: AppTheme.bg,
+        color: AppTheme.lightSurface,
         child: Stack(
           children: [
-            // Subtle orange dotted texture over the near-black canvas.
+            // Subtle orange dotted texture over the light canvas.
             const Positioned.fill(
               child: CustomPaint(painter: _DottedTexturePainter()),
             ),
@@ -109,7 +109,7 @@ class _MapLoadingOverlayState extends State<MapLoadingOverlay>
                 const SizedBox(width: 12),
                 Text(
                   'Finding gems near you…',
-                  style: GoogleFonts.dmSans(
+                  style: GoogleFonts.fredoka(
                     fontSize: 15,
                     fontWeight: FontWeight.w600,
                     color: AppTheme.sheetInk,
@@ -165,7 +165,7 @@ class _MapLoadingOverlayState extends State<MapLoadingOverlay>
                 Expanded(
                   child: Text(
                     "Couldn't load gems",
-                    style: GoogleFonts.dmSans(
+                    style: GoogleFonts.fredoka(
                       fontSize: 15,
                       fontWeight: FontWeight.w600,
                       color: AppTheme.sheetInk,
@@ -177,7 +177,7 @@ class _MapLoadingOverlayState extends State<MapLoadingOverlay>
             const SizedBox(height: 6),
             Text(
               'Check your connection and try again.',
-              style: GoogleFonts.dmSans(
+              style: GoogleFonts.fredoka(
                 fontSize: 13,
                 color: AppTheme.sheetSubInk,
               ),
@@ -196,7 +196,7 @@ class _MapLoadingOverlayState extends State<MapLoadingOverlay>
                 ),
                 child: Text(
                   'Retry',
-                  style: GoogleFonts.dmSans(
+                  style: GoogleFonts.fredoka(
                     fontSize: 15,
                     fontWeight: FontWeight.w700,
                     color: Colors.white,

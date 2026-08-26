@@ -28,6 +28,9 @@ external void _mapZoom(web.HTMLElement el, JSNumber delta);
 @JS('explorifeMapSetStyle')
 external void _mapSetStyle(web.HTMLElement el, JSString style);
 
+@JS('explorifeMapSetLightPreset')
+external void _mapSetLightPreset(web.HTMLElement el, JSString preset);
+
 @JS('explorifeMapFlyTo')
 external void _mapFlyTo(
     web.HTMLElement el, JSNumber lat, JSNumber lng, JSNumber zoom);
@@ -73,6 +76,9 @@ external void _mapSetUserLocation(
 
 @JS('explorifeMapResetNorth')
 external void _mapResetNorth(web.HTMLElement el);
+
+@JS('explorifeMapSetTilt')
+external void _mapSetTilt(web.HTMLElement el, JSBoolean tilted);
 
 @JS('explorifeMapOnRotate')
 external void _mapOnRotate(web.HTMLElement el, JSFunction onRotate);
@@ -140,6 +146,9 @@ class _WebController implements MapEngineController {
   void setStyle(String styleId) => _mapSetStyle(el, styleId.toJS);
 
   @override
+  void setLightPreset(String preset) => _mapSetLightPreset(el, preset.toJS);
+
+  @override
   void select(String id) => _mapSelect(el, id.toJS);
 
   @override
@@ -165,6 +174,9 @@ class _WebController implements MapEngineController {
   void resetNorth() => _mapResetNorth(el);
 
   @override
+  void setTilted(bool tilted) => _mapSetTilt(el, tilted.toJS);
+
+  @override
   void showCallout(
           {required double lat,
           required double lng,
@@ -182,6 +194,11 @@ class MapEngineView extends StatefulWidget {
   final String token;
   final ValueChanged<String> onMarkerTap;
   final ValueChanged<MapEngineController> onReady;
+
+  /// Mapbox Standard Style's dynamic lighting preset — 'dawn' | 'day' |
+  /// 'dusk' | 'night'. Ignored (harmlessly, see mapbox_globe.js's
+  /// applyLightPreset) when [styleId] isn't 'standard'.
+  final String lightPreset;
 
   /// Called whenever the camera comes to rest, with the centre coordinate AND
   /// the current viewport bounds (west/south/east/north). The centre tracks the
@@ -217,6 +234,7 @@ class MapEngineView extends StatefulWidget {
     required this.token,
     required this.onMarkerTap,
     required this.onReady,
+    this.lightPreset = 'day',
     this.onCameraIdle,
     this.onBearingChanged,
     this.userLat,
@@ -273,6 +291,7 @@ class _MapEngineViewState extends State<MapEngineView> {
     widget.onReady(_WebController(_host));
     _pushUserLocation();
     _pushRoute();
+    _pushLightPreset();
   }
 
   void _pushMarkers() {
@@ -281,6 +300,10 @@ class _MapEngineViewState extends State<MapEngineView> {
 
   void _pushRoute() {
     _mapSetRoute(_host, _routesJson(widget.routes).toJS);
+  }
+
+  void _pushLightPreset() {
+    _mapSetLightPreset(_host, widget.lightPreset.toJS);
   }
 
   void _pushUserLocation() {
@@ -305,6 +328,9 @@ class _MapEngineViewState extends State<MapEngineView> {
     }
     if (!_sameRoutes(oldWidget.routes, widget.routes)) {
       _pushRoute();
+    }
+    if (oldWidget.lightPreset != widget.lightPreset) {
+      _pushLightPreset();
     }
   }
 

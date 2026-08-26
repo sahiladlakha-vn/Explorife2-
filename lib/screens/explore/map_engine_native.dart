@@ -67,6 +67,11 @@ class _NativeController implements MapEngineController {
   void setStyle(String styleId) {/* style swap handled by the screen */}
 
   @override
+  void setLightPreset(String preset) {
+    /* flutter_map has no Standard Style / lighting engine */
+  }
+
+  @override
   void select(String id) {/* selection handled by the screen */}
 
   @override
@@ -76,13 +81,18 @@ class _NativeController implements MapEngineController {
   }
 
   @override
+  void setTilted(bool tilted) {/* flutter_map has no pitch/terrain support */}
+
+  @override
   void setCenterPin(bool show) {/* native uses a Flutter overlay widget */}
 
   @override
   void setSheetCoverage(double coverPx) {/* no platform-view bleed on native */}
 
   @override
-  void setOverlayShields(List<MapShieldRect> rects) {/* no platform-view bleed */}
+  void setOverlayShields(List<MapShieldRect> rects) {
+    /* no platform-view bleed */
+  }
 
   @override
   void showCallout(
@@ -102,6 +112,11 @@ class MapEngineView extends StatefulWidget {
   final String token;
   final ValueChanged<String> onMarkerTap;
   final ValueChanged<MapEngineController> onReady;
+
+  /// Accepted for API parity with the web engine; unused here — flutter_map
+  /// has no Standard Style / dynamic-lighting equivalent (see this file's
+  /// header comment on why native can't render Standard Style at all).
+  final String lightPreset;
 
   /// Called whenever the camera moves, with the centre coordinate AND the
   /// current viewport bounds (west/south/east/north). The centre tracks the
@@ -137,6 +152,7 @@ class MapEngineView extends StatefulWidget {
     required this.token,
     required this.onMarkerTap,
     required this.onReady,
+    this.lightPreset = 'day',
     this.onCameraIdle,
     this.onBearingChanged,
     this.userLat,
@@ -159,7 +175,8 @@ class _MapEngineViewState extends State<MapEngineView> {
       required double lng,
       required String title,
       String? subtitle}) {
-    setState(() => _callout = (lat: lat, lng: lng, title: title, subtitle: subtitle));
+    setState(() =>
+        _callout = (lat: lat, lng: lng, title: title, subtitle: subtitle));
   }
 
   void _hideCallout({bool notify = false}) {
@@ -266,11 +283,18 @@ class _MapEngineViewState extends State<MapEngineView> {
         MarkerLayer(
           markers: [
             ...widget.markers.map((m) {
-              final size = _markerSize(m.kind);
+              final size = _markerSize(m);
+              // The teardrop photo-pin's visual tip sits at the bottom of its
+              // box (not the center, unlike every other marker kind here) —
+              // bottomCenter alignment is what keeps that tip pointing at the
+              // actual coordinate instead of floating above/beside it.
+              final isPhotoPin = m.kind == MapMarkerKind.pin && m.label == null;
               return Marker(
                 point: LatLng(m.lat, m.lng),
                 width: size.width,
                 height: size.height,
+                alignment:
+                    isPhotoPin ? Alignment.bottomCenter : Alignment.center,
                 child: GestureDetector(
                   onTap: () => widget.onMarkerTap(m.id),
                   child: _buildMarker(m),
@@ -314,8 +338,7 @@ class _MapEngineViewState extends State<MapEngineView> {
     final callout = _callout!;
     final cam = _controller.camera;
     final centerPx = cam.project(cam.center, cam.zoom);
-    final targetPx =
-        cam.project(LatLng(callout.lat, callout.lng), cam.zoom);
+    final targetPx = cam.project(LatLng(callout.lat, callout.lng), cam.zoom);
     final markerX = size.width / 2 + (targetPx.x - centerPx.x);
     final markerY = size.height / 2 + (targetPx.y - centerPx.y);
 
@@ -343,10 +366,16 @@ class _MapEngineViewState extends State<MapEngineView> {
     );
   }
 
-  Size _markerSize(MapMarkerKind kind) => switch (kind) {
+  Size _markerSize(MapMarkerData m) => switch (m.kind) {
         MapMarkerKind.arrow => const Size(20, 20),
         MapMarkerKind.dayChip => const Size(72, 26),
-        MapMarkerKind.pin => const Size(46, 46),
+        // Numbered itinerary-stop pins stay the plain circle (sequence
+        // legibility matters more there than a photo — see PhotoPinMarker's
+        // doc comment); only the unlabeled gem-browsing pin becomes the
+        // taller teardrop shape, with room for its pointed tail below the
+        // circular head.
+        MapMarkerKind.pin =>
+          m.label != null ? const Size(46, 46) : const Size(42, 54),
       };
 
   Widget _buildMarker(MapMarkerData m) {
@@ -397,32 +426,94 @@ class _MapEngineViewState extends State<MapEngineView> {
             child: Text(
               m.label!,
               style: const TextStyle(
-                  color: Colors.white, fontSize: 12, fontWeight: FontWeight.w700),
+                  color: Colors.white,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700),
             ),
           );
         }
-        return Container(
-          decoration: BoxDecoration(
-            color: Colors.white,
-            shape: BoxShape.circle,
-            border: Border.all(color: const Color(0xFF14E08A), width: 2),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.4),
-                blurRadius: 6,
-                offset: const Offset(0, 3),
-              ),
-            ],
-            image: m.photoUrl != null
-                ? DecorationImage(
-                    image: NetworkImage(m.photoUrl!), fit: BoxFit.cover)
-                : null,
-          ),
-          child: m.photoUrl != null
-              ? null
-              : Icon(m.icon, size: 20, color: const Color(0xFF14E08A)),
-        );
+        return PhotoPinMarker(photoUrl: m.photoUrl, icon: m.icon);
     }
+  }
+}
+
+/// The teardrop, gradient-bordered "photo pin" used for plain gem-browsing
+/// markers (Explore/Discovery map only — itinerary/trip-route stops keep the
+/// simpler numbered circle above, since sequence legibility matters more
+/// there than a photo). A circular head — [photoUrl]'s image cropped inside
+/// when present, else a plain icon on a light fill — merges into a pointed
+/// tail via a rotated square peeking out from behind/below it, the standard
+/// cheap way to fake a pin silhouette without hand-rolled bezier math.
+class PhotoPinMarker extends StatelessWidget {
+  final String? photoUrl;
+  final IconData icon;
+  const PhotoPinMarker({super.key, required this.photoUrl, required this.icon});
+
+  static const _gradient = LinearGradient(
+    begin: Alignment.topLeft,
+    end: Alignment.bottomRight,
+    colors: [Color(0xFFFF8A00), Color(0xFFFFC542)],
+  );
+  static const _headDiameter = 40.0;
+  static const _tailSize = 14.0;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 42,
+      height: 54,
+      child: Stack(
+        alignment: Alignment.topCenter,
+        children: [
+          // Tail: a 45°-rotated square, positioned so only its bottom
+          // corner peeks out below the head circle drawn on top of it.
+          Positioned(
+            top: _headDiameter - 10,
+            child: Transform.rotate(
+              angle: 0.785398, // pi / 4
+              child: Container(
+                width: _tailSize,
+                height: _tailSize,
+                decoration: const BoxDecoration(gradient: _gradient),
+              ),
+            ),
+          ),
+          // Head: gradient ring -> thin white gap -> circular photo/icon.
+          Container(
+            width: _headDiameter,
+            height: _headDiameter,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              gradient: _gradient,
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.35),
+                  blurRadius: 6,
+                  offset: const Offset(0, 3),
+                ),
+              ],
+            ),
+            padding: const EdgeInsets.all(3),
+            child: ClipOval(
+              child: Container(
+                color: Colors.white,
+                padding: const EdgeInsets.all(2),
+                child: ClipOval(
+                  child: photoUrl != null
+                      ? Image.network(photoUrl!, fit: BoxFit.cover)
+                      : Container(
+                          color: const Color(0xFFFFF3E0),
+                          alignment: Alignment.center,
+                          child: Icon(icon,
+                              size: 16, color: const Color(0xFFFF8A00)),
+                        ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }
 
@@ -475,12 +566,14 @@ class _CalloutBubble extends StatelessWidget {
             Text(subtitle!,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(color: Color(0xFF6B6B6B), fontSize: 11.5)),
+                style:
+                    const TextStyle(color: Color(0xFF6B6B6B), fontSize: 11.5)),
           ],
         ],
       ),
     );
-    final tail = CustomPaint(size: const Size(14, 7), painter: _TailPainter(pointDown));
+    final tail =
+        CustomPaint(size: const Size(14, 7), painter: _TailPainter(pointDown));
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: pointDown ? [bubble, tail] : [tail, bubble],

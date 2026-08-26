@@ -109,10 +109,27 @@ abstract class MapEngineController {
   void setStyle(String styleId);
   void select(String id);
 
+  /// Sets Mapbox Standard Style's time-of-day lighting — one of 'dawn' |
+  /// 'day' | 'dusk' | 'night' (Mapbox's own preset names, via
+  /// `map.setConfigProperty('basemap', 'lightPreset', ...)`). Only Standard
+  /// has this concept; the web engine no-ops (catches the error) when a
+  /// non-Standard style is active, and this is a full no-op on native
+  /// (flutter_map has no Standard Style / lighting-engine equivalent at all —
+  /// see map_engine_native.dart's header comment).
+  void setLightPreset(String preset);
+
   /// Resets the camera orientation back to north-up (bearing 0) and removes any
   /// tilt (pitch 0), animating the transition. Drives the North Orientation
   /// control. On native (flutter_map) only bearing applies — there is no pitch.
   void resetNorth();
+
+  /// Toggles a tilted 3D perspective (pitch 60°), revealing real mountain/
+  /// valley terrain relief — vs. the flat top-down view (pitch 0°). Bearing
+  /// is untouched, unlike [resetNorth]. The web engine registers Mapbox's
+  /// terrain-DEM source ambiently, so relief is also visible via pinch/
+  /// two-finger-drag tilt gestures, not just this toggle. No-op on native
+  /// (flutter_map has no pitch or terrain support).
+  void setTilted(bool tilted);
 
   /// Shows/hides a fixed centre "drop" pin painted inside the map's own
   /// compositing surface (web), so it stays glued to screen centre with zero

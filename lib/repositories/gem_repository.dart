@@ -97,14 +97,17 @@ class GemRepository {
   Future<Gem> create(
     GemDraft draft, {
     required String userId,
-    String? photoUrl,
+    List<String> photoUrls = const [],
   }) async {
     final payload = draft.toGem().toInsert(
           userId: userId,
           lat: draft.lat,
           lng: draft.lng,
         );
-    if (photoUrl != null) payload['photo_url'] = photoUrl;
+    if (photoUrls.isNotEmpty) {
+      payload['photo_url'] = photoUrls.first;
+      payload['photo_urls'] = photoUrls;
+    }
     final inserted = await _db.from(table).insert(payload).select().single();
     return Gem.fromJson(inserted);
   }
@@ -171,8 +174,7 @@ class GemRepository {
           'falling back to two queries: $e');
       final ids = await savedGemIds();
       if (ids.isEmpty) return [];
-      final data =
-          await _db.from(table).select().inFilter('id', ids.toList());
+      final data = await _db.from(table).select().inFilter('id', ids.toList());
       return (data as List).map((e) => Gem.fromJson(e)).toList();
     }
   }
@@ -204,11 +206,7 @@ class GemRepository {
   Future<void> unsaveGem(String gemId) async {
     final uid = _db.auth.currentUser?.id;
     if (uid == null) return;
-    await _db
-        .from(savesTable)
-        .delete()
-        .eq('user_id', uid)
-        .eq('gem_id', gemId);
+    await _db.from(savesTable).delete().eq('user_id', uid).eq('gem_id', gemId);
   }
 
   // ───────── realtime ─────────

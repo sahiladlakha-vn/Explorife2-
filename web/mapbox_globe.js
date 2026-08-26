@@ -39,6 +39,44 @@
     }
   }
 
+  // Registers Mapbox's terrain-DEM source and turns on elevation relief —
+  // invisible at pitch 0 (looking straight down), but pops into real 3D
+  // mountain/valley shape the moment the camera tilts (pinch/two-finger-drag,
+  // or window.explorifeMapSetTilt below). Ambient, not gated behind the tilt
+  // toggle: registering the source is cheap and source+terrain do NOT survive
+  // a style swap (same reason applyFog/applyRoute re-run on every
+  // 'style.load'), so this must be re-applied there too, not just once at init.
+  function applyTerrain(el) {
+    var map = el._mb;
+    if (!map) return;
+    try {
+      if (!map.getSource('ex-terrain-dem')) {
+        map.addSource('ex-terrain-dem', {
+          type: 'raster-dem',
+          url: 'mapbox://mapbox.mapbox-terrain-dem-v1',
+          tileSize: 512,
+          maxzoom: 14,
+        });
+      }
+      map.setTerrain({ source: 'ex-terrain-dem', exaggeration: 1.5 });
+    } catch (e) { /* style may not support terrain */ }
+  }
+
+  // Applies el._lightPreset (set via window.explorifeMapSetLightPreset) to
+  // Mapbox Standard Style's built-in dynamic-lighting config — 'dawn' | 'day'
+  // | 'dusk' | 'night'. A Standard-only concept (setConfigProperty targets a
+  // config schema that only Standard/Standard Satellite declare), so this is
+  // wrapped in try/catch and silently does nothing on any other style rather
+  // than erroring. Re-applied on every 'style.load' below since config
+  // properties, like fog/terrain/routes, don't survive a style swap.
+  function applyLightPreset(el) {
+    var map = el._mb;
+    if (!map || !el._lightPreset) return;
+    try {
+      map.setConfigProperty('basemap', 'lightPreset', el._lightPreset);
+    } catch (e) { /* active style has no 'basemap' config (not Standard) */ }
+  }
+
   window.explorifeMapInit = function (el, token, style, onTap) {
     if (!libReady()) {
       console.error('[explorife] mapbox-gl not loaded');
@@ -78,6 +116,8 @@
 
     map.on('style.load', function () {
       applyFog();
+      applyTerrain(el);
+      applyLightPreset(el);
       el._loaded = true;
       if (el._pendingGems != null) {
         var pending = el._pendingGems;
@@ -148,29 +188,60 @@
 
       node.className = 'ex-gem' +
         (sel === g.id ? ' selected' : (sel ? ' dimmed' : ''));
+      var isPhotoPin = !g.label;
       if (g.label) {
         // Numbered pin (e.g. a trip route stop) — takes precedence over
-        // photo/emoji. Colored per its own `color` (e.g. that stop's day)
-        // when given, falling back to the CSS default otherwise.
+        // photo/emoji, and stays the plain circle: sequence legibility
+        // matters more here than a photo. Colored per its own `color` (e.g.
+        // that stop's day) when given, falling back to the CSS default
+        // otherwise.
         node.classList.add('ex-numbered');
         node.textContent = g.label;
         if (g.color) node.style.background = g.color;
-      } else if (g.photo) {
-        // Show the uploaded photo as a circular thumbnail.
-        node.classList.add('ex-photo');
-        node.style.backgroundImage = 'url("' + g.photo + '")';
-        node.style.backgroundSize = 'cover';
-        node.style.backgroundPosition = 'center';
-        node.textContent = '';
       } else {
-        node.textContent = g.emoji || '📍';
+        // Plain gem-browsing pin: the gradient-bordered teardrop "photo
+        // pin". `node` is a plain sized wrapper (NOT the circle itself) —
+        // needed so anchor:'bottom' below (see marker construction) points
+        // the pin's actual visual tip at the coordinate, not some smaller
+        // inner element's center. Tail is appended BEFORE the head so it
+        // paints behind it via plain DOM order — deliberately NOT a
+        // z-index trick: confirmed live that a negative z-index here
+        // escapes this marker's own stacking context (Mapbox gives the
+        // marker position:absolute but no z-index of its own, so it never
+        // contains a negative-z-index child) and paints behind the map
+        // canvas instead of just behind the pin's head.
+        node.classList.add('ex-photopin-wrap');
+        var tail = document.createElement('div');
+        tail.className = 'ex-photopin-tail';
+        var head = document.createElement('div');
+        head.className = 'ex-photopin';
+        var gap = document.createElement('div');
+        gap.className = 'ex-photopin-gap';
+        var inner = document.createElement('div');
+        inner.className = 'ex-photopin-photo';
+        if (g.photo) {
+          inner.style.backgroundImage = 'url("' + g.photo + '")';
+        } else {
+          inner.textContent = g.emoji || '📍';
+        }
+        gap.appendChild(inner);
+        head.appendChild(gap);
+        node.appendChild(tail);
+        node.appendChild(head);
       }
       node.addEventListener('click', function (e) {
         e.stopPropagation();
         window.explorifeMapSelect(el, g.id);
         if (el._onTap) { try { el._onTap(g.id); } catch (err) {} }
       });
-      var marker = new mapboxgl.Marker({ element: node })
+      var marker = new mapboxgl.Marker({
+        element: node,
+        // The photo pin's visual tip sits at the bottom of its box (unlike
+        // every other marker kind here, anchored at their own center) —
+        // 'bottom' is what keeps that tip pointing at the actual
+        // coordinate instead of the head circle floating above it.
+        anchor: isPhotoPin ? 'bottom' : 'center',
+      })
         .setLngLat([g.lng, g.lat])
         .addTo(map);
       marker._exNode = node;
@@ -213,8 +284,19 @@
           'star-intensity': 0.6,
         });
       } catch (e) {}
+      applyTerrain(el);
+      applyLightPreset(el);
       applyRoute(el);
     });
+  };
+
+  // 'dawn' | 'day' | 'dusk' | 'night' — see applyLightPreset above. Settable
+  // any time, whether or not the map/style has finished loading yet (the
+  // value is stashed on the element either way, applied immediately if
+  // possible, and re-applied on every future style.load).
+  window.explorifeMapSetLightPreset = function (el, preset) {
+    el._lightPreset = preset;
+    applyLightPreset(el);
   };
 
   // Draws (or clears, with an empty array) one connecting route line per
@@ -503,6 +585,15 @@
   window.explorifeMapResetNorth = function (el) {
     var map = el && el._mb; if (!map) return;
     map.easeTo({ bearing: 0, pitch: 0, duration: 300 });
+  };
+
+  // Toggles the 3D terrain tilt: pitched (60°) reveals the relief
+  // applyTerrain() already registered ambiently; flat (0°) is the original
+  // straight-down view. Bearing is untouched — this is a pure pitch toggle,
+  // unlike explorifeMapResetNorth which also re-levels rotation.
+  window.explorifeMapSetTilt = function (el, tilted) {
+    var map = el && el._mb; if (!map) return;
+    map.easeTo({ pitch: tilted ? 60 : 0, duration: 500 });
   };
 
   // Reports the map bearing (degrees) to Dart on every rotation, so the compass

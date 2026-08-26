@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
+import '../../core/services/mapbox_tilequery_service.dart';
 import '../../core/theme/app_theme.dart';
 import '../../providers/auth_provider.dart';
 import '../../screens/auth/auth_screen.dart';
@@ -123,6 +124,17 @@ class AppRouter {
               ),
               GoRoute(
                   path: '/stories', builder: (_, __) => const StoriesScreen()),
+              GoRoute(
+                // Opened from a Mapbox-sourced POI card (e.g. a destination
+                // landing page's "Top things to do"/"Top attractions" list)
+                // — no saved_gems row exists for these, so the POI itself is
+                // passed via `extra` rather than looked up by id. MUST come
+                // before '/gems/:id' below — GoRouter matches in declaration
+                // order, and ':id' would otherwise greedily match "poi".
+                path: '/gems/poi',
+                builder: (context, state) =>
+                    GemDetailScreen.fromPoi(poi: state.extra as NearbyPoi),
+              ),
               GoRoute(
                 path: '/gems/:id',
                 builder: (context, state) =>

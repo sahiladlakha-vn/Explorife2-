@@ -56,6 +56,52 @@ class _IconHit extends StatelessWidget {
   }
 }
 
+/// One Dawn/Day/Dusk/Night option in the layers sheet's lighting row (Mapbox
+/// Standard Style's own preset names — see explore_screen.dart's
+/// _autoLightPreset and mapbox_globe.js's applyLightPreset). Material has no
+/// distinct dawn/dusk glyphs, so dawn/dusk share a twilight icon; day/night
+/// get their own — the label text still disambiguates dawn from dusk.
+class _LightPresetChip extends StatelessWidget {
+  const _LightPresetChip({required this.preset, required this.selected, required this.onTap});
+
+  final String preset;
+  final bool selected;
+  final VoidCallback onTap;
+
+  IconData get _icon => switch (preset) {
+        'dawn' || 'dusk' => Icons.wb_twilight,
+        'day' => Icons.wb_sunny,
+        _ => Icons.nightlight_round,
+      };
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: selected ? AppTheme.primary : AppTheme.lightSurface,
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: selected ? AppTheme.primary : AppTheme.lightBorder),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(_icon, size: 16, color: selected ? Colors.white : AppTheme.lightMute),
+            const SizedBox(width: 6),
+            Text(preset[0].toUpperCase() + preset.substring(1),
+                style: GoogleFonts.fredoka(
+                    color: selected ? Colors.white : AppTheme.lightInk,
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w600)),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 // ─────────────────────────────────────────
 // BOTTOM SHEET — discovery feed
 //
@@ -342,7 +388,7 @@ class _BottomSheetState extends State<_BottomSheet> {
           child: Text(
             'No gems in this area yet — drag the map to explore, or drop one.',
             textAlign: TextAlign.center,
-            style: GoogleFonts.dmSans(
+            style: GoogleFonts.fredoka(
                 fontSize: 13, color: AppTheme.sheetSubInk),
           ),
         ),
@@ -435,7 +481,7 @@ class _FeedHeaderDelegate extends SliverPersistentHeaderDelegate {
         children: [
           TextSpan(
             text: city ?? 'Hidden Gems',
-            style: GoogleFonts.dmSans(
+            style: GoogleFonts.fredoka(
               fontSize: 13.5,
               height: 1.25,
               fontWeight: FontWeight.w700,
@@ -444,7 +490,7 @@ class _FeedHeaderDelegate extends SliverPersistentHeaderDelegate {
           ),
           TextSpan(
             text: total == 1 ? '  ·  $total spot  ·  ' : '  ·  $total spots  ·  ',
-            style: GoogleFonts.dmSans(
+            style: GoogleFonts.fredoka(
               fontSize: 13,
               height: 1.25,
               color: AppTheme.sheetSubInk,
@@ -462,7 +508,7 @@ class _FeedHeaderDelegate extends SliverPersistentHeaderDelegate {
                 : (focused
                     ? 'in ${areaLabel ?? 'this area'}'
                     : 'across the map'),
-            style: GoogleFonts.dmSans(
+            style: GoogleFonts.fredoka(
               fontSize: 13,
               height: 1.25,
               fontWeight: FontWeight.w600,
@@ -584,7 +630,7 @@ class _FilterChip extends StatelessWidget {
               const SizedBox(width: 6),
               Text(
                 label,
-                style: GoogleFonts.dmSans(
+                style: GoogleFonts.fredoka(
                   fontSize: 13,
                   fontWeight: FontWeight.w700,
                   color: fg,
@@ -601,7 +647,7 @@ class _FilterChip extends StatelessWidget {
                 ),
                 child: Text(
                   '$count',
-                  style: GoogleFonts.dmSans(
+                  style: GoogleFonts.fredoka(
                     fontSize: 10,
                     fontWeight: FontWeight.w700,
                     color: selected ? Colors.white : AppTheme.sheetSubInk,
@@ -817,7 +863,7 @@ class _GemDetailSheetState extends State<_GemDetailSheet> {
                       const SizedBox(height: 6),
                       Text(
                         gem.tagline!,
-                        style: GoogleFonts.dmSans(
+                        style: GoogleFonts.fredoka(
                           fontSize: 15,
                           fontStyle: FontStyle.italic,
                           color: AppTheme.primary,
@@ -836,7 +882,7 @@ class _GemDetailSheetState extends State<_GemDetailSheet> {
                           Expanded(
                             child: Text(
                               gem.gemLocation!,
-                              style: GoogleFonts.dmSans(
+                              style: GoogleFonts.fredoka(
                                 fontSize: 13,
                                 color: const Color(0xFF666666),
                                 height: 1.4,
@@ -854,7 +900,7 @@ class _GemDetailSheetState extends State<_GemDetailSheet> {
                           'A remarkable ${gem.displayCategory.toLowerCase()} discovered by the '
                               'Explorife community. Verified by local explorers with an '
                               'average rating of ${_rating.toStringAsFixed(1)} stars.',
-                      style: GoogleFonts.dmSans(
+                      style: GoogleFonts.fredoka(
                         fontSize: 14.5,
                         color: const Color(0xFF555555),
                         height: 1.6,
@@ -972,7 +1018,7 @@ class _GemDetailSheetState extends State<_GemDetailSheet> {
         const SizedBox(width: 4),
         Text(
           _rating.toStringAsFixed(1),
-          style: GoogleFonts.dmSans(
+          style: GoogleFonts.fredoka(
               fontSize: 14, fontWeight: FontWeight.w800, color: const Color(0xFF111111)),
         ),
         const SizedBox(width: 14),
@@ -980,7 +1026,7 @@ class _GemDetailSheetState extends State<_GemDetailSheet> {
         const SizedBox(width: 4),
         Text(
           _savesLabel,
-          style: GoogleFonts.dmSans(fontSize: 13, color: const Color(0xFF8A8A8A)),
+          style: GoogleFonts.fredoka(fontSize: 13, color: const Color(0xFF8A8A8A)),
         ),
         const SizedBox(width: 10),
         Container(
@@ -1051,7 +1097,7 @@ class _GemDetailSheetState extends State<_GemDetailSheet> {
             ),
             child: Text(
               i.initials,
-              style: GoogleFonts.dmSans(
+              style: GoogleFonts.fredoka(
                   fontSize: 13, fontWeight: FontWeight.w800, color: Colors.white),
             ),
           ),
@@ -1064,7 +1110,7 @@ class _GemDetailSheetState extends State<_GemDetailSheet> {
                   children: [
                     Text(
                       i.initials,
-                      style: GoogleFonts.dmSans(
+                      style: GoogleFonts.fredoka(
                           fontSize: 14,
                           fontWeight: FontWeight.w800,
                           color: const Color(0xFF111111)),
@@ -1072,7 +1118,7 @@ class _GemDetailSheetState extends State<_GemDetailSheet> {
                     const SizedBox(width: 8),
                     Text(
                       i.time,
-                      style: GoogleFonts.dmSans(
+                      style: GoogleFonts.fredoka(
                           fontSize: 12, color: const Color(0xFFAAAAAA)),
                     ),
                   ],
@@ -1080,7 +1126,7 @@ class _GemDetailSheetState extends State<_GemDetailSheet> {
                 const SizedBox(height: 3),
                 Text(
                   i.text,
-                  style: GoogleFonts.dmSans(
+                  style: GoogleFonts.fredoka(
                       fontSize: 14, color: const Color(0xFF666666), height: 1.45),
                 ),
               ],
@@ -1154,7 +1200,7 @@ class _GemDetailSheetState extends State<_GemDetailSheet> {
               g.label,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: GoogleFonts.dmSans(
+              style: GoogleFonts.fredoka(
                 fontSize: 14,
                 fontWeight: FontWeight.w600,
                 color: g.checked ? const Color(0xFF111111) : const Color(0xFF999999),

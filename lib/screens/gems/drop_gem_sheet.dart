@@ -52,10 +52,13 @@ class _DropGemSheetState extends State<DropGemSheet> {
   final GeocodingService _geo = GeocodingService();
 
   String _category = Gem.categories.first;
-  XFile? _cover;
-  Uint8List? _coverBytes;
+  final List<XFile> _photos = [];
+  final List<Uint8List> _photoBytes = [];
   bool _publishing = false;
   String? _address;
+
+  /// Keeps uploads (and the detail screen's gallery) to a sane size.
+  static const int _maxPhotos = 10;
 
   @override
   void initState() {
@@ -86,7 +89,7 @@ class _DropGemSheetState extends State<DropGemSheet> {
         tagline: _taglineCtrl.text,
         description: _descCtrl.text,
         address: _address,
-        hasPhoto: _cover != null,
+        hasPhoto: _photos.isNotEmpty,
       );
 
   bool get _canPublish => !_publishing && _buildDraft().canPublish;
@@ -102,16 +105,24 @@ class _DropGemSheetState extends State<DropGemSheet> {
 
   String get _coordLabel => GemDraft.formatCoordinates(widget.lat, widget.lng);
 
-  Future<void> _pickCover() async {
+  Future<void> _addPhotos() async {
+    if (_photos.length >= _maxPhotos) return;
     try {
-      final x = await _picker.pickImage(source: ImageSource.gallery);
-      if (x == null) return;
-      final bytes = await x.readAsBytes();
+      final picked = await _picker.pickMultiImage();
+      if (picked.isEmpty) return;
+      final room = _maxPhotos - _photos.length;
+      final toAdd = picked.take(room).toList();
+      final bytes = await Future.wait(toAdd.map((x) => x.readAsBytes()));
       if (mounted) {
         setState(() {
-          _cover = x;
-          _coverBytes = bytes;
+          _photos.addAll(toAdd);
+          _photoBytes.addAll(bytes);
         });
+        if (picked.length > toAdd.length) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Only added $_maxPhotos photos max')),
+          );
+        }
       }
     } catch (_) {
       if (mounted) {
@@ -120,6 +131,13 @@ class _DropGemSheetState extends State<DropGemSheet> {
         );
       }
     }
+  }
+
+  void _removePhotoAt(int i) {
+    setState(() {
+      _photos.removeAt(i);
+      _photoBytes.removeAt(i);
+    });
   }
 
   Future<void> _publish() async {
@@ -137,7 +155,7 @@ class _DropGemSheetState extends State<DropGemSheet> {
     final result = await context.read<GemProvider>().publish(
           draft,
           userId: auth.user!.id,
-          photo: _cover,
+          photos: _photos,
         );
 
     if (!mounted) return;
@@ -204,10 +222,14 @@ class _DropGemSheetState extends State<DropGemSheet> {
                     _categoryGrid(),
                     const SizedBox(height: 24),
 
-                    // 03 — Cover photo
-                    const _NumLabel(num: '03', title: 'COVER PHOTO'),
+                    // 03 — Photos
+                    _NumLabel(
+                      num: '03',
+                      title: 'PHOTOS',
+                      counter: '${_photos.length}/$_maxPhotos',
+                    ),
                     const SizedBox(height: 10),
-                    _coverPicker(),
+                    _photosPicker(),
                     const SizedBox(height: 24),
 
                     // 04 — Tagline
@@ -218,7 +240,8 @@ class _DropGemSheetState extends State<DropGemSheet> {
                           '${_taglineCtrl.text.characters.length}/${GemDraft.maxTaglineLength}',
                     ),
                     const SizedBox(height: 10),
-                    _field(_taglineCtrl, 'One line. Make it field-report crisp.',
+                    _field(
+                        _taglineCtrl, 'One line. Make it field-report crisp.',
                         maxLength: GemDraft.maxTaglineLength),
                     const SizedBox(height: 24),
 
@@ -230,7 +253,8 @@ class _DropGemSheetState extends State<DropGemSheet> {
                           '${_descCtrl.text.characters.length}/${GemDraft.maxDescriptionLength}',
                     ),
                     const SizedBox(height: 10),
-                    _field(_descCtrl, 'What makes it worth the pin. Local intel only.',
+                    _field(_descCtrl,
+                        'What makes it worth the pin. Local intel only.',
                         maxLines: 5, maxLength: GemDraft.maxDescriptionLength),
                     const SizedBox(height: 28),
 
@@ -255,7 +279,7 @@ class _DropGemSheetState extends State<DropGemSheet> {
                                     color: Colors.white, strokeWidth: 2),
                               )
                             : Text('Drop the gem',
-                                style: GoogleFonts.dmSans(
+                                style: GoogleFonts.fredoka(
                                     fontSize: 16,
                                     fontWeight: FontWeight.w700,
                                     color: Colors.white)),
@@ -309,7 +333,7 @@ class _DropGemSheetState extends State<DropGemSheet> {
                 const SizedBox(height: 6),
                 Text(
                   _address ?? 'Locating address…',
-                  style: GoogleFonts.dmSans(
+                  style: GoogleFonts.fredoka(
                     fontSize: 15,
                     color: const Color(0xFF555555),
                     height: 1.35,
@@ -329,7 +353,8 @@ class _DropGemSheetState extends State<DropGemSheet> {
                 borderRadius: BorderRadius.circular(12),
                 border: Border.all(color: const Color(0xFFE2E2E2)),
               ),
-              child: const Icon(Icons.close, color: Color(0xFF555555), size: 20),
+              child:
+                  const Icon(Icons.close, color: Color(0xFF555555), size: 20),
             ),
           ),
         ],
@@ -344,13 +369,13 @@ class _DropGemSheetState extends State<DropGemSheet> {
       controller: ctrl,
       maxLines: maxLines,
       maxLength: maxLength,
-      buildCounter: (_, {required currentLength, required isFocused, maxLength}) =>
-          null,
-      style: GoogleFonts.dmSans(fontSize: 15, color: const Color(0xFF111111)),
+      buildCounter:
+          (_, {required currentLength, required isFocused, maxLength}) => null,
+      style: GoogleFonts.fredoka(fontSize: 15, color: const Color(0xFF111111)),
       decoration: InputDecoration(
         hintText: hint,
-        hintStyle: GoogleFonts.dmSans(
-            fontSize: 15, color: const Color(0xFFAAAAAA)),
+        hintStyle:
+            GoogleFonts.fredoka(fontSize: 15, color: const Color(0xFFAAAAAA)),
         filled: true,
         fillColor: const Color(0xFFF5F5F5),
         contentPadding:
@@ -414,64 +439,108 @@ class _DropGemSheetState extends State<DropGemSheet> {
     );
   }
 
-  // ── cover photo upload box ──
-  Widget _coverPicker() {
-    if (_coverBytes != null) {
-      return ClipRRect(
-        borderRadius: BorderRadius.circular(16),
-        child: Stack(
-          children: [
-            Image.memory(_coverBytes!,
-                width: double.infinity, height: 180, fit: BoxFit.cover),
-            Positioned(
-              top: 10,
-              right: 10,
-              child: GestureDetector(
-                onTap: () => setState(() {
-                  _cover = null;
-                  _coverBytes = null;
-                }),
-                child: Container(
-                  decoration: BoxDecoration(
-                    color: Colors.black.withValues(alpha: 0.55),
-                    shape: BoxShape.circle,
-                  ),
-                  padding: const EdgeInsets.all(6),
-                  child: const Icon(Icons.close, color: Colors.white, size: 18),
-                ),
-              ),
-            ),
-          ],
+  // ── photo picker: empty prompt, or a scroll strip of thumbnails + add tile.
+  // The first photo is the cover (used as the hero everywhere the gem shows a
+  // single image); the rest back the detail screen's gallery.
+  Widget _photosPicker() {
+    if (_photos.isEmpty) {
+      return GestureDetector(
+        onTap: _addPhotos,
+        child: Container(
+          height: 180,
+          decoration: BoxDecoration(
+            color: const Color(0xFFF6F6F6),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: const Color(0xFFD9D9D9)),
+          ),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(Icons.photo_camera_outlined,
+                  size: 34, color: Color(0xFF999999)),
+              const SizedBox(height: 12),
+              Text('TAP TO UPLOAD',
+                  style: GoogleFonts.jetBrainsMono(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      letterSpacing: 1,
+                      color: const Color(0xFF777777))),
+              const SizedBox(height: 6),
+              Text('JPG · PNG · HEIC · Up to $_maxPhotos photos',
+                  style: GoogleFonts.fredoka(
+                      fontSize: 12, color: const Color(0xFFAAAAAA))),
+            ],
+          ),
         ),
       );
     }
-    return GestureDetector(
-      onTap: _pickCover,
-      child: Container(
-        height: 180,
-        decoration: BoxDecoration(
-          color: const Color(0xFFF6F6F6),
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: const Color(0xFFD9D9D9)),
-        ),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Icon(Icons.photo_camera_outlined,
-                size: 34, color: Color(0xFF999999)),
-            const SizedBox(height: 12),
-            Text('TAP TO UPLOAD',
-                style: GoogleFonts.jetBrainsMono(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    letterSpacing: 1,
-                    color: const Color(0xFF777777))),
-            const SizedBox(height: 6),
-            Text('JPG · PNG · HEIC · Max 12MB',
-                style: GoogleFonts.dmSans(
-                    fontSize: 12, color: const Color(0xFFAAAAAA))),
-          ],
-        ),
+    return SizedBox(
+      height: 96,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        itemCount: _photos.length + (_photos.length < _maxPhotos ? 1 : 0),
+        separatorBuilder: (_, __) => const SizedBox(width: 10),
+        itemBuilder: (context, i) {
+          if (i == _photos.length) {
+            return GestureDetector(
+              onTap: _addPhotos,
+              child: Container(
+                width: 96,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF6F6F6),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: const Color(0xFFD9D9D9)),
+                ),
+                child: const Icon(Icons.add_photo_alternate_outlined,
+                    color: Color(0xFF999999)),
+              ),
+            );
+          }
+          return ClipRRect(
+            borderRadius: BorderRadius.circular(14),
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                Image.memory(_photoBytes[i],
+                    width: 96, height: 96, fit: BoxFit.cover),
+                if (i == 0)
+                  Positioned(
+                    left: 4,
+                    bottom: 4,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 5, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: AppTheme.primary,
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Text('COVER',
+                          style: GoogleFonts.jetBrainsMono(
+                              fontSize: 8,
+                              fontWeight: FontWeight.w700,
+                              color: Colors.white)),
+                    ),
+                  ),
+                Positioned(
+                  top: 4,
+                  right: 4,
+                  child: GestureDetector(
+                    onTap: () => _removePhotoAt(i),
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: Colors.black.withValues(alpha: 0.55),
+                        shape: BoxShape.circle,
+                      ),
+                      padding: const EdgeInsets.all(4),
+                      child: const Icon(Icons.close,
+                          color: Colors.white, size: 14),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          );
+        },
       ),
     );
   }
@@ -511,7 +580,8 @@ class _NumLabel extends StatelessWidget {
             padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(6),
-              border: Border.all(color: AppTheme.primary.withValues(alpha: 0.6)),
+              border:
+                  Border.all(color: AppTheme.primary.withValues(alpha: 0.6)),
             ),
             child: Text('REQ',
                 style: GoogleFonts.jetBrainsMono(

@@ -69,12 +69,12 @@ class ImageShimmer extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final block = Container(width: width, height: height, color: AppTheme.surface2);
+    final block = Container(width: width, height: height, color: AppTheme.lightCard);
     if (MediaQuery.of(context).disableAnimations) return block;
 
     return Shimmer.fromColors(
-      baseColor: AppTheme.surface2,
-      highlightColor: const Color(0xFF2C2C2C),
+      baseColor: AppTheme.lightCard,
+      highlightColor: Colors.white,
       child: block,
     );
   }
@@ -92,9 +92,9 @@ class ImageFallback extends StatelessWidget {
     return Container(
       width: width,
       height: height,
-      color: AppTheme.surface2,
+      color: AppTheme.lightCard,
       alignment: Alignment.center,
-      child: const Icon(Icons.terrain_rounded, color: AppTheme.textSecondary, size: 26),
+      child: const Icon(Icons.terrain_rounded, color: AppTheme.lightMute, size: 26),
     );
   }
 }
