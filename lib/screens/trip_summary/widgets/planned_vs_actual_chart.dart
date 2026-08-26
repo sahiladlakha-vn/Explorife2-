@@ -29,10 +29,15 @@ class PlannedVsActualChart extends StatelessWidget {
   const PlannedVsActualChart({
     super.key,
     required this.categories,
+    required this.symbol,
     this.height = 200,
   });
 
   final List<CategorySpend> categories;
+
+  /// The trip's currency symbol (see lib/core/logic/currency.dart) — prefixes
+  /// the value axis labels.
+  final String symbol;
   final double height;
 
   static const Color _plannedColor = AppTheme.primary;
@@ -71,7 +76,7 @@ class PlannedVsActualChart extends StatelessWidget {
               if (barW < _PvaPainter._minBarW) {
                 return const _NarrowViewportFallback();
               }
-              return CustomPaint(painter: _PvaPainter(bars));
+              return CustomPaint(painter: _PvaPainter(bars, symbol));
             },
           ),
         ),
@@ -102,7 +107,7 @@ class _NarrowViewportFallback extends StatelessWidget {
           'spending by category.',
           textAlign: TextAlign.center,
           style: TextStyle(
-            color: AppTheme.textSecondary,
+            color: AppTheme.lightMute,
             fontSize: 12,
             fontWeight: FontWeight.w500,
           ),
@@ -113,9 +118,10 @@ class _NarrowViewportFallback extends StatelessWidget {
 }
 
 class _PvaPainter extends CustomPainter {
-  _PvaPainter(this.bars);
+  _PvaPainter(this.bars, this.symbol);
 
   final List<CategorySpend> bars;
+  final String symbol;
 
   static const double _groupGap = 14; // horizontal gap between category groups
   // Intra-pair gap: 3px says "these two bars belong together" without letting
@@ -223,7 +229,7 @@ class _PvaPainter extends CustomPainter {
     // TODO(chart-axis): revisit the ₫100K threshold if a user reports a missing
     // axis on a genuine low-budget trip.
     final linePaint = Paint()
-      ..color = AppTheme.divider.withValues(alpha: 0.3)
+      ..color = AppTheme.lightBorder.withValues(alpha: 0.5)
       ..strokeWidth = 1;
     for (final frac in const [0.5, 1.0]) {
       final v = (maxVal * frac).round();
@@ -232,9 +238,9 @@ class _PvaPainter extends CustomPainter {
 
       final tp = TextPainter(
         text: TextSpan(
-          text: '₫${Trip.formatVnd(v, short: true)}',
+          text: '$symbol${Trip.formatVnd(v, short: true)}',
           style: const TextStyle(
-            color: AppTheme.textSecondary,
+            color: AppTheme.lightMute,
             fontSize: 9,
             fontWeight: FontWeight.w600,
           ),
@@ -307,7 +313,7 @@ class _PvaPainter extends CustomPainter {
       text: TextSpan(
         text: text,
         style: const TextStyle(
-          color: AppTheme.textSecondary,
+          color: AppTheme.lightMute,
           fontSize: 10,
           fontWeight: FontWeight.w600,
         ),

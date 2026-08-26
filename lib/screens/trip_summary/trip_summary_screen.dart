@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
+import '../../core/logic/currency.dart';
 import '../../core/theme/app_theme.dart';
 import '../../models/trip.dart';
 import '../../providers/trip_provider.dart';
@@ -43,7 +44,7 @@ class TripSummaryScreen extends StatelessWidget {
   // ---- Loaded: single vertical scroll, mobile-first, capped reading width. ----
   Widget _loaded(BuildContext context, Trip trip) {
     return Scaffold(
-      backgroundColor: AppTheme.bg,
+      backgroundColor: AppTheme.lightSurface,
       appBar: _appBar(context, title: trip.displayName),
       body: SafeArea(
         top: false,
@@ -80,12 +81,12 @@ class TripSummaryScreen extends StatelessWidget {
           height: h,
           margin: const EdgeInsets.only(bottom: 12),
           decoration: BoxDecoration(
-            color: AppTheme.surface2,
+            color: AppTheme.lightCard,
             borderRadius: BorderRadius.circular(16),
           ),
         );
     return Scaffold(
-      backgroundColor: AppTheme.bg,
+      backgroundColor: AppTheme.lightSurface,
       appBar: _appBar(context),
       body: SafeArea(
         top: false,
@@ -105,7 +106,7 @@ class TripSummaryScreen extends StatelessWidget {
   // ---- Error: raw message kept as a clipped diagnostic breadcrumb. ----
   Widget _errorState(BuildContext context, String message) {
     return Scaffold(
-      backgroundColor: AppTheme.bg,
+      backgroundColor: AppTheme.lightSurface,
       appBar: _appBar(context),
       body: Center(
         child: Padding(
@@ -114,17 +115,17 @@ class TripSummaryScreen extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             children: [
               const Icon(Icons.error_outline,
-                  color: AppTheme.textSecondary, size: 40),
+                  color: AppTheme.lightMute, size: 40),
               const SizedBox(height: 12),
               const Text("Couldn't load this trip.",
-                  style: TextStyle(color: AppTheme.textPrimary, fontSize: 16)),
+                  style: TextStyle(color: AppTheme.lightInk, fontSize: 16)),
               const SizedBox(height: 6),
               Text(message,
                   maxLines: 3,
                   overflow: TextOverflow.ellipsis,
                   textAlign: TextAlign.center,
                   style: const TextStyle(
-                      color: AppTheme.textSecondary, fontSize: 12)),
+                      color: AppTheme.lightMute, fontSize: 12)),
               const SizedBox(height: 20),
               ElevatedButton(
                 onPressed: () => context.read<TripProvider>().init(),
@@ -140,7 +141,7 @@ class TripSummaryScreen extends StatelessWidget {
   // ---- Not found: trip missing after a completed load. ----
   Widget _notFound(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppTheme.bg,
+      backgroundColor: AppTheme.lightSurface,
       appBar: _appBar(context),
       body: Center(
         child: Padding(
@@ -149,11 +150,11 @@ class TripSummaryScreen extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             children: [
               const Icon(Icons.map_outlined,
-                  color: AppTheme.textSecondary, size: 40),
+                  color: AppTheme.lightMute, size: 40),
               const SizedBox(height: 12),
               const Text("This trip doesn't exist or isn't yours.",
                   textAlign: TextAlign.center,
-                  style: TextStyle(color: AppTheme.textSecondary)),
+                  style: TextStyle(color: AppTheme.lightMute)),
               const SizedBox(height: 20),
               ElevatedButton(
                 onPressed: () => context.go('/profile'),
@@ -167,18 +168,18 @@ class TripSummaryScreen extends StatelessWidget {
   }
 
   AppBar _appBar(BuildContext context, {String? title}) => AppBar(
-        backgroundColor: AppTheme.bg,
+        backgroundColor: AppTheme.lightSurface,
         elevation: 0,
         title: title == null
             ? null
             : Text(title,
                 style: const TextStyle(
-                    color: AppTheme.textPrimary,
+                    color: AppTheme.lightInk,
                     fontSize: 16,
                     fontWeight: FontWeight.w800)),
         // TODO(tab-deeplink): target the Trips tab once it's deep-linkable.
         leading: BackButton(
-            color: AppTheme.textPrimary,
+            color: AppTheme.lightInk,
             onPressed: () => context.go('/profile')),
       );
 }
@@ -205,9 +206,9 @@ class _SummaryCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       decoration: BoxDecoration(
-        color: AppTheme.surface,
+        color: AppTheme.lightCard,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppTheme.divider),
+        border: Border.all(color: AppTheme.lightBorder),
       ),
       padding: const EdgeInsets.all(16),
       child: Column(
@@ -215,7 +216,7 @@ class _SummaryCard extends StatelessWidget {
         children: [
           Text(title,
               style: const TextStyle(
-                  color: AppTheme.textPrimary,
+                  color: AppTheme.lightInk,
                   fontSize: 15,
                   fontWeight: FontWeight.w800)),
           const SizedBox(height: 12),
@@ -229,7 +230,7 @@ class _SummaryCard extends StatelessWidget {
 Widget _emptyLine(String text) => Padding(
       padding: const EdgeInsets.symmetric(vertical: 8),
       child: Text(text,
-          style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12)),
+          style: const TextStyle(color: AppTheme.lightMute, fontSize: 12)),
     );
 
 const _monthAbbr = [
@@ -289,7 +290,7 @@ class _CountdownCard extends StatelessWidget {
           const SizedBox(height: 2),
           Text(sub,
               style: const TextStyle(
-                  color: AppTheme.textSecondary, fontSize: 12)),
+                  color: AppTheme.lightMute, fontSize: 12)),
         ],
       ),
     );
@@ -311,17 +312,19 @@ class _BudgetSnapshotCard extends StatelessWidget {
   Widget build(BuildContext context) {
     // Record slice → value equality, so this rebuilds only when spent or budget
     // actually changes (not on every unrelated provider notify).
-    final (spent, budget) = context.select<TripProvider, (int, int)>((p) {
+    final (spent, budget, currencyCode) =
+        context.select<TripProvider, (int, int, String?)>((p) {
       final t = p.tripById(tripId);
-      return (p.totalSpent(tripId), t?.budgetVnd ?? 0);
+      return (p.totalSpent(tripId), t?.budgetVnd ?? 0, t?.currency);
     });
+    final symbol = currencyFor(currencyCode).symbol;
 
     final status = BudgetStatus.of(spent: spent, budgetVnd: budget);
     final fill = (status.pct / 100).clamp(0.0, 1.0);
     final remaining = budget - spent;
     final tail = status.over
-        ? '₫${Trip.formatVnd(-remaining, short: true)} over'
-        : '₫${Trip.formatVnd(remaining, short: true)} left';
+        ? '$symbol${Trip.formatVnd(-remaining, short: true)} over'
+        : '$symbol${Trip.formatVnd(remaining, short: true)} left';
 
     return _SummaryCard(
       title: 'Budget',
@@ -332,15 +335,15 @@ class _BudgetSnapshotCard extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.baseline,
             textBaseline: TextBaseline.alphabetic,
             children: [
-              Text('₫${Trip.formatVnd(spent, short: true)}',
+              Text('$symbol${Trip.formatVnd(spent, short: true)}',
                   style: TextStyle(
                       color: status.accent,
                       fontSize: 22,
                       fontWeight: FontWeight.w800)),
               const SizedBox(width: 6),
-              Text('of ₫${Trip.formatVnd(budget, short: true)}',
+              Text('of $symbol${Trip.formatVnd(budget, short: true)}',
                   style: const TextStyle(
-                      color: AppTheme.textSecondary, fontSize: 12)),
+                      color: AppTheme.lightMute, fontSize: 12)),
               const Spacer(),
               // Catch 1: percentage carries the accent too — a muted % beside a
               // red number would be a mixed signal.
@@ -356,7 +359,7 @@ class _BudgetSnapshotCard extends StatelessWidget {
             borderRadius: BorderRadius.circular(6),
             child: Stack(
               children: [
-                Container(height: 8, color: AppTheme.surface2),
+                Container(height: 8, color: AppTheme.lightCard),
                 FractionallySizedBox(
                   widthFactor: fill,
                   child: Container(height: 8, color: status.accent),
@@ -368,7 +371,7 @@ class _BudgetSnapshotCard extends StatelessWidget {
           Text(tail,
               style: TextStyle(
                   color:
-                      status.over ? AppTheme.danger : AppTheme.textSecondary,
+                      status.over ? AppTheme.danger : AppTheme.lightMute,
                   fontSize: 12,
                   fontWeight: FontWeight.w600)),
         ],
@@ -407,6 +410,9 @@ class _PlannedVsActualCard extends StatelessWidget {
         ac['transit'] ?? 0,
       );
     });
+    final symbol = currencyFor(context
+            .select<TripProvider, String?>((p) => p.tripById(tripId)?.currency))
+        .symbol;
 
     final cats = <CategorySpend>[
       CategorySpend('Stay', v.$1, v.$5),
@@ -422,7 +428,7 @@ class _PlannedVsActualCard extends StatelessWidget {
       // bars would be an empty axis. The chart also self-guards (drops zero
       // pairs, mobile-narrow fallback), so this only handles the all-zero case.
       child: anyData
-          ? PlannedVsActualChart(categories: cats)
+          ? PlannedVsActualChart(categories: cats, symbol: symbol)
           : _emptyLine('No budget or spending to compare yet.'),
     );
   }
@@ -471,6 +477,9 @@ class _ExpenseDonutCard extends StatelessWidget {
       'activity': v.$7,
       'transit': v.$8,
     };
+    final symbol = currencyFor(context
+            .select<TripProvider, String?>((p) => p.tripById(tripId)?.currency))
+        .symbol;
 
     return _SummaryCard(
       title: "Where it's going",
@@ -480,74 +489,31 @@ class _ExpenseDonutCard extends StatelessWidget {
       // zero budget, hence "No budget set yet." not "No spending logged yet."
       child: plannedTotal == 0
           ? _emptyLine('No budget set yet.')
-          : Center(child: ExpenseDonut(planned: planned, actual: actual)),
+          : Center(
+              child:
+                  ExpenseDonut(planned: planned, actual: actual, symbol: symbol)),
     );
   }
 }
 
 // ===========================================================================
-// Reference rates — auxiliary. Built net-new (there was no prior CurrencyWidget
-// to "reverse"; grep confirmed no currency/FX code existed). Semantic per Catch
-// 2, oriented for a Vietnam-first audience: a VND trip needs no conversion; a
-// foreign-currency trip shows "1 X = ₫… VND" with a USD line for global
-// reference.
+// Reference rates — auxiliary, force-dormant. Built net-new (there was no
+// prior CurrencyWidget to "reverse"; grep confirmed no currency/FX code
+// existed) as a forward seam for real exchange-rate conversion.
 //
-// DORMANT TODAY: the app is single-currency (Trip.currency defaults to 'VND'
-// and is treated as identity), so this branch shrinks for every current trip.
-// It's a forward seam for when multi-currency trips exist — which is also why
-// the placeholder rates below never reach a user.
+// Per-trip currency (see lib/core/logic/currency.dart) is now live and
+// user-settable in the setup wizard, but that feature is explicitly scoped as
+// "no conversion" — every money field is a whole unit of the trip's own
+// currency, with no exchange rate between trips. Showing this card would mean
+// converting a live, non-VND trip's numbers against hardcoded, already-wrong
+// placeholder rates, so it stays a no-op until real rates (and a real
+// decision to add conversion) exist.
 // ===========================================================================
 class _CurrencyCard extends StatelessWidget {
   const _CurrencyCard({required this.tripId});
 
   final String tripId;
 
-  // TODO(rates): replace with live rates via a server-side proxy. STATIC
-  // PLACEHOLDERS — wrong by definition, kept only so the dormant widget renders
-  // a shape. Never shown today (see class doc), so the staleness can't mislead.
-  static const Map<String, int> _placeholderVndPer = {
-    'USD': 25400,
-    'EUR': 27600,
-    'JPY': 170,
-    'KRW': 19,
-    'THB': 720,
-    'SGD': 18800,
-  };
-
   @override
-  Widget build(BuildContext context) {
-    final currency = context
-        .select<TripProvider, String?>((p) => p.tripById(tripId)?.currency);
-
-    // VND trip → skip: the user already knows what VND is (Catch 2 reversal).
-    if (currency == null || currency == 'VND') return const SizedBox.shrink();
-
-    final vndPer = _placeholderVndPer[currency];
-    // Unknown currency → no sensible rate to show; stay silent rather than guess.
-    if (vndPer == null) return const SizedBox.shrink();
-
-    final usdPer = _placeholderVndPer['USD']!;
-    final inUsd = vndPer / usdPer;
-
-    return _SummaryCard(
-      title: 'Reference rates',
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text('1 $currency = ₫${Trip.formatVnd(vndPer)}',
-              style: const TextStyle(
-                  color: AppTheme.textPrimary,
-                  fontSize: 15,
-                  fontWeight: FontWeight.w700)),
-          // Row 2 is redundant when the trip currency IS USD — hide it.
-          if (currency != 'USD') ...[
-            const SizedBox(height: 4),
-            Text('≈ \$${inUsd.toStringAsFixed(2)} USD',
-                style: const TextStyle(
-                    color: AppTheme.textSecondary, fontSize: 12)),
-          ],
-        ],
-      ),
-    );
-  }
+  Widget build(BuildContext context) => const SizedBox.shrink();
 }

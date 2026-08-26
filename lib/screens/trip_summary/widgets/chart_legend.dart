@@ -76,7 +76,7 @@ class _LegendChip extends StatelessWidget {
         Text(
           label,
           style: const TextStyle(
-            color: AppTheme.textSecondary,
+            color: AppTheme.lightMute,
             fontSize: 11,
             fontWeight: FontWeight.w600,
           ),

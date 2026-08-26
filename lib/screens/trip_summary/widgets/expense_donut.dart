@@ -38,15 +38,22 @@ class ExpenseDonut extends StatelessWidget {
     super.key,
     required this.planned,
     required this.actual,
+    required this.symbol,
     this.diameter = 200,
   });
 
-  /// The four zero-filled PLANNED buckets (VND) — the outer ring / colour key.
+  /// The four zero-filled PLANNED buckets, in the trip's own currency — the
+  /// outer ring / colour key.
   final Map<String, int> planned;
 
-  /// The four zero-filled ACTUAL buckets (VND) — the inner ring. All-zero on a
-  /// fresh trip, in which case the inner ring is not drawn.
+  /// The four zero-filled ACTUAL buckets, in the trip's own currency — the
+  /// inner ring. All-zero on a fresh trip, in which case the inner ring is not
+  /// drawn.
   final Map<String, int> actual;
+
+  /// The trip's currency symbol (see lib/core/logic/currency.dart) — prefixes
+  /// the centre total.
+  final String symbol;
 
   /// Bumped 180→200 (relief (i)): the inner ring steals the centre hole the
   /// label uses, so the extra diameter keeps both ring strokes and the label
@@ -118,9 +125,9 @@ class ExpenseDonut extends StatelessWidget {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Text(
-                        '₫${Trip.formatVnd(centreValue, short: true)}',
+                        '$symbol${Trip.formatVnd(centreValue, short: true)}',
                         style: const TextStyle(
-                          color: AppTheme.textPrimary,
+                          color: AppTheme.lightInk,
                           fontSize: 20,
                           fontWeight: FontWeight.w800,
                         ),
@@ -128,7 +135,7 @@ class ExpenseDonut extends StatelessWidget {
                       Text(
                         centreCaption,
                         style: const TextStyle(
-                          color: AppTheme.textSecondary,
+                          color: AppTheme.lightMute,
                           fontSize: 11,
                           fontWeight: FontWeight.w600,
                         ),
@@ -159,7 +166,7 @@ class ExpenseDonut extends StatelessWidget {
           const Text(
             'Outer: planned · Inner: actuals',
             style: TextStyle(
-              color: AppTheme.textSecondary,
+              color: AppTheme.lightMute,
               fontSize: 10,
               fontWeight: FontWeight.w500,
             ),
@@ -214,7 +221,7 @@ class _ExpenseDonutPainter extends CustomPainter {
           ..style = PaintingStyle.stroke
           ..strokeWidth = _ringThickness
           ..strokeCap = StrokeCap.butt
-          ..color = AppTheme.divider,
+          ..color = AppTheme.lightBorder,
       );
       return;
     }
@@ -315,7 +322,7 @@ class _ExpenseDonutPainter extends CustomPainter {
       arcEdge,
       elbow,
       Paint()
-        ..color = AppTheme.textSecondary.withValues(alpha: 0.5)
+        ..color = AppTheme.lightMute.withValues(alpha: 0.5)
         ..strokeWidth = 1,
     );
 
@@ -324,7 +331,7 @@ class _ExpenseDonutPainter extends CustomPainter {
       text: TextSpan(
         text: '${(frac * 100).round()}%',
         style: const TextStyle(
-          color: AppTheme.textSecondary,
+          color: AppTheme.lightMute,
           fontSize: 10,
           fontWeight: FontWeight.w600,
         ),

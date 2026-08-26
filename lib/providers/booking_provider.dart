@@ -1,6 +1,6 @@
 import 'package:flutter/foundation.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/trip_booking.dart';
+import '../repositories/booking_repository.dart';
 
 // Owns trip bookings (flights/stays/activities/transport) per trip. Registered as
 // a PLAIN ChangeNotifierProvider — NOT a proxy: reads are scoped by trip_id and
@@ -9,13 +9,18 @@ import '../models/trip_booking.dart';
 // is `created_by` on insert, taken as a per-call parameter. That designs out the
 // owner_id:'' auth-race bug class at the signature rather than guarding against it.
 //
+// All Supabase access is delegated to [BookingRepository] (mirrors GemProvider/
+// GemRepository) — this class owns only the optimistic-update/rollback/sentinel
+// logic, which is what makes it testable with a fake repository instead of a
+// real network call. See test/providers/booking_provider_test.dart.
+//
 //   Registration (lib/main.dart, one line among the plain providers):
-//     ChangeNotifierProvider(create: (_) => BookingProvider(
-//         supabase: Supabase.instance.client)),
+//     ChangeNotifierProvider(create: (_) => BookingProvider()),
 class BookingProvider extends ChangeNotifier {
-  BookingProvider({required SupabaseClient supabase}) : _supabase = supabase;
+  BookingProvider({BookingRepository? repository})
+      : _repo = repository ?? BookingRepository();
 
-  final SupabaseClient _supabase;
+  final BookingRepository _repo;
 
   // Cache keyed by tripId (mirrors TripProvider._stopsByTrip). Key present with an
   // empty list == "fetched, no bookings"; a MISSING key == "never fetched" — that
@@ -49,15 +54,7 @@ class BookingProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final rows = await _supabase
-          .from('trip_bookings')
-          .select()
-          .eq('trip_id', tripId) // RLS owns ownership; no userId filter, no ''.
-          .order('start_at', ascending: true, nullsFirst: false)
-          .order('created_at', ascending: true); // stable secondary sort
-      _byTrip[tripId] = (rows as List)
-          .map((e) => TripBooking.fromJson(e as Map<String, dynamic>))
-          .toList();
+      _byTrip[tripId] = await _repo.fetchForTrip(tripId);
       _sortInPlace(tripId); // belt-and-braces; server already ordered this way
     } catch (e) {
       // Leave _byTrip[tripId] ABSENT (hasLoaded stays false) and record the error.
@@ -112,24 +109,19 @@ class BookingProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final row = await _supabase
-          .from('trip_bookings')
-          .insert({
-            'trip_id': tripId,
-            'stop_id': stopId,
-            'booking_type': bookingType.wire,
-            'title': title,
-            'confirmation_ref': confirmationRef,
-            'provider': provider,
-            'start_at': startAt?.toUtc().toIso8601String(),
-            'end_at': endAt?.toUtc().toIso8601String(),
-            'amount_vnd': amountVnd,
-            'status': status.wire,
-            'created_by': createdBy,
-          })
-          .select()
-          .single();
-      final saved = TripBooking.fromJson(row);
+      final saved = await _repo.insert(
+        tripId: tripId,
+        stopId: stopId,
+        bookingType: bookingType,
+        title: title,
+        confirmationRef: confirmationRef,
+        provider: provider,
+        startAt: startAt,
+        endAt: endAt,
+        amountVnd: amountVnd,
+        status: status,
+        createdBy: createdBy,
+      );
       _byTrip[tripId] =
           _byTrip[tripId]!.map((b) => b.id == tempId ? saved : b).toList();
       _sortInPlace(tripId);
@@ -160,9 +152,7 @@ class BookingProvider extends ChangeNotifier {
     if (_isTemp(bookingId)) return; // never PATCH an id the server hasn't seen
 
     try {
-      await _supabase
-          .from('trip_bookings')
-          .update({'status': status.wire}).eq('id', bookingId);
+      await _repo.patch(bookingId, {'status': status.wire});
     } catch (e) {
       _byTrip[tripId] =
           _byTrip[tripId]!.map((b) => b.id == bookingId ? old : b).toList();
@@ -189,9 +179,7 @@ class BookingProvider extends ChangeNotifier {
     if (_isTemp(bookingId)) return;
 
     try {
-      await _supabase
-          .from('trip_bookings')
-          .update({'amount_vnd': amountVnd}).eq('id', bookingId);
+      await _repo.patch(bookingId, {'amount_vnd': amountVnd});
     } catch (e) {
       _byTrip[tripId] =
           _byTrip[tripId]!.map((b) => b.id == bookingId ? old : b).toList();
@@ -201,20 +189,27 @@ class BookingProvider extends ChangeNotifier {
     }
   }
 
-  /// General edit for the fuller form. All fields optional. KNOWN LIMITATION
-  /// (same as TripBooking.copyWith): only amountVnd has a sentinel, so this can
-  /// SET nullable text/date fields but can't CLEAR them back to null. The PATCH
-  /// carries only the provided (non-null) fields, mirroring that preserve-on-null
-  /// semantics so we never null a column we didn't mean to touch.
+  // Sentinel so callers can distinguish "leave unchanged" (omit the arg) from
+  // "clear to null" (pass `field: null` explicitly) for every nullable field
+  // below — mirrors TripBooking.copyWith's own sentinel exactly.
+  static const Object _unset = Object();
+
+  /// General edit for the fuller form — the one call the Add/Edit Booking
+  /// sheet uses for everything (title/type/status/amount/dates/confirmation/
+  /// provider/stop link) in a single optimistic PATCH. Sentinel-based: omit an
+  /// arg to leave it unchanged, pass `null` explicitly to clear it (e.g.
+  /// unpin from a stop, clear a confirmation number).
   Future<void> update(
     String bookingId, {
     String? title,
-    String? confirmationRef,
-    String? provider,
-    DateTime? startAt,
-    DateTime? endAt,
     BookingType? bookingType,
-    String? stopId,
+    BookingStatus? status,
+    Object? stopId = _unset,
+    Object? confirmationRef = _unset,
+    Object? provider = _unset,
+    Object? startAt = _unset,
+    Object? endAt = _unset,
+    Object? amountVnd = _unset,
   }) async {
     final loc = _locate(bookingId);
     if (loc == null) return;
@@ -225,12 +220,14 @@ class BookingProvider extends ChangeNotifier {
       if (b.id != bookingId) return b;
       return b.copyWith(
         title: title,
+        bookingType: bookingType,
+        status: status,
+        stopId: stopId,
         confirmationRef: confirmationRef,
         provider: provider,
         startAt: startAt,
         endAt: endAt,
-        bookingType: bookingType,
-        stopId: stopId,
+        amountVnd: amountVnd,
       );
     }).toList();
     _sortInPlace(tripId); // start_at may have changed
@@ -240,17 +237,22 @@ class BookingProvider extends ChangeNotifier {
 
     final patch = <String, dynamic>{
       if (title != null) 'title': title,
-      if (confirmationRef != null) 'confirmation_ref': confirmationRef,
-      if (provider != null) 'provider': provider,
-      if (startAt != null) 'start_at': startAt.toUtc().toIso8601String(),
-      if (endAt != null) 'end_at': endAt.toUtc().toIso8601String(),
       if (bookingType != null) 'booking_type': bookingType.wire,
-      if (stopId != null) 'stop_id': stopId,
+      if (status != null) 'status': status.wire,
+      if (!identical(stopId, _unset)) 'stop_id': stopId as String?,
+      if (!identical(confirmationRef, _unset))
+        'confirmation_ref': confirmationRef as String?,
+      if (!identical(provider, _unset)) 'provider': provider as String?,
+      if (!identical(startAt, _unset))
+        'start_at': (startAt as DateTime?)?.toUtc().toIso8601String(),
+      if (!identical(endAt, _unset))
+        'end_at': (endAt as DateTime?)?.toUtc().toIso8601String(),
+      if (!identical(amountVnd, _unset)) 'amount_vnd': amountVnd as int?,
     };
     if (patch.isEmpty) return;
 
     try {
-      await _supabase.from('trip_bookings').update(patch).eq('id', bookingId);
+      await _repo.patch(bookingId, patch);
     } catch (e) {
       _byTrip[tripId] =
           _byTrip[tripId]!.map((b) => b.id == bookingId ? old : b).toList();
@@ -274,7 +276,7 @@ class BookingProvider extends ChangeNotifier {
     if (_isTemp(bookingId)) return; // never persisted; nothing to delete
 
     try {
-      await _supabase.from('trip_bookings').delete().eq('id', bookingId);
+      await _repo.delete(bookingId);
     } catch (e) {
       _byTrip[tripId]!.insert(index, removed);
       _sortInPlace(tripId);

@@ -31,9 +31,9 @@ class ChecklistCard extends StatelessWidget {
 
     return Container(
       decoration: BoxDecoration(
-        color: AppTheme.surface,
+        color: AppTheme.lightCard,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppTheme.divider),
+        border: Border.all(color: AppTheme.lightBorder),
       ),
       padding: const EdgeInsets.all(16),
       child: Column(
@@ -42,7 +42,7 @@ class ChecklistCard extends StatelessWidget {
           const Text(
             'Checklist',
             style: TextStyle(
-              color: AppTheme.textPrimary,
+              color: AppTheme.lightInk,
               fontSize: 15,
               fontWeight: FontWeight.w800,
             ),
@@ -53,7 +53,7 @@ class ChecklistCard extends StatelessWidget {
               padding: EdgeInsets.symmetric(vertical: 12),
               child: Text(
                 'No checklist for this trip yet.',
-                style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+                style: TextStyle(color: AppTheme.lightMute, fontSize: 12),
               ),
             )
           else
@@ -94,7 +94,7 @@ class _ChecklistSection extends StatelessWidget {
               child: Text(
                 TripChecklistItem.sectionLabel(section),
                 style: const TextStyle(
-                  color: AppTheme.textPrimary,
+                  color: AppTheme.lightInk,
                   fontSize: 13,
                   fontWeight: FontWeight.w700,
                 ),
@@ -103,7 +103,7 @@ class _ChecklistSection extends StatelessWidget {
             Text(
               '$done/$total',
               style: const TextStyle(
-                color: AppTheme.textSecondary,
+                color: AppTheme.lightMute,
                 fontSize: 11,
                 fontWeight: FontWeight.w600,
               ),
@@ -117,7 +117,7 @@ class _ChecklistSection extends StatelessWidget {
             child: LinearProgressIndicator(
               value: ratio,
               minHeight: 3,
-              backgroundColor: AppTheme.divider,
+              backgroundColor: AppTheme.lightBorder,
               valueColor: const AlwaysStoppedAnimation(AppTheme.primary),
             ),
           ),
@@ -161,7 +161,7 @@ class _ChecklistRow extends StatelessWidget {
                   ? Icons.check_circle_rounded
                   : Icons.radio_button_unchecked_rounded,
               size: 20,
-              color: item.isChecked ? AppTheme.primary : AppTheme.textSecondary,
+              color: item.isChecked ? AppTheme.primary : AppTheme.lightMute,
             ),
             const SizedBox(width: 10),
             Expanded(
@@ -169,8 +169,8 @@ class _ChecklistRow extends StatelessWidget {
                 item.title,
                 style: TextStyle(
                   color: item.isChecked
-                      ? AppTheme.textSecondary
-                      : AppTheme.textPrimary,
+                      ? AppTheme.lightMute
+                      : AppTheme.lightInk,
                   fontSize: 13,
                   decoration:
                       item.isChecked ? TextDecoration.lineThrough : null,

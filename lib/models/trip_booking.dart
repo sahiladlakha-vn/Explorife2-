@@ -130,33 +130,39 @@ class TripBooking {
         'created_at': createdAt.toUtc().toIso8601String(),
       };
 
-  // Sentinel so copyWith can distinguish "not provided" from "set to null" for
-  // [amountVnd] — the one field where null (TBD) is a meaningful value the
-  // caller may want to set explicitly, per the MONEY CONTRACT. Omitting the arg
-  // preserves the current amount; passing `amountVnd: null` clears it to TBD.
+  // Sentinel so copyWith can distinguish "not provided" from "set to null" —
+  // needed for every nullable field here (stopId, confirmationRef, provider,
+  // startAt, endAt, amountVnd), since each has a meaningful cleared-to-null
+  // state (unpin from a stop, clear a confirmation number, etc.) that a plain
+  // `param ?? this.field` can't express. Omitting an arg preserves the current
+  // value; passing `field: null` explicitly clears it.
   static const Object _unset = Object();
 
   TripBooking copyWith({
-    String? stopId,
+    Object? stopId = _unset,
     BookingType? bookingType,
     String? title,
-    String? confirmationRef,
-    String? provider,
-    DateTime? startAt,
-    DateTime? endAt,
+    Object? confirmationRef = _unset,
+    Object? provider = _unset,
+    Object? startAt = _unset,
+    Object? endAt = _unset,
     Object? amountVnd = _unset,
     BookingStatus? status,
   }) =>
       TripBooking(
         id: id,
         tripId: tripId,
-        stopId: stopId ?? this.stopId,
+        stopId: identical(stopId, _unset) ? this.stopId : stopId as String?,
         bookingType: bookingType ?? this.bookingType,
         title: title ?? this.title,
-        confirmationRef: confirmationRef ?? this.confirmationRef,
-        provider: provider ?? this.provider,
-        startAt: startAt ?? this.startAt,
-        endAt: endAt ?? this.endAt,
+        confirmationRef: identical(confirmationRef, _unset)
+            ? this.confirmationRef
+            : confirmationRef as String?,
+        provider:
+            identical(provider, _unset) ? this.provider : provider as String?,
+        startAt:
+            identical(startAt, _unset) ? this.startAt : startAt as DateTime?,
+        endAt: identical(endAt, _unset) ? this.endAt : endAt as DateTime?,
         amountVnd:
             identical(amountVnd, _unset) ? this.amountVnd : amountVnd as int?,
         status: status ?? this.status,

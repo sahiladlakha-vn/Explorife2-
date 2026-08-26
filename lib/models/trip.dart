@@ -3,8 +3,10 @@ import 'trip_vibe.dart';
 /// A planned trip. Backs `public.trips`. Plain Dart, no codegen — mirrors the
 /// [Gem]/[TripStop] convention.
 ///
-/// Money is always whole VND ([budgetVnd]); the app is single-currency for now
-/// ([currency] defaults to 'VND' and is treated as identity, not state).
+/// [currency] is a real, per-trip, user-settable field (see
+/// lib/core/logic/currency.dart) — every money field on this trip
+/// ([budgetVnd] and its stop/booking/expense counterparts) is a whole unit of
+/// whatever this is, with no exchange-rate conversion between trips.
 class Trip {
   final String id;
   final String ownerId;
@@ -18,6 +20,11 @@ class Trip {
   final double? locationLat;
   final double? locationLng;
 
+  /// Freeform "what is this trip about" — captured by the setup wizard's
+  /// Description field. Nullable: every trip created before this field
+  /// existed, and any trip where the user leaves it blank, has none.
+  final String? description;
+
   final DateTime startDate;
   final DateTime endDate;
   final int budgetVnd;
@@ -26,6 +33,14 @@ class Trip {
   final String? templateId;
   final DateTime createdAt;
 
+  /// A real, user-uploaded cover photo — set via the setup wizard's Cover
+  /// Image field (or EditTripSheet, after creation). Nullable: every trip
+  /// created before this field existed, and any trip where the user skips
+  /// it, has none. Hero-photo surfaces (Overview/My Trip cards) fall back to
+  /// a map-thumbnail/picsum placeholder when this is null — see
+  /// overview_tab.dart's _heroImageUrl.
+  final String? coverImageUrl;
+
   const Trip({
     required this.id,
     required this.ownerId,
@@ -33,6 +48,7 @@ class Trip {
     required this.location,
     this.locationLat,
     this.locationLng,
+    this.description,
     required this.startDate,
     required this.endDate,
     required this.budgetVnd,
@@ -40,6 +56,7 @@ class Trip {
     this.vibe,
     this.templateId,
     required this.createdAt,
+    this.coverImageUrl,
   });
 
   /// Number of nights. Jul 12 → Jul 18 == 6. Intentionally not clamped when
@@ -63,6 +80,7 @@ class Trip {
         location: j['location'] as String,
         locationLat: (j['location_lat'] as num?)?.toDouble(),
         locationLng: (j['location_lng'] as num?)?.toDouble(),
+        description: j['description'] as String?,
         startDate: DateTime.parse(j['start_date'] as String),
         endDate: DateTime.parse(j['end_date'] as String),
         budgetVnd: (j['budget_vnd'] as num).toInt(),
@@ -70,6 +88,7 @@ class Trip {
         vibe: TripVibe.fromKey(j['vibe'] as String?),
         templateId: j['template_id'] as String?,
         createdAt: DateTime.parse(j['created_at'] as String),
+        coverImageUrl: j['cover_image_url'] as String?,
       );
 
   // start/end are date-only columns → first 10 chars of the ISO string;
@@ -81,6 +100,7 @@ class Trip {
         'location': location,
         'location_lat': locationLat,
         'location_lng': locationLng,
+        'description': description,
         'start_date': startDate.toIso8601String().substring(0, 10),
         'end_date': endDate.toIso8601String().substring(0, 10),
         'budget_vnd': budgetVnd,
@@ -88,20 +108,28 @@ class Trip {
         'vibe': vibe?.key,
         'template_id': templateId,
         'created_at': createdAt.toIso8601String(),
+        'cover_image_url': coverImageUrl,
       };
 
-  /// Mutable fields only. id/ownerId/currency/createdAt are identity, not state:
-  /// migrating those is a service-level operation, never a copyWith.
+  /// Mutable fields only. id/ownerId/createdAt are identity, not state:
+  /// migrating those is a service-level operation, never a copyWith. Note
+  /// [description]/[locationLat]/[locationLng] use plain `?? this.field`
+  /// (no clear-to-null sentinel) — intentional; a caller that needs to clear
+  /// one of those (e.g. removing a trip's description) constructs a new
+  /// [Trip] directly instead, same as [TripProvider.updateTrip] already does.
   Trip copyWith({
     String? name,
     String? location,
     double? locationLat,
     double? locationLng,
+    String? description,
     DateTime? startDate,
     DateTime? endDate,
     int? budgetVnd,
+    String? currency,
     TripVibe? vibe,
     String? templateId,
+    String? coverImageUrl,
   }) =>
       Trip(
         id: id,
@@ -110,13 +138,15 @@ class Trip {
         location: location ?? this.location,
         locationLat: locationLat ?? this.locationLat,
         locationLng: locationLng ?? this.locationLng,
+        description: description ?? this.description,
         startDate: startDate ?? this.startDate,
         endDate: endDate ?? this.endDate,
         budgetVnd: budgetVnd ?? this.budgetVnd,
-        currency: currency,
+        currency: currency ?? this.currency,
         vibe: vibe ?? this.vibe,
         templateId: templateId ?? this.templateId,
         createdAt: createdAt,
+        coverImageUrl: coverImageUrl ?? this.coverImageUrl,
       );
 
   // ---- Display formatters ----
