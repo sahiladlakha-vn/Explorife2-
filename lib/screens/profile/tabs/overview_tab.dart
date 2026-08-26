@@ -7,7 +7,7 @@ part of '../profile_screen.dart';
 // ─────────────────────────────────────────
 class _OverviewTab extends StatelessWidget {
   final double spent;
-  final int groups;    // split groups → "Groups settled"
+  final int groups; // split groups → "Groups settled"
   final int tripCount; // real trips → avg-per-trip divisor
   final List<Story> stories;
   // Derived-insight inputs, computed once in the shell (shared `now`). [alerts]
@@ -17,6 +17,10 @@ class _OverviewTab extends StatelessWidget {
   final List<Alert> alerts;
   final TripPace? pace;
   final int? budgetVnd;
+
+  /// Active trip's currency symbol (see core/logic/currency.dart) — every
+  /// money figure this tab renders is scoped to that one trip.
+  final String symbol;
   final List<BadgeProgress> badges;
   // Overview's Itinerary/Bookings/Budget chips jump straight to that My Trip
   // segment — owned by ProfileScreen since it also owns _tab.
@@ -32,6 +36,7 @@ class _OverviewTab extends StatelessWidget {
     required this.alerts,
     required this.pace,
     required this.budgetVnd,
+    required this.symbol,
     required this.badges,
     required this.onOpenTripSegment,
     required this.onSwitchTab,
@@ -40,103 +45,109 @@ class _OverviewTab extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final avg = tripCount > 0 ? spent / tripCount : 0;
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 18, 16, 100),
-      children: [
-        // Next / upcoming trip pulse — first thing a returning user sees.
-        _TripCarousel(onOpenTripSegment: onOpenTripSegment),
-        const SizedBox(height: 16),
-
-        // Derived alerts — most actionable, so directly under the trip pulse.
-        // Absent when the active trip has nothing flagged.
-        if (alerts.isNotEmpty) ...[
-          _AlertsCard(alerts: alerts),
+    return MaxWidthCenter(
+      child: ListView(
+        padding: const EdgeInsets.fromLTRB(16, 18, 16, 100),
+        children: [
+          // Next / upcoming trip pulse — first thing a returning user sees.
+          _TripCarousel(onOpenTripSegment: onOpenTripSegment),
           const SizedBox(height: 16),
-        ],
 
-        // Budget pace — present for any active trip (honest not-started/no-budget
-        // states included); absent only when there's no active trip.
-        if (pace != null) ...[
-          _PaceCard(pace: pace!, budgetVnd: budgetVnd ?? 0),
+          // Derived alerts — most actionable, so directly under the trip pulse.
+          // Absent when the active trip has nothing flagged.
+          if (alerts.isNotEmpty) ...[
+            _AlertsCard(
+                alerts: alerts,
+                symbol: symbol,
+                onOpenTripSegment: onOpenTripSegment),
+            const SizedBox(height: 16),
+          ],
+
+          // Budget pace — present for any active trip (honest not-started/no-budget
+          // states included); absent only when there's no active trip.
+          if (pace != null) ...[
+            _PaceCard(pace: pace!, budgetVnd: budgetVnd ?? 0, symbol: symbol),
+            const SizedBox(height: 16),
+          ],
+
+          // Expense summary
+          _Card(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const _CardHeader(
+                    icon: Icons.trending_up,
+                    label: 'EXPENSE SUMMARY',
+                    color: _kTeal),
+                const SizedBox(height: 16),
+                _summaryRow('Total across all trips',
+                    '\$${spent.toStringAsFixed(1)}', _kInk),
+                const SizedBox(height: 14),
+                _summaryRow(
+                    'Average per trip', '\$${avg.toStringAsFixed(2)}', _kInk),
+                const SizedBox(height: 14),
+                _summaryRow('Groups settled', '$groups / $groups', _kTeal),
+                const SizedBox(height: 14),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(4),
+                  child: const LinearProgressIndicator(
+                    value: 1,
+                    minHeight: 5,
+                    backgroundColor: _kBorder,
+                    valueColor: AlwaysStoppedAnimation(_kTeal),
+                  ),
+                ),
+              ],
+            ),
+          ),
           const SizedBox(height: 16),
+
+          // Recent stories
+          _Card(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const _CardHeader(
+                    icon: Icons.menu_book_outlined,
+                    label: 'RECENT STORIES',
+                    color: AppTheme.primary),
+                const SizedBox(height: 8),
+                if (stories.isEmpty)
+                  _emptyLine('You haven\'t submitted any stories yet.')
+                else
+                  ...stories.take(3).toList().asMap().entries.map(
+                      (e) => _StoryRow(story: e.value, divider: e.key > 0)),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+
+          // Saved Gems — photo strip, matching the mockup. Bookmarked gems
+          // (GemProvider.savedGems), not the user's own dropped pins — same
+          // data the dedicated Saved Gems tab (index 2) reads.
+          _SectionTitle(title: 'Saved Gems', onViewAll: () => onSwitchTab(2)),
+          const SizedBox(height: 10),
+          const _SavedGemsStrip(),
+          const SizedBox(height: 20),
+
+          // Badges — preview strip of the same _BadgeTile the Badges tab (index
+          // 4) renders in full.
+          _SectionTitle(title: 'Badges', onViewAll: () => onSwitchTab(4)),
+          const SizedBox(height: 10),
+          SizedBox(
+            height: 96,
+            child: badges.isEmpty
+                ? _emptyLine('No badges yet.')
+                : ListView.separated(
+                    scrollDirection: Axis.horizontal,
+                    itemCount: badges.length,
+                    separatorBuilder: (_, __) => const SizedBox(width: 10),
+                    itemBuilder: (_, i) => SizedBox(
+                        width: 84, child: _BadgeTile(badge: badges[i])),
+                  ),
+          ),
         ],
-
-        // Expense summary
-        _Card(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const _CardHeader(
-                  icon: Icons.trending_up, label: 'EXPENSE SUMMARY', color: _kTeal),
-              const SizedBox(height: 16),
-              _summaryRow('Total across all trips',
-                  '\$${spent.toStringAsFixed(1)}', _kInk),
-              const SizedBox(height: 14),
-              _summaryRow('Average per trip',
-                  '\$${avg.toStringAsFixed(2)}', _kInk),
-              const SizedBox(height: 14),
-              _summaryRow('Groups settled', '$groups / $groups', _kTeal),
-              const SizedBox(height: 14),
-              ClipRRect(
-                borderRadius: BorderRadius.circular(4),
-                child: const LinearProgressIndicator(
-                  value: 1,
-                  minHeight: 5,
-                  backgroundColor: _kBorder,
-                  valueColor: AlwaysStoppedAnimation(_kTeal),
-                ),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 16),
-
-        // Recent stories
-        _Card(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const _CardHeader(
-                  icon: Icons.menu_book_outlined,
-                  label: 'RECENT STORIES',
-                  color: AppTheme.primary),
-              const SizedBox(height: 8),
-              if (stories.isEmpty)
-                _emptyLine('You haven\'t submitted any stories yet.')
-              else
-                ...stories.take(3).toList().asMap().entries.map((e) =>
-                    _StoryRow(story: e.value, divider: e.key > 0)),
-            ],
-          ),
-        ),
-        const SizedBox(height: 16),
-
-        // Saved Gems — photo strip, matching the mockup. Bookmarked gems
-        // (GemProvider.savedGems), not the user's own dropped pins — same
-        // data the dedicated Saved Gems tab (index 2) reads.
-        _SectionTitle(
-            title: 'Saved Gems', onViewAll: () => onSwitchTab(2)),
-        const SizedBox(height: 10),
-        const _SavedGemsStrip(),
-        const SizedBox(height: 20),
-
-        // Badges — preview strip of the same _BadgeTile the Badges tab (index
-        // 4) renders in full.
-        _SectionTitle(title: 'Badges', onViewAll: () => onSwitchTab(4)),
-        const SizedBox(height: 10),
-        SizedBox(
-          height: 96,
-          child: badges.isEmpty
-              ? _emptyLine('No badges yet.')
-              : ListView.separated(
-                  scrollDirection: Axis.horizontal,
-                  itemCount: badges.length,
-                  separatorBuilder: (_, __) => const SizedBox(width: 10),
-                  itemBuilder: (_, i) => SizedBox(
-                      width: 84, child: _BadgeTile(badge: badges[i])),
-                ),
-        ),
-      ],
+      ),
     );
   }
 
@@ -145,10 +156,11 @@ class _OverviewTab extends StatelessWidget {
       children: [
         Expanded(
           child: Text(label,
-              style: GoogleFonts.dmSans(fontSize: 15, color: const Color(0xFF555555))),
+              style: GoogleFonts.fredoka(
+                  fontSize: 15, color: const Color(0xFF555555))),
         ),
         Text(value,
-            style: GoogleFonts.dmSans(
+            style: GoogleFonts.fredoka(
                 fontSize: 17, fontWeight: FontWeight.w800, color: valueColor)),
       ],
     );
@@ -156,8 +168,8 @@ class _OverviewTab extends StatelessWidget {
 
   Widget _emptyLine(String text) => Padding(
         padding: const EdgeInsets.symmetric(vertical: 14),
-        child: Text(text,
-            style: GoogleFonts.dmSans(fontSize: 13, color: _kMute)),
+        child:
+            Text(text, style: GoogleFonts.fredoka(fontSize: 13, color: _kMute)),
       );
 }
 
@@ -179,8 +191,10 @@ class _SectionTitle extends StatelessWidget {
         GestureDetector(
           onTap: onViewAll,
           child: Text('View all →',
-              style: GoogleFonts.dmSans(
-                  fontSize: 12, fontWeight: FontWeight.w600, color: AppTheme.primary)),
+              style: GoogleFonts.fredoka(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: AppTheme.primary)),
         ),
       ],
     );
@@ -199,8 +213,9 @@ class _SavedGemsStrip extends StatelessWidget {
     if (saved.isEmpty) {
       return Padding(
         padding: const EdgeInsets.symmetric(vertical: 14),
-        child: Text('Nothing saved yet — bookmark spots and they\'ll show up here.',
-            style: GoogleFonts.dmSans(fontSize: 13, color: _kMute)),
+        child: Text(
+            'Nothing saved yet — bookmark spots and they\'ll show up here.',
+            style: GoogleFonts.fredoka(fontSize: 13, color: _kMute)),
       );
     }
     return SizedBox(
@@ -278,14 +293,13 @@ class _TripCarouselState extends State<_TripCarousel> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text('No trips yet',
-                      style: GoogleFonts.dmSans(
+                      style: GoogleFonts.fredoka(
                           fontSize: 16,
                           fontWeight: FontWeight.w800,
                           color: _kInk)),
                   const SizedBox(height: 2),
                   Text('Plan your first adventure.',
-                      style:
-                          GoogleFonts.dmSans(fontSize: 13, color: _kMute)),
+                      style: GoogleFonts.fredoka(fontSize: 13, color: _kMute)),
                 ],
               ),
             ),
@@ -325,10 +339,14 @@ class _TripCarouselState extends State<_TripCarousel> {
   }
 }
 
-/// One trip's hero card — photo, PAST/UPCOMING badge + day countdown, name,
-/// dates, budget bar, and (active trip only) the Itinerary/Bookings/Budget
-/// segment chips.
-class _TripCard extends StatelessWidget {
+/// One trip's hero card — full-bleed cover photo (or map-thumbnail/picsum
+/// fallback) as the entire card's background, with a bottom-weighted scrim
+/// and everything else — PAST/UPCOMING badge + day countdown, name, dates,
+/// budget bar, and (active trip only) the Itinerary/Dashboard/Bookings
+/// segment chips — layered directly over it. The single shared
+/// implementation for both Overview's carousel and the My Trip tab's header
+/// (trips_tab.dart calls this class directly; same library).
+class _TripCard extends StatefulWidget {
   final Trip trip;
   final bool isActive;
   final ValueChanged<TripDetailSegment> onOpenTripSegment;
@@ -338,161 +356,334 @@ class _TripCard extends StatelessWidget {
       required this.onOpenTripSegment});
 
   @override
+  State<_TripCard> createState() => _TripCardState();
+}
+
+class _TripCardState extends State<_TripCard> {
+  bool _openingExpenseSheet = false;
+
+  Trip get trip => widget.trip;
+  bool get isActive => widget.isActive;
+
+  @override
+  void initState() {
+    super.initState();
+    // Not preloaded elsewhere on Overview (only the active trip's bookings
+    // are) — the avatar stack needs every shown card's own traveler list,
+    // not just the active one. Idempotent/guarded inside the provider, so a
+    // warm cache (e.g. this trip was already opened in My Trip) is a no-op.
+    context.read<TripSetupProvider>().loadSetup(trip.id, ownerId: trip.ownerId);
+  }
+
+  /// Resolves this trip's shadow split group (auto-provisioning it on first
+  /// use — see SplitsProvider.getOrCreateTripGroup) and this trip's
+  /// traveler list (for the paid-by picker; not preloaded on Overview, so
+  /// this loads it on demand), then opens the shared AddExpenseSheet
+  /// pre-scoped to this trip — no group/trip picker, the user never sees
+  /// "groups" at all.
+  Future<void> _openAddExpense() async {
+    if (_openingExpenseSheet) return;
+    setState(() => _openingExpenseSheet = true);
+
+    final splits = context.read<SplitsProvider>();
+    final tripSetup = context.read<TripSetupProvider>();
+    final messenger = ScaffoldMessenger.of(context);
+
+    try {
+      final results = await Future.wait([
+        splits.getOrCreateTripGroup(
+            tripId: trip.id, tripName: trip.displayName),
+        tripSetup.loadSetup(trip.id, ownerId: trip.ownerId).then((_) => null),
+      ]);
+      final groupId = results[0];
+      if (!mounted) return;
+      if (groupId == null) {
+        messenger.showSnackBar(
+          const SnackBar(
+              content: Text('Could not start this trip\'s expense group')),
+        );
+        return;
+      }
+      await showModalBottomSheet<void>(
+        context: context,
+        backgroundColor: Colors.transparent,
+        isScrollControlled: true,
+        builder: (_) => AddExpenseSheet(
+          groupId: groupId,
+          tripId: trip.id,
+          travelers: tripSetup.travelersFor(trip.id),
+          light: true,
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _openingExpenseSheet = false);
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
     final provider = context.watch<TripProvider>();
     final spent = provider.totalSpent(trip.id);
+    final symbol = currencyFor(trip.currency).symbol;
     final status = BudgetStatus.of(spent: spent, budgetVnd: trip.budgetVnd);
     final fill = (status.pct / 100).clamp(0.0, 1.0);
-    final daysUntil = trip.daysUntilStart;
-    final isPast = daysUntil < 0;
 
     final orderedStops = provider.allStopsOrdered(trip.id, trip.nights + 1);
     final gems = context.watch<GemProvider>().allGems;
+    final travelers = context.watch<TripSetupProvider>().travelersFor(trip.id);
 
+    // Full-bleed: the photo fills the entire card (not just a header strip),
+    // with everything else — badges, title, dates, budget, segment chips —
+    // layered on top of it as separate Stack siblings over _TripHeroPhoto's
+    // own scrim. Buttons/avatars/chips each paint their own opaque
+    // background, so tapping them is consumed there and never falls through
+    // to _TripHeroPhoto's underlying map-tap GestureDetector beneath —
+    // ordinary Stack hit-test behavior (topmost opaque hit wins), not
+    // anything bespoke.
     return Container(
       clipBehavior: Clip.antiAlias,
       decoration: BoxDecoration(
-        color: _kCard,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: _kBorder),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          GestureDetector(
-            // Centered modal (dimmed backdrop, tap-outside/X to dismiss) —
-            // not a routed screen, so this is a showDialog, not a push.
-            onTap: () => showDialog<void>(
-              context: context,
-              barrierColor: Colors.black.withValues(alpha: 0.6),
-              builder: (_) => TripMapDialog(tripId: trip.id),
-            ),
-            child: SizedBox(
-              height: 120,
-              child: Stack(
-                fit: StackFit.expand,
+      child: SizedBox(
+        height: 280,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            _TripHeroPhoto(trip: trip, orderedStops: orderedStops, gems: gems),
+            Positioned(
+              left: 15,
+              right: 15,
+              bottom: 16,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  AppNetworkImage(
-                    url: _heroImageUrl(trip, orderedStops, gems),
-                    fit: BoxFit.cover,
-                    semanticLabel: trip.location,
-                  ),
-                  DecoratedBox(
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
-                        colors: [
-                          Colors.black.withValues(alpha: 0.05),
-                          Colors.black.withValues(alpha: 0.55),
-                        ],
-                      ),
-                    ),
-                  ),
-                  Positioned(
-                    left: 12,
-                    top: 11,
-                    child: _HeroBadge(
-                      label: isPast ? 'PAST TRIP' : 'UPCOMING TRIP',
-                      background: Colors.black.withValues(alpha: 0.72),
-                      foreground: AppTheme.primary,
-                    ),
-                  ),
-                  Positioned(
-                    right: 12,
-                    top: 11,
-                    child: _HeroBadge(
-                      label: isPast
-                          ? '${-daysUntil} days ago'
-                          : '$daysUntil days to go',
-                      background: AppTheme.primary,
-                      foreground: Colors.white,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(15, 14, 15, 16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(trip.displayName,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: GoogleFonts.bebasNeue(fontSize: 22, color: _kInk)),
-                const SizedBox(height: 4),
-                Text(
-                  '${Trip.formatDateRange(trip.startDate, trip.endDate)} · ${trip.nights} ${trip.nights == 1 ? 'night' : 'nights'}',
-                  style: GoogleFonts.dmSans(fontSize: 12, color: _kMute),
-                ),
-                const SizedBox(height: 14),
-                Row(
-                  children: [
-                    Expanded(
-                      child: Text('Budget used',
-                          style: GoogleFonts.dmSans(fontSize: 12, color: _kInk)),
-                    ),
-                    Text(
-                      '₫${Trip.formatVnd(spent, short: true)} ',
-                      style: GoogleFonts.dmSans(
-                          fontSize: 12, fontWeight: FontWeight.w700, color: _kTeal),
-                    ),
-                    Text(
-                      '/ ₫${Trip.formatVnd(trip.budgetVnd, short: true)}',
-                      style: GoogleFonts.dmSans(fontSize: 12, color: _kMute),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 6),
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(3),
-                  child: Stack(
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.center,
                     children: [
-                      Container(
-                        height: 8,
-                        decoration: BoxDecoration(
-                            color: _kCard, border: Border.all(color: _kBorder)),
+                      Expanded(
+                        child: Text(trip.displayName,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: GoogleFonts.bebasNeue(
+                                fontSize: 22, color: Colors.white)),
                       ),
-                      FractionallySizedBox(
-                        widthFactor: fill,
-                        child: Container(height: 8, color: status.accent),
+                      // Solo trip (organizer only) → nothing worth showing here;
+                      // the stack only earns its space once there's an actual
+                      // group. 2+ is the "worth showing" bar.
+                      if (travelers.length > 1) ...[
+                        _TravelerAvatarStack(
+                          travelers: travelers,
+                          onTap: () =>
+                              widget.onOpenTripSegment(TripDetailSegment.trip),
+                        ),
+                        const SizedBox(width: 8),
+                      ],
+                      GestureDetector(
+                        onTap: _openingExpenseSheet ? null : _openAddExpense,
+                        behavior: HitTestBehavior.opaque,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 12, vertical: 8),
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              begin: Alignment.topLeft,
+                              end: Alignment.bottomRight,
+                              colors: [
+                                AppTheme.primary,
+                                Color.lerp(
+                                    AppTheme.primary, Colors.white, 0.2)!,
+                              ],
+                            ),
+                            borderRadius: BorderRadius.circular(20),
+                            boxShadow: [
+                              BoxShadow(
+                                color: AppTheme.primary.withValues(alpha: 0.35),
+                                blurRadius: 12,
+                                offset: const Offset(0, 5),
+                              ),
+                            ],
+                          ),
+                          child: _openingExpenseSheet
+                              ? const SizedBox(
+                                  width: 14,
+                                  height: 14,
+                                  child: CircularProgressIndicator(
+                                      strokeWidth: 2, color: Colors.white),
+                                )
+                              : Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    const Icon(Icons.add,
+                                        size: 14, color: Colors.white),
+                                    const SizedBox(width: 3),
+                                    Text('Expense',
+                                        style: GoogleFonts.fredoka(
+                                            fontSize: 11.5,
+                                            fontWeight: FontWeight.w700,
+                                            color: Colors.white)),
+                                  ],
+                                ),
+                        ),
                       ),
                     ],
                   ),
-                ),
-                if (isActive) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    '${Trip.formatDateRange(trip.startDate, trip.endDate)} · ${trip.nights} ${trip.nights == 1 ? 'night' : 'nights'}',
+                    style: GoogleFonts.fredoka(
+                        fontSize: 12,
+                        color: Colors.white.withValues(alpha: 0.8)),
+                  ),
                   const SizedBox(height: 14),
                   Row(
                     children: [
                       Expanded(
-                          child: _SegmentChip(
-                              icon: Icons.calendar_today_outlined,
-                              label: 'Itinerary',
-                              onTap: () => onOpenTripSegment(
-                                  TripDetailSegment.itinerary))),
-                      const SizedBox(width: 8),
-                      Expanded(
-                          child: _SegmentChip(
-                              icon: Icons.attach_money,
-                              label: 'Dashboard',
-                              onTap: () => onOpenTripSegment(
-                                  TripDetailSegment.dashboard))),
-                      const SizedBox(width: 8),
-                      Expanded(
-                          child: _SegmentChip(
-                              icon: Icons.confirmation_number_outlined,
-                              label: 'Bookings',
-                              onTap: () =>
-                                  onOpenTripSegment(TripDetailSegment.bookings))),
+                        child: Text('Budget used',
+                            style: GoogleFonts.fredoka(
+                                fontSize: 12, color: Colors.white)),
+                      ),
+                      Text(
+                        '$symbol${Trip.formatVnd(spent, short: true)} ',
+                        style: GoogleFonts.fredoka(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                            color: Colors.white),
+                      ),
+                      Text(
+                        '/ $symbol${Trip.formatVnd(trip.budgetVnd, short: true)}',
+                        style: GoogleFonts.fredoka(
+                            fontSize: 12,
+                            color: Colors.white.withValues(alpha: 0.8)),
+                      ),
                     ],
                   ),
+                  const SizedBox(height: 6),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(100),
+                    child: Stack(
+                      children: [
+                        Container(
+                            height: 6,
+                            color: Colors.white.withValues(alpha: 0.25)),
+                        FractionallySizedBox(
+                          widthFactor: fill,
+                          child: Container(
+                            height: 6,
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(100),
+                              gradient: LinearGradient(colors: [
+                                status.accent,
+                                Color.lerp(status.accent, Colors.white, 0.3)!,
+                              ]),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  if (isActive) ...[
+                    const SizedBox(height: 14),
+                    Row(
+                      children: [
+                        Expanded(
+                            child: _SegmentChip(
+                                icon: Icons.calendar_today_outlined,
+                                label: 'Itinerary',
+                                onTap: () => widget.onOpenTripSegment(
+                                    TripDetailSegment.itinerary))),
+                        const SizedBox(width: 8),
+                        Expanded(
+                            child: _SegmentChip(
+                                icon: Icons.attach_money,
+                                label: 'Dashboard',
+                                onTap: () => widget.onOpenTripSegment(
+                                    TripDetailSegment.dashboard))),
+                        const SizedBox(width: 8),
+                        Expanded(
+                            child: _SegmentChip(
+                                icon: Icons.confirmation_number_outlined,
+                                label: 'Bookings',
+                                onTap: () => widget.onOpenTripSegment(
+                                    TripDetailSegment.bookings))),
+                      ],
+                    ),
+                  ],
                 ],
-              ],
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Compact overlapping traveler avatars for the trip card header — up to
+/// [_maxVisible], then a "+N" overflow bubble. Reuses _TravelerAvatar
+/// (trips_tab.dart's Travelers card) at a smaller size rather than a
+/// separate avatar treatment, so the two surfaces can't visually drift.
+/// Tap jumps to the Trip tab's Travelers card — the same
+/// onOpenTripSegment callback this card already uses for its Itinerary/
+/// Dashboard/Bookings chips, so no new navigation surface either.
+class _TravelerAvatarStack extends StatelessWidget {
+  final List<TripTraveler> travelers;
+  final VoidCallback onTap;
+  const _TravelerAvatarStack({required this.travelers, required this.onTap});
+
+  static const _maxVisible = 3;
+  static const _size = 22.0;
+  static const _overlap = 10.0; // each avatar covers this much of the previous
+
+  @override
+  Widget build(BuildContext context) {
+    final shown = travelers.take(_maxVisible).toList();
+    final extra = travelers.length - shown.length;
+    final bubbleCount = shown.length + (extra > 0 ? 1 : 0);
+    final width = _size + (bubbleCount - 1) * (_size - _overlap);
+
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: SizedBox(
+        width: width,
+        height: _size,
+        child: Stack(
+          children: [
+            for (final (i, t) in shown.indexed)
+              Positioned(
+                left: i * (_size - _overlap),
+                child: Container(
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    border: Border.all(color: Colors.white, width: 1.5),
+                  ),
+                  child: _TravelerAvatar(traveler: t, size: _size),
+                ),
+              ),
+            if (extra > 0)
+              Positioned(
+                left: shown.length * (_size - _overlap),
+                child: Container(
+                  width: _size,
+                  height: _size,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.5),
+                    shape: BoxShape.circle,
+                    border: Border.all(color: Colors.white, width: 1.5),
+                  ),
+                  child: Text('+$extra',
+                      style: GoogleFonts.jetBrainsMono(
+                          fontSize: 9,
+                          fontWeight: FontWeight.w700,
+                          color: Colors.white)),
+                ),
+              ),
+          ],
+        ),
       ),
     );
   }
@@ -528,31 +719,48 @@ class _PageDots extends StatelessWidget {
 
 /// Small overlay pill used on the hero photo (top-left "UPCOMING TRIP" tag,
 /// top-right "N days to go" countdown).
+/// Translucent glass pill for a badge layered directly over the hero photo —
+/// blurred so it stays legible over any part of the image, not just a
+/// pre-darkened region.
 class _HeroBadge extends StatelessWidget {
   final String label;
   final Color background;
   final Color foreground;
   const _HeroBadge(
-      {required this.label, required this.background, required this.foreground});
+      {required this.label,
+      required this.background,
+      required this.foreground});
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
-      decoration: BoxDecoration(
-        color: background,
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Text(
-        label,
-        style: GoogleFonts.jetBrainsMono(
-            fontSize: 10, fontWeight: FontWeight.w700, color: foreground, letterSpacing: 0.4),
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(999),
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5.5),
+          decoration: BoxDecoration(
+            color: background,
+            borderRadius: BorderRadius.circular(999),
+            border: Border.all(color: Colors.white.withValues(alpha: 0.3)),
+          ),
+          child: Text(
+            label,
+            style: GoogleFonts.jetBrainsMono(
+                fontSize: 10,
+                fontWeight: FontWeight.w700,
+                color: foreground,
+                letterSpacing: 0.4),
+          ),
+        ),
       ),
     );
   }
 }
 
 /// One of the hero card's three shortcuts into the My Trip tab's segments.
+/// Semi-transparent dark pill (not a light card) — it sits directly over the
+/// full-bleed cover photo, not a separate light section beneath it.
 class _SegmentChip extends StatelessWidget {
   final IconData icon;
   final String label;
@@ -564,19 +772,23 @@ class _SegmentChip extends StatelessWidget {
   Widget build(BuildContext context) {
     return GestureDetector(
       onTap: onTap,
+      behavior: HitTestBehavior.opaque,
       child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 10),
+        padding: const EdgeInsets.symmetric(vertical: 12),
         decoration: BoxDecoration(
-          color: _kStripe,
-          borderRadius: BorderRadius.circular(11),
-          border: Border.all(color: _kBorder),
+          color: Colors.black.withValues(alpha: 0.4),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: Colors.white.withValues(alpha: 0.25)),
         ),
         child: Column(
           children: [
-            Icon(icon, size: 16, color: _kInk),
-            const SizedBox(height: 5),
+            Icon(icon, size: 17, color: Colors.white),
+            const SizedBox(height: 6),
             Text(label,
-                style: GoogleFonts.dmSans(fontSize: 11, fontWeight: FontWeight.w600, color: _kInk)),
+                style: GoogleFonts.fredoka(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.white)),
           ],
         ),
       ),
@@ -590,13 +802,17 @@ class _SegmentChip extends StatelessWidget {
 String _locationSlug(String location) =>
     location.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), '');
 
-/// A real map centered on the trip's destination when it has coordinates
-/// (picked from the setup wizard's place autocomplete), with the itinerary's
-/// stops plotted as a numbered route when any are plottable; the
-/// picsum.photos placeholder otherwise — older trips, free-typed locations,
-/// a missing Mapbox token, and a trip with no plottable stops all fall back
-/// the same way rather than showing a broken/bare image.
+/// The trip's real, user-uploaded cover photo when it has one (set via the
+/// setup wizard's Cover Image field or EditTripSheet); otherwise a real map
+/// centered on the trip's destination when it has coordinates (picked from
+/// the setup wizard's place autocomplete), with the itinerary's stops
+/// plotted as a numbered route when any are plottable; the picsum.photos
+/// placeholder otherwise — older trips, free-typed locations, a missing
+/// Mapbox token, and a trip with no plottable stops all fall back the same
+/// way rather than showing a broken/bare image.
 String _heroImageUrl(Trip trip, List<TripStop> orderedStops, List<Gem> gems) {
+  final cover = trip.coverImageUrl;
+  if (cover != null && cover.isNotEmpty) return cover;
   final lat = trip.locationLat, lng = trip.locationLng;
   if (lat != null && lng != null) {
     final overlay = _routeOverlay(orderedStops, gems);
@@ -613,6 +829,96 @@ String _heroImageUrl(Trip trip, List<TripStop> orderedStops, List<Gem> gems) {
     if (mapUrl != null) return mapUrl;
   }
   return 'https://picsum.photos/seed/${_locationSlug(trip.location)}/800/400';
+}
+
+/// Full-bleed background layer for [_TripCard]: cover photo (or
+/// map-thumbnail/picsum fallback, via [_heroImageUrl]) with a bottom-weighted
+/// scrim and PAST/UPCOMING + day-countdown badges, tapping through to the
+/// full itinerary map ([TripMapDialog]). Fills whatever size its parent
+/// Stack gives it — [_TripCard] is the sole caller (both Overview's carousel
+/// and the My Trip tab's header use [_TripCard] itself, not this directly;
+/// same library, both `part of` profile_screen.dart).
+class _TripHeroPhoto extends StatelessWidget {
+  const _TripHeroPhoto({
+    required this.trip,
+    required this.orderedStops,
+    required this.gems,
+  });
+
+  final Trip trip;
+  final List<TripStop> orderedStops;
+  final List<Gem> gems;
+
+  @override
+  Widget build(BuildContext context) {
+    final daysUntil = trip.daysUntilStart;
+    final isPast = daysUntil < 0;
+
+    return GestureDetector(
+      // Centered modal (dimmed backdrop, tap-outside/X to dismiss) — not a
+      // routed screen, so this is a showDialog, not a push. Safe even for a
+      // brand-new trip with no stops yet: TripMapDialog's own _TripMapView
+      // renders an "No stops planned yet" empty state rather than erroring.
+      onTap: () => showDialog<void>(
+        context: context,
+        barrierColor: Colors.black.withValues(alpha: 0.6),
+        builder: (_) => TripMapDialog(tripId: trip.id),
+      ),
+      child: SizedBox.expand(
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            AppNetworkImage(
+              url: _heroImageUrl(trip, orderedStops, gems),
+              fit: BoxFit.cover,
+              semanticLabel: trip.location,
+            ),
+            // Full-bleed cards carry all their text/buttons over the photo
+            // now, not just a couple of badges over a thin strip — a flat
+            // 0.05→0.55 wash left the lower half (title/budget/segment
+            // chips) too weak against bright photos. Three stops instead of
+            // two: the top stays nearly clear (badges already sit on their
+            // own opaque pills), then darkens steeply from ~40% down so the
+            // whole content zone stays legible regardless of the photo's own
+            // brightness/color.
+            DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  stops: const [0.0, 0.4, 1.0],
+                  colors: [
+                    Colors.black.withValues(alpha: 0.05),
+                    Colors.black.withValues(alpha: 0.45),
+                    Colors.black.withValues(alpha: 0.88),
+                  ],
+                ),
+              ),
+            ),
+            Positioned(
+              left: 12,
+              top: 11,
+              child: _HeroBadge(
+                label: isPast ? 'PAST TRIP' : 'UPCOMING TRIP',
+                background: Colors.black.withValues(alpha: 0.72),
+                foreground: AppTheme.primary,
+              ),
+            ),
+            Positioned(
+              right: 12,
+              top: 11,
+              child: _HeroBadge(
+                label:
+                    isPast ? '${-daysUntil} days ago' : '$daysUntil days to go',
+                background: AppTheme.primary,
+                foreground: Colors.white,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 /// Stops per card before the map switches from one-pin-per-stop to
@@ -690,7 +996,7 @@ class _TripChipCta extends StatelessWidget {
           borderRadius: BorderRadius.circular(10),
         ),
         child: Text(label,
-            style: GoogleFonts.dmSans(
+            style: GoogleFonts.fredoka(
                 fontSize: 13,
                 fontWeight: FontWeight.w700,
                 color: Colors.white)),
@@ -706,9 +1012,30 @@ class _TripChipCta extends StatelessWidget {
 /// tripAlerts, so the head is the most urgent) with a muted "+N more" line for
 /// the remainder. Static in v1 — the stopId/bookingId/category each Alert
 /// carries are future-proofing for deep-links, wired in a later step.
+/// Which My Trip segment an alert's CTA jumps to — every kind maps to the
+/// segment that actually resolves it (a booking gap → Bookings, an overrun
+/// category → Dashboard's category breakdown, a booking coming due →
+/// Bookings again).
+TripDetailSegment _alertSegment(AlertKind k) => switch (k) {
+      AlertKind.unbookedStop => TripDetailSegment.bookings,
+      AlertKind.overBudgetCategory => TripDetailSegment.dashboard,
+      AlertKind.upcomingBooking => TripDetailSegment.bookings,
+    };
+
+String _alertCta(AlertKind k) => switch (k) {
+      AlertKind.unbookedStop => 'Book now',
+      AlertKind.overBudgetCategory => 'Review',
+      AlertKind.upcomingBooking => 'View',
+    };
+
 class _AlertsCard extends StatelessWidget {
   final List<Alert> alerts;
-  const _AlertsCard({required this.alerts});
+  final String symbol;
+  final ValueChanged<TripDetailSegment> onOpenTripSegment;
+  const _AlertsCard(
+      {required this.alerts,
+      required this.symbol,
+      required this.onOpenTripSegment});
 
   static const int _kAlertCap = 4;
 
@@ -722,33 +1049,18 @@ class _AlertsCard extends StatelessWidget {
         Text('Needs attention',
             style: GoogleFonts.bebasNeue(fontSize: 18, color: _kInk)),
         const SizedBox(height: 10),
-        Container(
-          decoration: BoxDecoration(
-            color: _kCard,
-            borderRadius: BorderRadius.circular(16),
-            border: const Border(
-              top: BorderSide(color: _kBorder),
-              right: BorderSide(color: _kBorder),
-              bottom: BorderSide(color: _kBorder),
-              left: BorderSide(color: _kCritical, width: 3),
-            ),
+        for (final a in shown) ...[
+          _AlertRow(
+              alert: a, symbol: symbol, onOpenTripSegment: onOpenTripSegment),
+          const SizedBox(height: 10),
+        ],
+        if (extra > 0)
+          Padding(
+            padding: const EdgeInsets.only(left: 4),
+            child: Text('+$extra more',
+                style: GoogleFonts.jetBrainsMono(
+                    fontSize: 11, color: _kMute, letterSpacing: 0.5)),
           ),
-          padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 4),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              ...shown.asMap().entries.map(
-                  (e) => _AlertRow(alert: e.value, divider: e.key > 0)),
-              if (extra > 0)
-                Padding(
-                  padding: const EdgeInsets.only(top: 4, bottom: 12),
-                  child: Text('+$extra more',
-                      style: GoogleFonts.jetBrainsMono(
-                          fontSize: 11, color: _kMute, letterSpacing: 0.5)),
-                ),
-            ],
-          ),
-        ),
       ],
     );
   }
@@ -756,28 +1068,33 @@ class _AlertsCard extends StatelessWidget {
 
 class _AlertRow extends StatelessWidget {
   final Alert alert;
-  final bool divider;
-  const _AlertRow({required this.alert, required this.divider});
+  final String symbol;
+  final ValueChanged<TripDetailSegment> onOpenTripSegment;
+  const _AlertRow(
+      {required this.alert,
+      required this.symbol,
+      required this.onOpenTripSegment});
 
   @override
   Widget build(BuildContext context) {
     final accent = _alertAccent(alert.severity);
-    final copy = _alertCopy(alert);
+    final copy = _alertCopy(alert, symbol);
     return Container(
-      padding: const EdgeInsets.symmetric(vertical: 12),
+      padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        border:
-            divider ? const Border(top: BorderSide(color: _kBorder)) : null,
+        color: accent.withValues(alpha: 0.09),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: accent.withValues(alpha: 0.28)),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Container(
-            width: 32,
-            height: 32,
+            width: 34,
+            height: 34,
             decoration: BoxDecoration(
-              color: accent.withValues(alpha: 0.12),
-              borderRadius: BorderRadius.circular(9),
+              color: accent.withValues(alpha: 0.16),
+              borderRadius: BorderRadius.circular(11),
             ),
             child: Icon(_alertIcon(alert.kind), size: 17, color: accent),
           ),
@@ -787,14 +1104,32 @@ class _AlertRow extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(copy.title,
-                    style: GoogleFonts.dmSans(
+                    style: GoogleFonts.fredoka(
                         fontSize: 14,
                         fontWeight: FontWeight.w800,
                         color: _kInk)),
                 const SizedBox(height: 2),
                 Text(copy.body,
-                    style: GoogleFonts.dmSans(
+                    style: GoogleFonts.fredoka(
                         fontSize: 12.5, color: _kMute, height: 1.35)),
+                const SizedBox(height: 10),
+                GestureDetector(
+                  onTap: () => onOpenTripSegment(_alertSegment(alert.kind)),
+                  child: Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                    decoration: BoxDecoration(
+                      color: _kPage,
+                      borderRadius: BorderRadius.circular(999),
+                      border: Border.all(color: accent.withValues(alpha: 0.45)),
+                    ),
+                    child: Text(_alertCta(alert.kind),
+                        style: GoogleFonts.fredoka(
+                            fontSize: 11.5,
+                            fontWeight: FontWeight.w700,
+                            color: accent)),
+                  ),
+                ),
               ],
             ),
           ),
@@ -820,14 +1155,14 @@ IconData _alertIcon(AlertKind k) => switch (k) {
 
 /// The copy layer. Lives HERE (UI), never in trip_insights — the pure layer
 /// stays string-free and emits structured payloads this formatter interpolates.
-({String title, String body}) _alertCopy(Alert a) {
+({String title, String body}) _alertCopy(Alert a, String symbol) {
   switch (a.kind) {
     case AlertKind.unbookedStop:
       final price = a.payload['priceVnd'] ?? 0;
       return (
         title: 'Nothing booked yet',
         body: price > 0
-            ? '₫${Trip.formatVnd(price, short: true)} planned — no booking against it.'
+            ? '$symbol${Trip.formatVnd(price, short: true)} planned — no booking against it.'
             : 'A planned stop has no booking yet.',
       );
     case AlertKind.overBudgetCategory:
@@ -837,9 +1172,9 @@ IconData _alertIcon(AlertKind k) => switch (k) {
       final cat = _capitalize(a.category);
       return (
         title: '$cat over budget',
-        body: '₫${Trip.formatVnd(actual, short: true)} of '
-            '₫${Trip.formatVnd(planned, short: true)} · '
-            '₫${Trip.formatVnd(over, short: true)} over.',
+        body: '$symbol${Trip.formatVnd(actual, short: true)} of '
+            '$symbol${Trip.formatVnd(planned, short: true)} · '
+            '$symbol${Trip.formatVnd(over, short: true)} over.',
       );
     case AlertKind.upcomingBooking:
       // Severity encodes to_book (critical) vs booked/paid (info) at the
@@ -870,7 +1205,9 @@ String _capitalize(String? s) {
 class _PaceCard extends StatelessWidget {
   final TripPace pace;
   final int budgetVnd;
-  const _PaceCard({required this.pace, required this.budgetVnd});
+  final String symbol;
+  const _PaceCard(
+      {required this.pace, required this.budgetVnd, required this.symbol});
 
   @override
   Widget build(BuildContext context) {
@@ -894,14 +1231,14 @@ class _PaceCard extends StatelessWidget {
           _headline("Trip hasn't started", _kInk),
           const SizedBox(height: 4),
           _mono(
-              'Day 0 of ${pace.tripDays} · ₫${Trip.formatVnd(budgetVnd, short: true)} planned'),
+              'Day 0 of ${pace.tripDays} · $symbol${Trip.formatVnd(budgetVnd, short: true)} planned'),
         ];
       case PaceStatus.noBudget:
         return [
           _headline('No budget set', _kInk),
           const SizedBox(height: 4),
           _mono(
-              '₫${Trip.formatVnd(pace.cumulativeActual, short: true)} committed so far'),
+              '$symbol${Trip.formatVnd(pace.cumulativeActual, short: true)} committed so far'),
         ];
       case PaceStatus.underPace:
       case PaceStatus.onPace:
@@ -919,22 +1256,24 @@ class _PaceCard extends StatelessWidget {
     };
     final deltaText = switch (pace.status) {
       PaceStatus.overPace =>
-        '₫${Trip.formatVnd(pace.delta, short: true)} over pace',
+        '$symbol${Trip.formatVnd(pace.delta, short: true)} over pace',
       PaceStatus.underPace =>
-        '₫${Trip.formatVnd(pace.delta.abs(), short: true)} under pace',
+        '$symbol${Trip.formatVnd(pace.delta.abs(), short: true)} under pace',
       _ => 'On pace',
     };
-    final actualFill =
-        budgetVnd > 0 ? (pace.cumulativeActual / budgetVnd).clamp(0.0, 1.0) : 0.0;
-    final expectedFill =
-        budgetVnd > 0 ? (pace.expectedByToday / budgetVnd).clamp(0.0, 1.0) : 0.0;
+    final actualFill = budgetVnd > 0
+        ? (pace.cumulativeActual / budgetVnd).clamp(0.0, 1.0)
+        : 0.0;
+    final expectedFill = budgetVnd > 0
+        ? (pace.expectedByToday / budgetVnd).clamp(0.0, 1.0)
+        : 0.0;
     return [
       Row(
         children: [
           Expanded(
               child: _mono('Day ${pace.tripDayToday} of ${pace.tripDays}')),
           Text(deltaText,
-              style: GoogleFonts.dmSans(
+              style: GoogleFonts.fredoka(
                   fontSize: 13, fontWeight: FontWeight.w800, color: accent)),
         ],
       ),
@@ -980,11 +1319,10 @@ class _PaceCard extends StatelessWidget {
   }
 
   Widget _headline(String t, Color c) => Text(t,
-      style: GoogleFonts.dmSans(
+      style: GoogleFonts.fredoka(
           fontSize: 15, fontWeight: FontWeight.w800, color: c));
 
   Widget _mono(String t) => Text(t,
       style: GoogleFonts.jetBrainsMono(
           fontSize: 11, color: _kMute, letterSpacing: 0.3));
 }
-

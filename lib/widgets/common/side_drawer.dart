@@ -31,12 +31,12 @@ class SideDrawer extends StatelessWidget {
     showDialog(
       context: context,
       builder: (dialogCtx) => AlertDialog(
-        backgroundColor: AppTheme.surface,
+        backgroundColor: AppTheme.lightCard,
         title: Text('Sign Out',
             style: GoogleFonts.bebasNeue(
-                fontSize: 22, color: AppTheme.textPrimary)),
+                fontSize: 22, color: AppTheme.lightInk)),
         content: Text('Are you sure you want to sign out?',
-            style: GoogleFonts.dmSans(color: AppTheme.textSecondary)),
+            style: GoogleFonts.fredoka(color: AppTheme.lightMute)),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(dialogCtx),
@@ -69,7 +69,7 @@ class SideDrawer extends StatelessWidget {
     return SizedBox(
       width: width,
       child: Drawer(
-        backgroundColor: AppTheme.bg,
+        backgroundColor: AppTheme.lightSurface,
         shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.horizontal(right: Radius.circular(24)),
         ),
@@ -148,7 +148,7 @@ class SideDrawer extends StatelessWidget {
                             children: [
                               Text(
                                 'View Profile',
-                                style: GoogleFonts.dmSans(
+                                style: GoogleFonts.fredoka(
                                   fontSize: 13,
                                   fontWeight: FontWeight.w700,
                                   color: AppTheme.primary,
@@ -283,7 +283,7 @@ class SideDrawer extends StatelessWidget {
                           const SizedBox(width: 8),
                           Text(
                             'Sign Out',
-                            style: GoogleFonts.dmSans(
+                            style: GoogleFonts.fredoka(
                               fontSize: 15,
                               fontWeight: FontWeight.w700,
                               color: const Color(0xFFFF6B6B),
@@ -359,7 +359,7 @@ class _Avatar extends StatelessWidget {
   Widget _initialsLabel(String initials) => Center(
         child: Text(
           initials,
-          style: GoogleFonts.dmSans(
+          style: GoogleFonts.fredoka(
             fontSize: 22,
             fontWeight: FontWeight.w800,
             color: Colors.white,
@@ -387,9 +387,9 @@ class _NavCard extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(vertical: 18, horizontal: 14),
         decoration: BoxDecoration(
-          color: AppTheme.surface,
+          color: AppTheme.lightCard,
           borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: AppTheme.divider),
+          border: Border.all(color: AppTheme.lightBorder),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -406,10 +406,10 @@ class _NavCard extends StatelessWidget {
             const SizedBox(height: 12),
             Text(
               label,
-              style: GoogleFonts.dmSans(
+              style: GoogleFonts.fredoka(
                 fontSize: 14,
                 fontWeight: FontWeight.w700,
-                color: AppTheme.textPrimary,
+                color: AppTheme.lightInk,
               ),
             ),
           ],
@@ -437,7 +437,7 @@ class _AccountTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final fg = enabled ? AppTheme.textPrimary : const Color(0xFF6A6A6A);
+    final fg = enabled ? AppTheme.lightInk : const Color(0xFFB0B0B0);
     return GestureDetector(
       onTap: enabled ? onTap : null,
       behavior: HitTestBehavior.opaque,
@@ -449,9 +449,9 @@ class _AccountTile extends StatelessWidget {
               width: 40,
               height: 40,
               decoration: BoxDecoration(
-                color: AppTheme.surface,
+                color: AppTheme.lightCard,
                 borderRadius: BorderRadius.circular(11),
-                border: Border.all(color: AppTheme.divider),
+                border: Border.all(color: AppTheme.lightBorder),
               ),
               child: Icon(icon, size: 20, color: fg),
             ),
@@ -464,7 +464,7 @@ class _AccountTile extends StatelessWidget {
                     children: [
                       Text(
                         title,
-                        style: GoogleFonts.dmSans(
+                        style: GoogleFonts.fredoka(
                           fontSize: 15,
                           fontWeight: FontWeight.w700,
                           color: fg,
@@ -478,7 +478,7 @@ class _AccountTile extends StatelessWidget {
                           decoration: BoxDecoration(
                             color: badge == 'PRO'
                                 ? AppTheme.primary.withValues(alpha: 0.16)
-                                : Colors.white.withValues(alpha: 0.08),
+                                : AppTheme.lightBorder,
                             borderRadius: BorderRadius.circular(6),
                           ),
                           child: Text(
@@ -488,7 +488,7 @@ class _AccountTile extends StatelessWidget {
                               fontWeight: FontWeight.w700,
                               color: badge == 'PRO'
                                   ? AppTheme.primary
-                                  : const Color(0xFF999999),
+                                  : const Color(0xFF8A8A8A),
                               letterSpacing: 0.5,
                             ),
                           ),
@@ -499,7 +499,7 @@ class _AccountTile extends StatelessWidget {
                   const SizedBox(height: 2),
                   Text(
                     subtitle,
-                    style: GoogleFonts.dmSans(
+                    style: GoogleFonts.fredoka(
                       fontSize: 12,
                       color: const Color(0xFF8A8A8A),
                     ),

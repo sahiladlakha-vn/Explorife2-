@@ -49,7 +49,7 @@ class _SettingsTab extends StatelessWidget {
                 const Icon(Icons.logout, size: 18, color: Colors.red),
                 const SizedBox(width: 8),
                 Text('Sign Out',
-                    style: GoogleFonts.dmSans(
+                    style: GoogleFonts.fredoka(
                         fontSize: 15,
                         fontWeight: FontWeight.w700,
                         color: Colors.red)),
@@ -76,7 +76,7 @@ class _SettingsTab extends StatelessWidget {
             const SizedBox(width: 14),
             Expanded(
               child: Text(label,
-                  style: GoogleFonts.dmSans(
+                  style: GoogleFonts.fredoka(
                       fontSize: 15, fontWeight: FontWeight.w600, color: _kInk)),
             ),
             const Icon(Icons.chevron_right, size: 20, color: _kMute),
@@ -191,24 +191,24 @@ class _EditProfileSheetState extends State<_EditProfileSheet> {
                     const SizedBox(height: 16),
                     TextField(
                       controller: _nameCtrl,
-                      style: GoogleFonts.dmSans(fontSize: 14, color: _kInk),
+                      style: GoogleFonts.fredoka(fontSize: 14, color: _kInk),
                       decoration: _lightFieldDecoration('Display name'),
                     ),
                     const SizedBox(height: 12),
                     TextField(
                       controller: _usernameCtrl,
-                      style: GoogleFonts.dmSans(fontSize: 14, color: _kInk),
+                      style: GoogleFonts.fredoka(fontSize: 14, color: _kInk),
                       decoration:
                           _lightFieldDecoration('Username (e.g. sahil_j)'),
                     ),
                     const SizedBox(height: 6),
                     Text(
                         "This is how other travelers find you when they add you to a trip.",
-                        style: GoogleFonts.dmSans(fontSize: 11.5, color: _kMute)),
+                        style: GoogleFonts.fredoka(fontSize: 11.5, color: _kMute)),
                     if (_error != null) ...[
                       const SizedBox(height: 10),
                       Text(_error!,
-                          style: GoogleFonts.dmSans(
+                          style: GoogleFonts.fredoka(
                               fontSize: 12.5, color: _kCritical)),
                     ],
                     const SizedBox(height: 20),
@@ -225,7 +225,7 @@ class _EditProfileSheetState extends State<_EditProfileSheet> {
                                   strokeWidth: 2, color: Colors.white),
                             )
                           : Text('Save',
-                              style: GoogleFonts.dmSans(
+                              style: GoogleFonts.fredoka(
                                   fontSize: 15,
                                   fontWeight: FontWeight.w700,
                                   color: Colors.white)),

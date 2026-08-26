@@ -81,7 +81,7 @@ class _BadgeTile extends StatelessWidget {
             badge.def.label,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: GoogleFonts.dmSans(
+            style: GoogleFonts.fredoka(
               fontSize: 13,
               fontWeight: FontWeight.w800,
               color: earned ? _kInk : _kMute,

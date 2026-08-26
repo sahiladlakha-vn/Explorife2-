@@ -1,6 +1,7 @@
 // Widget tests for the reusable [NavItem]. Scope is deliberately narrow:
-//   1. selected rendering — orange icon sitting inside the warm pill;
-//   2. resting rendering — gray icon, no pill (transparent);
+//   1. selected rendering — white (inverted) icon inside a solid, glowing
+//      orange circle;
+//   2. resting rendering — muted icon, transparent circle, no glow;
 //   3. onTap fires its callback.
 // Animation timing/curve is NOT under test — only the end-state styling that
 // `isSelected` drives.
@@ -23,29 +24,30 @@ Widget _host({required bool isSelected, VoidCallback? onTap}) => MaterialApp(
     );
 
 void main() {
-  testWidgets('selected: orange icon inside the warm pill', (tester) async {
+  testWidgets('selected: white icon inside a glowing orange circle',
+      (tester) async {
     await tester.pumpWidget(_host(isSelected: true));
 
     final icon = tester.widget<Icon>(find.byType(Icon));
-    expect(icon.color, AppTheme.primary);
+    expect(icon.color, Colors.white);
 
-    final pill = tester.widget<AnimatedContainer>(find.byType(AnimatedContainer));
-    final decoration = pill.decoration as BoxDecoration;
-    expect(
-      decoration.color,
-      AppTheme.primary.withValues(alpha: AppTheme.navPillOpacity),
-    );
+    final circle = tester.widget<AnimatedContainer>(find.byType(AnimatedContainer));
+    final decoration = circle.decoration as BoxDecoration;
+    expect(decoration.color, AppTheme.primary);
+    expect(decoration.boxShadow, isNotNull);
+    expect(decoration.boxShadow, isNotEmpty);
   });
 
-  testWidgets('resting: gray icon, no pill', (tester) async {
+  testWidgets('resting: muted icon, transparent circle, no glow', (tester) async {
     await tester.pumpWidget(_host(isSelected: false));
 
     final icon = tester.widget<Icon>(find.byType(Icon));
-    expect(icon.color, AppTheme.textSecondary);
+    expect(icon.color, AppTheme.lightMute);
 
-    final pill = tester.widget<AnimatedContainer>(find.byType(AnimatedContainer));
-    final decoration = pill.decoration as BoxDecoration;
+    final circle = tester.widget<AnimatedContainer>(find.byType(AnimatedContainer));
+    final decoration = circle.decoration as BoxDecoration;
     expect(decoration.color, Colors.transparent);
+    expect(decoration.boxShadow, isNull);
   });
 
   testWidgets('tap fires the callback once', (tester) async {

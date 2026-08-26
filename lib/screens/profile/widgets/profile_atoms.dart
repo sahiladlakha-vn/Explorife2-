@@ -86,7 +86,7 @@ class _StoryRow extends StatelessWidget {
                     story.title,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: GoogleFonts.dmSans(
+                    style: GoogleFonts.fredoka(
                         fontSize: 16, fontWeight: FontWeight.w800, color: _kInk),
                   ),
                   const SizedBox(height: 3),
@@ -159,7 +159,7 @@ class _EmptyState extends StatelessWidget {
             const SizedBox(height: 6),
             Text(subtitle,
                 textAlign: TextAlign.center,
-                style: GoogleFonts.dmSans(
+                style: GoogleFonts.fredoka(
                     fontSize: 14, color: _kMute, height: 1.5)),
             if (cta != null) ...[
               const SizedBox(height: 20),
@@ -173,7 +173,7 @@ class _EmptyState extends StatelessWidget {
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: Text(cta!,
-                      style: GoogleFonts.dmSans(
+                      style: GoogleFonts.fredoka(
                           fontSize: 14,
                           fontWeight: FontWeight.w700,
                           color: Colors.white)),
@@ -191,7 +191,7 @@ class _SignInPrompt extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppTheme.bg,
+      backgroundColor: AppTheme.lightSurface,
       body: Center(
         child: Padding(
           padding: const EdgeInsets.all(32),
@@ -203,14 +203,14 @@ class _SignInPrompt extends StatelessWidget {
               Text('JOIN THE TRIBE',
                   style: GoogleFonts.bebasNeue(
                       fontSize: 32,
-                      color: AppTheme.textPrimary,
+                      color: AppTheme.lightInk,
                       letterSpacing: 1)),
               const SizedBox(height: 8),
               Text(
                 'Sign in to access your profile, save gems, track hikes, and connect with fellow adventurers.',
                 textAlign: TextAlign.center,
-                style: GoogleFonts.dmSans(
-                    fontSize: 14, color: AppTheme.textSecondary, height: 1.6),
+                style: GoogleFonts.fredoka(
+                    fontSize: 14, color: AppTheme.lightMute, height: 1.6),
               ),
               const SizedBox(height: 32),
               SizedBox(

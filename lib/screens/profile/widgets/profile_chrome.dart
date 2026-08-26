@@ -2,6 +2,45 @@ part of '../profile_screen.dart';
 
 // Fixed chrome above the tab body: header, avatar, stats bar, tab bar.
 
+/// Two soft accent blobs behind the header/stats block — pure decoration,
+/// giving the glass stats bar something colourful to actually reveal (a
+/// blur over a flat fill just looks like a flat fill). Cheap: a RadialGradient
+/// already fades to nothing on its own, no BackdropFilter needed here.
+class _ChromeGlow extends StatelessWidget {
+  const _ChromeGlow();
+
+  @override
+  Widget build(BuildContext context) {
+    return Positioned.fill(
+      child: Stack(
+        children: [
+          Positioned(
+            left: -50,
+            top: -70,
+            child: _blob(220, AppTheme.primary),
+          ),
+          Positioned(
+            right: -60,
+            top: -80,
+            child: _blob(210, _kGreen),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _blob(double size, Color color) => Container(
+        width: size,
+        height: size,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          gradient: RadialGradient(
+            colors: [color.withValues(alpha: 0.28), color.withValues(alpha: 0)],
+          ),
+        ),
+      );
+}
+
 // ─────────────────────────────────────────
 // HEADER
 // ─────────────────────────────────────────
@@ -28,108 +67,129 @@ class _Header extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      decoration: const BoxDecoration(
-        color: AppTheme.lightSurface,
-        border: Border(bottom: BorderSide(color: AppTheme.lightBorder)),
-      ),
-      child: SafeArea(
-        bottom: false,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 10, 12, 14),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  GestureDetector(
-                    onTap: onMenu,
-                    child: SizedBox(
-                      width: 34,
-                      height: 34,
-                      child: Icon(Icons.menu,
-                          color: AppTheme.lightInk.withValues(alpha: 0.9)),
-                    ),
-                  ),
-                  const Spacer(),
-                  GestureDetector(
-                    onTap: onSettings,
-                    child: SizedBox(
-                      width: 34,
-                      height: 34,
-                      child: Icon(Icons.settings_outlined,
-                          size: 20,
-                          color: AppTheme.lightInk.withValues(alpha: 0.8)),
-                    ),
-                  ),
-                  GestureDetector(
-                    onTap: onSignOut,
-                    child: const SizedBox(
-                      width: 34,
-                      height: 34,
-                      child: Icon(Icons.logout,
-                          size: 19, color: Color(0xFFFF6B6B)),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 10),
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: [
-                  _Avatar(user: user),
-                  const SizedBox(width: 13),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            Flexible(
-                              child: Text(
-                                user.name,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: GoogleFonts.bebasNeue(
-                                  fontSize: 22,
-                                  color: AppTheme.lightInk,
-                                  letterSpacing: 0.3,
-                                  height: 1,
-                                ),
+    return SafeArea(
+      bottom: false,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 10, 12, 14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                _GlassIconButton(icon: Icons.menu, onTap: onMenu),
+                const Spacer(),
+                _GlassIconButton(icon: Icons.settings_outlined, onTap: onSettings),
+                const SizedBox(width: 8),
+                _GlassIconButton(
+                  icon: Icons.logout,
+                  iconColor: const Color(0xFFFF6B6B),
+                  onTap: onSignOut,
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                _Avatar(user: user),
+                const SizedBox(width: 13),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Flexible(
+                            child: Text(
+                              user.name,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: GoogleFonts.bebasNeue(
+                                fontSize: 22,
+                                color: AppTheme.lightInk,
+                                letterSpacing: 0.3,
+                                height: 1,
                               ),
                             ),
-                            const SizedBox(width: 7),
-                            Icon(Icons.edit_outlined,
-                                size: 14,
-                                color: AppTheme.lightInk.withValues(alpha: 0.55)),
-                          ],
-                        ),
-                        const SizedBox(height: 3),
-                        Text(
-                          _handle,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: GoogleFonts.jetBrainsMono(
-                            fontSize: 12,
-                            color: AppTheme.lightInk.withValues(alpha: 0.55),
                           ),
-                        ),
-                        if (memberSince != null) ...[
-                          const SizedBox(height: 5),
-                          Text(
-                            memberSince!,
-                            style: GoogleFonts.jetBrainsMono(
-                              fontSize: 10.5,
-                              color: AppTheme.lightInk.withValues(alpha: 0.4),
+                          const SizedBox(width: 7),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 8, vertical: 3),
+                            decoration: BoxDecoration(
+                              color: AppTheme.primary.withValues(alpha: 0.13),
+                              border: Border.all(
+                                  color: AppTheme.primary.withValues(alpha: 0.3)),
+                              borderRadius: BorderRadius.circular(999),
                             ),
+                            child: Text('MEMBER',
+                                style: GoogleFonts.jetBrainsMono(
+                                    fontSize: 9,
+                                    fontWeight: FontWeight.w700,
+                                    letterSpacing: 0.6,
+                                    color: AppTheme.primary)),
                           ),
                         ],
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        _handle,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: GoogleFonts.jetBrainsMono(
+                          fontSize: 12,
+                          color: AppTheme.lightInk.withValues(alpha: 0.55),
+                        ),
+                      ),
+                      if (memberSince != null) ...[
+                        const SizedBox(height: 5),
+                        Text(
+                          memberSince!,
+                          style: GoogleFonts.jetBrainsMono(
+                            fontSize: 10.5,
+                            color: AppTheme.lightInk.withValues(alpha: 0.4),
+                          ),
+                        ),
                       ],
-                    ),
+                    ],
                   ),
-                ],
-              ),
-            ],
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Small circular glass button — translucent blurred fill, matching the
+/// stats bar's glass language. Used for the header's menu/settings/sign-out
+/// actions in place of bare icons.
+class _GlassIconButton extends StatelessWidget {
+  final IconData icon;
+  final VoidCallback onTap;
+  final Color? iconColor;
+  const _GlassIconButton({required this.icon, required this.onTap, this.iconColor});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(19),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+          child: Container(
+            width: 38,
+            height: 38,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.5),
+              shape: BoxShape.circle,
+              border: Border.all(color: Colors.white.withValues(alpha: 0.7)),
+            ),
+            child: Icon(icon, size: 18, color: iconColor ?? AppTheme.lightInk),
           ),
         ),
       ),
@@ -147,26 +207,43 @@ class _Avatar extends StatelessWidget {
       width: 58,
       height: 58,
       child: Stack(
+        clipBehavior: Clip.none,
         children: [
           Container(
             width: 58,
             height: 58,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              border: Border.all(color: const Color(0xFF6B4A2F), width: 2),
+              border: Border.all(color: AppTheme.lightSurface, width: 2.5),
+              boxShadow: [
+                BoxShadow(
+                  color: AppTheme.primary.withValues(alpha: 0.35),
+                  blurRadius: 14,
+                  offset: const Offset(0, 6),
+                ),
+              ],
             ),
             clipBehavior: Clip.antiAlias,
             child: user.avatarUrl != null
                 ? Image.network(user.avatarUrl!, fit: BoxFit.cover)
                 : Container(
-                    color: AppTheme.primary.withValues(alpha: 0.2),
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                        colors: [
+                          AppTheme.primary,
+                          Color.lerp(AppTheme.primary, Colors.white, 0.35)!,
+                        ],
+                      ),
+                    ),
                     child: Center(
                       child: Text(
                         user.name.isNotEmpty
                             ? user.name[0].toUpperCase()
                             : 'E',
                         style: GoogleFonts.bebasNeue(
-                            fontSize: 24, color: AppTheme.primary),
+                            fontSize: 24, color: Colors.white),
                       ),
                     ),
                   ),
@@ -211,24 +288,39 @@ class _StatsBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      color: _kStripe,
-      child: Row(
-        children: [
-          _cell('$trips', 'TRIPS', _kInk),
-          _divider(),
-          _cell('$gems', 'SAVED', AppTheme.primary),
-          _divider(),
-          _cell(loading ? '··' : '\$${spent.toStringAsFixed(0)}', 'SPLIT SPEND',
-              _kTeal),
-          _divider(),
-          _cell(alerts == null ? '–' : '$alerts', 'ALERTS', _kInk),
-        ],
+    final hasAlerts = alerts != null && alerts! > 0;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(22),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 22, sigmaY: 22),
+          child: Container(
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.4),
+              borderRadius: BorderRadius.circular(22),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.65)),
+            ),
+            child: Row(
+              children: [
+                _cell('$trips', 'TRIPS', _kInk),
+                _divider(),
+                _cell('$gems', 'SAVED', AppTheme.primary),
+                _divider(),
+                _cell(loading ? '··' : '\$${spent.toStringAsFixed(0)}',
+                    'SPLIT SPEND', _kTeal),
+                _divider(),
+                _cell(alerts == null ? '–' : '$alerts', 'ALERTS',
+                    hasAlerts ? _kWarn : _kInk),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }
 
-  Widget _divider() => Container(width: 1, height: 44, color: _kBorder);
+  Widget _divider() => Container(width: 1, height: 40, color: _kBorder.withValues(alpha: 0.7));
 
   Widget _cell(String value, String label, Color color) {
     return Expanded(
@@ -253,6 +345,9 @@ class _StatsBar extends StatelessWidget {
 // ─────────────────────────────────────────
 // TAB BAR
 // ─────────────────────────────────────────
+/// Floating segmented control — one pill background, a single sliding
+/// highlight behind whichever tab is active (AnimatedPositioned, driven by
+/// [active]'s index), rather than N independently-coloured chips.
 class _TabBar extends StatelessWidget {
   final List<String> tabs;
   final int active;
@@ -262,42 +357,78 @@ class _TabBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      decoration: const BoxDecoration(
-        color: _kStripe,
-        border: Border(bottom: BorderSide(color: _kBorder)),
-      ),
-      padding: const EdgeInsets.symmetric(vertical: 11),
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 16),
-        child: Row(
-          children: tabs.asMap().entries.map((e) {
-            final i = e.key;
-            final isActive = i == active;
-            return GestureDetector(
-              onTap: () => onSelect(i),
-              behavior: HitTestBehavior.opaque,
-              child: Container(
-                margin: const EdgeInsets.only(right: 8),
-                padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 9),
-                decoration: BoxDecoration(
-                  color: isActive ? AppTheme.primary : Colors.white,
-                  borderRadius: BorderRadius.circular(999),
-                  border: Border.all(
-                      color: isActive ? AppTheme.primary : _kBorder),
-                ),
-                child: Text(
-                  e.value,
-                  style: GoogleFonts.dmSans(
-                    fontSize: 13,
-                    fontWeight: isActive ? FontWeight.w700 : FontWeight.w500,
-                    color: isActive ? Colors.white : _kMute,
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
+      child: Container(
+        padding: const EdgeInsets.all(4),
+        decoration: BoxDecoration(
+          color: _kStripe,
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(color: _kBorder),
+        ),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final tabW = constraints.maxWidth / tabs.length;
+            return Stack(
+              children: [
+                AnimatedPositioned(
+                  duration: const Duration(milliseconds: 280),
+                  curve: Curves.easeOutCubic,
+                  left: tabW * active,
+                  top: 0,
+                  bottom: 0,
+                  width: tabW,
+                  child: Container(
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(999),
+                      gradient: LinearGradient(
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                        colors: [
+                          AppTheme.primary,
+                          Color.lerp(AppTheme.primary, Colors.white, 0.18)!,
+                        ],
+                      ),
+                      boxShadow: [
+                        BoxShadow(
+                          color: AppTheme.primary.withValues(alpha: 0.4),
+                          blurRadius: 14,
+                          offset: const Offset(0, 5),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
-              ),
+                Row(
+                  children: tabs.asMap().entries.map((e) {
+                    final i = e.key;
+                    final isActive = i == active;
+                    return Expanded(
+                      child: GestureDetector(
+                        onTap: () => onSelect(i),
+                        behavior: HitTestBehavior.opaque,
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 9),
+                          child: Text(
+                            e.value,
+                            textAlign: TextAlign.center,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: GoogleFonts.fredoka(
+                              fontSize: 12.5,
+                              fontWeight:
+                                  isActive ? FontWeight.w700 : FontWeight.w500,
+                              color: isActive ? Colors.white : _kMute,
+                            ),
+                          ),
+                        ),
+                      ),
+                    );
+                  }).toList(),
+                ),
+              ],
             );
-          }).toList(),
+          },
         ),
       ),
     );

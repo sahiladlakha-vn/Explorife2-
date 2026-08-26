@@ -55,7 +55,7 @@ class _SavedGemCard extends StatelessWidget {
     final photo = gem.photoUrl;
     final hasPhoto = photo != null && photo.isNotEmpty;
     return GestureDetector(
-      onTap: () => context.go('/gems/${gem.id}'),
+      onTap: () => context.push('/gems/${gem.id}'),
       child: ClipRRect(
         borderRadius: BorderRadius.circular(14),
         child: Stack(
@@ -90,7 +90,7 @@ class _SavedGemCard extends StatelessWidget {
                 gem.gemName,
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
-                style: GoogleFonts.dmSans(
+                style: GoogleFonts.fredoka(
                     color: Colors.white,
                     fontWeight: FontWeight.w700,
                     fontSize: 13),
@@ -108,8 +108,8 @@ class _SavedGemCard extends StatelessWidget {
                     color: Colors.black.withValues(alpha: 0.45),
                     shape: BoxShape.circle,
                   ),
-                  child: const Icon(Icons.favorite,
-                      size: 18, color: Colors.white),
+                  child:
+                      const Icon(Icons.favorite, size: 18, color: Colors.white),
                 ),
               ),
             ),

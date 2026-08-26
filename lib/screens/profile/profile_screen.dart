@@ -1,11 +1,15 @@
+import 'dart:ui' show ImageFilter;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart' show PostgrestException;
+import '../../core/layout/max_width_center.dart';
 import '../../core/services/geocoding_service.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/logic/currency.dart';
+import '../../core/logic/booking_itinerary.dart';
 import '../../core/logic/trip_insights.dart';
 import '../../core/logic/trip_route.dart';
 import '../../core/logic/settle_up.dart';
@@ -29,10 +33,12 @@ import '../../widgets/common/app_shell.dart';
 import '../../widgets/budget_status.dart';
 import '../../widgets/state_views.dart';
 import '../../widgets/app_network_image.dart';
+import '../../widgets/common/add_expense_sheet.dart';
 import '../../widgets/common/traveler_lookup_sheet.dart';
 import '../trip_map/trip_map_dialog.dart';
 import '../trip_setup/edit_trip_sheet.dart';
 import '../trip_builder/widgets/add_stop_sheet.dart';
+import '../trips/trips_list_screen.dart' show showTripSwitcherSheet;
 
 part 'profile_palette.dart';
 part 'widgets/profile_atoms.dart';
@@ -50,7 +56,9 @@ part 'tabs/settings_tab.dart';
 /// `TODO(tab-deeplink)` that every builder back-button used to carry.
 class ProfileDeepLink {
   const ProfileDeepLink(
-      {required this.tab, this.tripId, this.segment = TripDetailSegment.itinerary});
+      {required this.tab,
+      this.tripId,
+      this.segment = TripDetailSegment.itinerary});
 
   final int tab;
   final String? tripId;
@@ -70,7 +78,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
   // Both defaults are overridden from widget.deepLink in initState, below,
   // when the screen is reached via a deep link (e.g. Trip Builder's back
   // button) rather than the tab bar/drawer.
-  int _tab = 0; // 0 Overview · 1 My Trip · 2 Saved Gems · 3 My Stories · 4 Badges · 5 Settings
+  int _tab =
+      0; // 0 Overview · 1 My Trip · 2 Saved Gems · 3 My Stories · 4 Badges · 5 Settings
   // Which My Trip segment to land on next time tab 1 opens — set by
   // Overview's chip taps via _openMyTrip.
   TripDetailSegment _myTripSegment = TripDetailSegment.itinerary;
@@ -91,8 +100,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
     'Settings',
   ];
 
-  void _openMyTrip(TripDetailSegment segment) =>
-      setState(() { _tab = 1; _myTripSegment = segment; });
+  void _openMyTrip(TripDetailSegment segment) => setState(() {
+        _tab = 1;
+        _myTripSegment = segment;
+      });
 
   @override
   void initState() {
@@ -169,8 +180,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final now = DateTime.now();
 
     final gemProvider = context.watch<GemProvider>();
-    final gems =
-        gemProvider.allGems.where((g) => g.userId == user.id).toList();
+    final gems = gemProvider.allGems.where((g) => g.userId == user.id).toList();
     // Strip SAVED stat: bookmarked gems, not dropped pins. Pre-loadSaved this
     // reads 0 and refines on notify — same accepted transient as ALERTS.
     final savedCount = gemProvider.savedGems.length;
@@ -258,19 +268,28 @@ class _ProfileScreenState extends State<ProfileScreen> {
       backgroundColor: _kPage,
       body: Column(
         children: [
-          _Header(
-            user: user,
-            onMenu: () => AppShellScope.of(context).openDrawer(),
-            onSettings: () => setState(() => _tab = 5),
-            onSignOut: () => _confirmSignOut(context),
-            memberSince: _memberSince(gems, myStories),
-          ),
-          _StatsBar(
-            gems: savedCount,
-            trips: tripCount,
-            alerts: alertCount,
-            spent: _spent,
-            loading: _statsLoading,
+          Stack(
+            children: [
+              const _ChromeGlow(),
+              Column(
+                children: [
+                  _Header(
+                    user: user,
+                    onMenu: () => AppShellScope.of(context).openDrawer(),
+                    onSettings: () => setState(() => _tab = 5),
+                    onSignOut: () => _confirmSignOut(context),
+                    memberSince: _memberSince(gems, myStories),
+                  ),
+                  _StatsBar(
+                    gems: savedCount,
+                    trips: tripCount,
+                    alerts: alertCount,
+                    spent: _spent,
+                    loading: _statsLoading,
+                  ),
+                ],
+              ),
+            ],
           ),
           _TabBar(
             tabs: _tabs,
@@ -286,8 +305,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  Widget _body(BuildContext context, List<Story> stories, int tripCount,
-      List<BadgeProgress> badges, List<Alert> alerts, TripPace? pace,
+  Widget _body(
+      BuildContext context,
+      List<Story> stories,
+      int tripCount,
+      List<BadgeProgress> badges,
+      List<Alert> alerts,
+      TripPace? pace,
       Trip? active) {
     switch (_tab) {
       case 1:
@@ -313,6 +337,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           alerts: alerts,
           pace: pace,
           budgetVnd: active?.budgetVnd,
+          symbol: currencyFor(active?.currency).symbol,
           badges: badges,
           onOpenTripSegment: _openMyTrip,
           onSwitchTab: (i) => setState(() => _tab = i),
@@ -339,7 +364,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         title: Text('Sign Out',
             style: GoogleFonts.bebasNeue(fontSize: 22, color: _kInk)),
         content: Text('Are you sure you want to sign out?',
-            style: GoogleFonts.dmSans(color: _kMute)),
+            style: GoogleFonts.fredoka(color: _kMute)),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
