@@ -68,12 +68,18 @@ class SplitGroup {
   final String createdBy;
   final DateTime createdAt;
 
+  /// Set only for a trip's auto-provisioned "shadow" group (see
+  /// SplitsProvider.getOrCreateTripGroup) — null for a standalone group
+  /// created through the /splits feature, unrelated to any trip.
+  final String? tripId;
+
   const SplitGroup({
     required this.id,
     required this.name,
     this.description,
     required this.createdBy,
     required this.createdAt,
+    this.tripId,
   });
 
   factory SplitGroup.fromJson(Map<String, dynamic> json) => SplitGroup(
@@ -82,6 +88,7 @@ class SplitGroup {
         description: json['description'] as String?,
         createdBy: json['created_by'] as String,
         createdAt: DateTime.tryParse(json['created_at'] as String? ?? '') ?? DateTime.now(),
+        tripId: json['trip_id'] as String?,
       );
 }
 

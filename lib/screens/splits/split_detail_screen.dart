@@ -4,8 +4,8 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import '../../core/theme/app_theme.dart';
 import '../../models/hike.dart';
-import '../../providers/auth_provider.dart';
 import '../../providers/splits_provider.dart';
+import '../../widgets/common/add_expense_sheet.dart';
 
 class SplitDetailScreen extends StatefulWidget {
   final String groupId;
@@ -38,94 +38,26 @@ class _SplitDetailScreenState extends State<SplitDetailScreen> {
 
   double get _total => _expenses.fold(0.0, (s, e) => s + e.amount);
 
+  // Shared with the trip-scoped "+ Add Expense" entry points (Overview tab)
+  // — see AddExpenseSheet's own doc comment. This call site passes no
+  // tripId/travelers: a standalone split group has no trip association and
+  // no "trip travelers" concept, so the sheet falls back to its original
+  // description-and-amount-only, paid-by-self behavior.
   void _showAddExpense() {
-    final descCtrl = TextEditingController();
-    final amtCtrl = TextEditingController();
-    showModalBottomSheet(
+    showModalBottomSheet<void>(
       context: context,
-      backgroundColor: AppTheme.surface,
+      backgroundColor: Colors.transparent,
       isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-      builder: (ctx) => Padding(
-        padding: EdgeInsets.fromLTRB(
-            20, 20, 20, MediaQuery.of(ctx).viewInsets.bottom + 20),
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          Container(width: 40, height: 4,
-              decoration: BoxDecoration(
-                  color: AppTheme.divider,
-                  borderRadius: BorderRadius.circular(2))),
-          const SizedBox(height: 20),
-          Text('ADD EXPENSE',
-              style: GoogleFonts.bebasNeue(fontSize: 22, letterSpacing: 0.5)),
-          const SizedBox(height: 16),
-          TextField(
-            controller: descCtrl,
-            autofocus: true,
-            style: GoogleFonts.dmSans(color: AppTheme.textPrimary),
-            decoration: _inputDeco('Description (e.g. Fuel, Hostel)'),
-          ),
-          const SizedBox(height: 10),
-          TextField(
-            controller: amtCtrl,
-            keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            style: GoogleFonts.dmSans(color: AppTheme.textPrimary),
-            decoration: _inputDeco('Amount (USD)'),
-          ),
-          const SizedBox(height: 16),
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton(
-              onPressed: () async {
-                final amt = double.tryParse(amtCtrl.text);
-                if (descCtrl.text.trim().isEmpty || amt == null) return;
-                final auth = context.read<AuthProvider>();
-                Navigator.pop(ctx);
-                final ok = await context.read<SplitsProvider>().addExpense(
-                  groupId: widget.groupId,
-                  paidBy: auth.user?.id ?? '',
-                  title: descCtrl.text.trim(),
-                  amount: amt,
-                );
-                if (ok) _load();
-              },
-              style: ElevatedButton.styleFrom(
-                  backgroundColor: AppTheme.primary,
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12))),
-              child: Text('ADD',
-                  style: GoogleFonts.bebasNeue(fontSize: 18, letterSpacing: 0.5)),
-            ),
-          ),
-        ]),
-      ),
-    );
+      builder: (_) => AddExpenseSheet(groupId: widget.groupId, light: true),
+    ).then((_) => _load());
   }
-
-  InputDecoration _inputDeco(String hint) => InputDecoration(
-        hintText: hint,
-        hintStyle: GoogleFonts.dmSans(
-            color: AppTheme.textSecondary.withValues(alpha: 0.5), fontSize: 14),
-        filled: true,
-        fillColor: AppTheme.surface2,
-        border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
-            borderSide: BorderSide(color: AppTheme.divider)),
-        enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
-            borderSide: BorderSide(color: AppTheme.divider)),
-        focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
-            borderSide: const BorderSide(color: AppTheme.primary)),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-      );
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppTheme.bg,
+      backgroundColor: AppTheme.lightSurface,
       appBar: AppBar(
-        backgroundColor: AppTheme.bg,
+        backgroundColor: AppTheme.lightSurface,
         leading: IconButton(
             icon: const Icon(Icons.arrow_back),
             onPressed: () =>
@@ -157,7 +89,7 @@ class _SplitDetailScreenState extends State<SplitDetailScreen> {
                     Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                       Text('TOTAL SPENT',
                           style: GoogleFonts.jetBrainsMono(
-                              fontSize: 10, color: AppTheme.textSecondary)),
+                              fontSize: 10, color: AppTheme.lightMute)),
                       Text('\$${_total.toStringAsFixed(2)}',
                           style: GoogleFonts.bebasNeue(
                               fontSize: 36, color: AppTheme.primary)),
@@ -165,10 +97,10 @@ class _SplitDetailScreenState extends State<SplitDetailScreen> {
                     Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
                       Text('EXPENSES',
                           style: GoogleFonts.jetBrainsMono(
-                              fontSize: 10, color: AppTheme.textSecondary)),
+                              fontSize: 10, color: AppTheme.lightMute)),
                       Text('${_expenses.length}',
                           style: GoogleFonts.bebasNeue(
-                              fontSize: 36, color: AppTheme.textPrimary)),
+                              fontSize: 36, color: AppTheme.lightInk)),
                     ]),
                   ],
                 ),
@@ -186,14 +118,14 @@ class _SplitDetailScreenState extends State<SplitDetailScreen> {
                             Text('No expenses yet',
                                 style: GoogleFonts.bebasNeue(
                                     fontSize: 22,
-                                    color: AppTheme.textSecondary)),
+                                    color: AppTheme.lightMute)),
                             const SizedBox(height: 20),
                             ElevatedButton(
                               onPressed: _showAddExpense,
                               style: ElevatedButton.styleFrom(
                                   backgroundColor: AppTheme.primary),
                               child: Text('Add First Expense',
-                                  style: GoogleFonts.dmSans(
+                                  style: GoogleFonts.fredoka(
                                       color: Colors.white,
                                       fontWeight: FontWeight.w600)),
                             ),
@@ -226,21 +158,21 @@ class _ExpenseRow extends StatelessWidget {
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
       decoration: BoxDecoration(
-        color: AppTheme.surface,
+        color: AppTheme.lightCard,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppTheme.divider),
+        border: Border.all(color: AppTheme.lightBorder),
       ),
       child: Row(children: [
         Expanded(
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text(expense.title,
-                style: GoogleFonts.dmSans(
+                style: GoogleFonts.fredoka(
                     fontSize: 14, fontWeight: FontWeight.w600,
-                    color: AppTheme.textPrimary)),
+                    color: AppTheme.lightInk)),
             Text(
               '${expense.createdAt.day}/${expense.createdAt.month}/${expense.createdAt.year}',
               style: GoogleFonts.jetBrainsMono(
-                  fontSize: 10, color: AppTheme.textSecondary),
+                  fontSize: 10, color: AppTheme.lightMute),
             ),
           ]),
         ),

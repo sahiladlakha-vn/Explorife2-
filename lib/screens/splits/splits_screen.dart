@@ -29,7 +29,7 @@ class _SplitsScreenState extends State<SplitsScreen> {
     final ctrl = TextEditingController();
     showModalBottomSheet(
       context: context,
-      backgroundColor: AppTheme.surface,
+      backgroundColor: AppTheme.lightCard,
       isScrollControlled: true,
       shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
@@ -39,7 +39,7 @@ class _SplitsScreenState extends State<SplitsScreen> {
         child: Column(mainAxisSize: MainAxisSize.min, children: [
           Container(width: 40, height: 4,
               decoration: BoxDecoration(
-                  color: AppTheme.divider,
+                  color: AppTheme.lightBorder,
                   borderRadius: BorderRadius.circular(2))),
           const SizedBox(height: 20),
           Text('NEW TRIP GROUP',
@@ -48,19 +48,19 @@ class _SplitsScreenState extends State<SplitsScreen> {
           TextField(
             controller: ctrl,
             autofocus: true,
-            style: GoogleFonts.dmSans(color: AppTheme.textPrimary),
+            style: GoogleFonts.fredoka(color: AppTheme.lightInk),
             decoration: InputDecoration(
               hintText: 'e.g. Vietnam Road Trip 2025',
-              hintStyle: GoogleFonts.dmSans(
-                  color: AppTheme.textSecondary.withValues(alpha: 0.5)),
+              hintStyle: GoogleFonts.fredoka(
+                  color: AppTheme.lightMute.withValues(alpha: 0.5)),
               filled: true,
-              fillColor: AppTheme.surface2,
+              fillColor: AppTheme.lightCard,
               border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide(color: AppTheme.divider)),
+                  borderSide: BorderSide(color: AppTheme.lightBorder)),
               enabledBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide(color: AppTheme.divider)),
+                  borderSide: BorderSide(color: AppTheme.lightBorder)),
               focusedBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
                   borderSide: const BorderSide(color: AppTheme.primary)),
@@ -97,12 +97,12 @@ class _SplitsScreenState extends State<SplitsScreen> {
     final groups = prov.groups;
 
     return Scaffold(
-      backgroundColor: AppTheme.bg,
+      backgroundColor: AppTheme.lightSurface,
       body: CustomScrollView(
         slivers: [
           SliverAppBar(
             pinned: true,
-            backgroundColor: AppTheme.bg,
+            backgroundColor: AppTheme.lightSurface,
             title: Text('EXPENSE SPLITS',
                 style: GoogleFonts.bebasNeue(fontSize: 24, letterSpacing: 0.5)),
             actions: [
@@ -145,7 +145,7 @@ class _SplitsScreenState extends State<SplitsScreen> {
               backgroundColor: AppTheme.primary,
               icon: const Icon(Icons.group_add, color: Colors.white),
               label: Text('New Group',
-                  style: GoogleFonts.dmSans(
+                  style: GoogleFonts.fredoka(
                       color: Colors.white, fontWeight: FontWeight.w600)),
             )
           : null,
@@ -162,13 +162,13 @@ class _SplitsScreenState extends State<SplitsScreen> {
           const SizedBox(height: 16),
           Text(label,
               style: GoogleFonts.bebasNeue(
-                  fontSize: 22, color: AppTheme.textSecondary, letterSpacing: 0.5)),
+                  fontSize: 22, color: AppTheme.lightMute, letterSpacing: 0.5)),
           const SizedBox(height: 20),
           ElevatedButton(
             onPressed: onTap,
             style: ElevatedButton.styleFrom(backgroundColor: AppTheme.primary),
             child: Text(action,
-                style: GoogleFonts.dmSans(
+                style: GoogleFonts.fredoka(
                     color: Colors.white, fontWeight: FontWeight.w600)),
           ),
         ]),
@@ -190,9 +190,9 @@ class _GroupCard extends StatelessWidget {
         margin: const EdgeInsets.only(bottom: 10),
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
-          color: AppTheme.surface,
+          color: AppTheme.lightCard,
           borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: AppTheme.divider),
+          border: Border.all(color: AppTheme.lightBorder),
         ),
         child: Row(children: [
           Container(
@@ -208,17 +208,17 @@ class _GroupCard extends StatelessWidget {
           Expanded(
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Text(group.name,
-                  style: GoogleFonts.dmSans(
+                  style: GoogleFonts.fredoka(
                       fontSize: 15, fontWeight: FontWeight.w600,
-                      color: AppTheme.textPrimary)),
+                      color: AppTheme.lightInk)),
               if (group.description != null)
                 Text(group.description!,
-                    style: GoogleFonts.dmSans(
-                        fontSize: 12, color: AppTheme.textSecondary),
+                    style: GoogleFonts.fredoka(
+                        fontSize: 12, color: AppTheme.lightMute),
                     maxLines: 1, overflow: TextOverflow.ellipsis),
             ]),
           ),
-          const Icon(Icons.chevron_right, color: AppTheme.textSecondary),
+          const Icon(Icons.chevron_right, color: AppTheme.lightMute),
         ]),
       ),
     );

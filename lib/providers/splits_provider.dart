@@ -106,6 +106,38 @@ class SplitsProvider extends ChangeNotifier {
     }
   }
 
+  /// Resolves (creating if needed) the trip's auto-provisioned "shadow" split
+  /// group via the get_or_create_trip_split_group RPC — atomic and
+  /// security-definer so it works correctly even for a second traveler who
+  /// isn't yet able to SELECT an existing group under RLS (see the RPC's own
+  /// doc comment, migration 20260814000000). Also ensures the current user
+  /// is a member of the returned group, which split_expenses' insert policy
+  /// requires. Returns null on failure — callers should show an error rather
+  /// than silently falling through to a null groupId.
+  Future<String?> getOrCreateTripGroup({
+    required String tripId,
+    required String tripName,
+  }) async {
+    try {
+      final result = await _db.rpc('get_or_create_trip_split_group',
+          params: {'p_trip_id': tripId, 'p_name': tripName});
+      return result as String?;
+    } catch (e) {
+      debugPrint('getOrCreateTripGroup error: $e');
+      return null;
+    }
+  }
+
+  int _tempSeq = 0;
+
+  /// Optimistic temp-id insert, then reconcile to the server row — same
+  /// convention as TripSetupProvider.addDocument/addPackingItem. When
+  /// [tripId] is given, the optimistic row is appended to
+  /// [expensesByTrip]'s cache immediately (and notifyListeners fires), so
+  /// the Dashboard segment and any other watcher reflect the new expense
+  /// without a manual refetch — this previously didn't call
+  /// notifyListeners() at all, so the one existing caller (SplitDetailScreen)
+  /// had to re-fetch its own local list manually after every add.
   Future<bool> addExpense({
     required String groupId,
     required String paidBy,
@@ -114,25 +146,62 @@ class SplitsProvider extends ChangeNotifier {
     String currency = 'USD',
     String? tripId,
     String? category,
+    DateTime? expenseDate,
   }) async {
+    final tempId = 'temp-${DateTime.now().microsecondsSinceEpoch}-${_tempSeq++}';
+    final optimistic = SplitExpense(
+      id: tempId,
+      groupId: groupId,
+      paidBy: paidBy,
+      title: title,
+      amount: amount,
+      currency: currency,
+      createdAt: DateTime.now(),
+      tripId: tripId,
+      category: category,
+      expenseDate: expenseDate,
+    );
+    if (tripId != null) {
+      _expensesByTrip[tripId] = [optimistic, ...expensesForTrip(tripId)];
+      notifyListeners();
+    }
+
     try {
       // 'title' — NOT 'description'. The live split_expenses table has no
       // description column; this insert previously sent a key PostgREST
       // rejected on every call, so every "Add expense" tap silently failed
       // (addExpense caught the error and returned false with no user-facing
       // message). Confirmed against information_schema.columns.
-      await _db.from('split_expenses').insert({
-        'group_id': groupId,
-        'paid_by': paidBy,
-        'title': title,
-        'amount': amount,
-        'currency': currency,
-        if (tripId != null) 'trip_id': tripId,
-        if (category != null) 'category': category,
-      });
+      final row = await _db
+          .from('split_expenses')
+          .insert({
+            'group_id': groupId,
+            'paid_by': paidBy,
+            'title': title,
+            'amount': amount,
+            'currency': currency,
+            if (tripId != null) 'trip_id': tripId,
+            if (category != null) 'category': category,
+            if (expenseDate != null)
+              'expense_date': expenseDate.toIso8601String().substring(0, 10),
+          })
+          .select()
+          .single();
+      if (tripId != null) {
+        final saved = SplitExpense.fromJson(row);
+        _expensesByTrip[tripId] = _expensesByTrip[tripId]!
+            .map((e) => e.id == tempId ? saved : e)
+            .toList();
+        notifyListeners();
+      }
       return true;
     } catch (e) {
       debugPrint('addExpense error: $e');
+      if (tripId != null) {
+        _expensesByTrip[tripId] =
+            _expensesByTrip[tripId]!.where((e) => e.id != tempId).toList();
+        notifyListeners();
+      }
       return false;
     }
   }
