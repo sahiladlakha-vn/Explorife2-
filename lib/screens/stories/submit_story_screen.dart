@@ -20,7 +20,7 @@ class _SubmitStoryScreenState extends State<SubmitStoryScreen> {
   final _locationCtrl = TextEditingController();
   final _contentCtrl = TextEditingController();
 
-  String? _adventureType;
+  final List<String> _adventureTypes = [];
   String? _difficulty;
   int _lonelinessLevel = 3;
   String? _safetyLevel;
@@ -29,7 +29,12 @@ class _SubmitStoryScreenState extends State<SubmitStoryScreen> {
   bool _submitting = false;
 
   static const _difficulties = ['Easy', 'Moderate', 'Hard', 'Expert'];
-  static const _safetyLevels = ['very safe', 'comfortable', 'risky', 'dangerous'];
+  static const _safetyLevels = [
+    'very safe',
+    'comfortable',
+    'risky',
+    'dangerous'
+  ];
   static const _connectivityLevels = ['great', 'decent', 'weak', 'none'];
   static const _aftermathLevels = ['euphoric', 'grounded', 'humbled', 'shaken'];
 
@@ -47,17 +52,19 @@ class _SubmitStoryScreenState extends State<SubmitStoryScreen> {
 
     setState(() => _submitting = true);
     final ok = await context.read<StoryProvider>().submitStory(
-      title: _titleCtrl.text.trim(),
-      content: _contentCtrl.text.trim(),
-      email: _emailCtrl.text.trim(),
-      location: _locationCtrl.text.trim().isEmpty ? null : _locationCtrl.text.trim(),
-      adventureType: _adventureType,
-      difficulty: _difficulty,
-      lonelinessLevel: _lonelinessLevel,
-      safetyLevel: _safetyLevel,
-      connectivity: _connectivity,
-      aftermath: _aftermath,
-    );
+          title: _titleCtrl.text.trim(),
+          content: _contentCtrl.text.trim(),
+          email: _emailCtrl.text.trim(),
+          location: _locationCtrl.text.trim().isEmpty
+              ? null
+              : _locationCtrl.text.trim(),
+          adventureTypes: _adventureTypes,
+          difficulty: _difficulty,
+          lonelinessLevel: _lonelinessLevel,
+          safetyLevel: _safetyLevel,
+          connectivity: _connectivity,
+          aftermath: _aftermath,
+        );
 
     if (mounted) {
       setState(() => _submitting = false);
@@ -65,12 +72,14 @@ class _SubmitStoryScreenState extends State<SubmitStoryScreen> {
         showDialog(
           context: context,
           builder: (_) => AlertDialog(
-            backgroundColor: AppTheme.surface,
+            backgroundColor: AppTheme.lightCard,
             title: Text('Story Submitted! 🎉',
-                style: GoogleFonts.bebasNeue(fontSize: 22, color: AppTheme.textPrimary)),
+                style: GoogleFonts.bebasNeue(
+                    fontSize: 22, color: AppTheme.lightInk)),
             content: Text(
               'Your story is under review. We\'ll publish it once approved.',
-              style: GoogleFonts.dmSans(color: AppTheme.textSecondary, fontSize: 14),
+              style:
+                  GoogleFonts.fredoka(color: AppTheme.lightMute, fontSize: 14),
             ),
             actions: [
               TextButton(
@@ -94,33 +103,61 @@ class _SubmitStoryScreenState extends State<SubmitStoryScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppTheme.bg,
+      backgroundColor: AppTheme.lightSurface,
       appBar: AppBar(
-        backgroundColor: AppTheme.bg,
+        backgroundColor: AppTheme.lightSurface,
+        foregroundColor: AppTheme.lightInk,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back),
+          icon: const Icon(Icons.arrow_back, color: AppTheme.lightInk),
           onPressed: () =>
               context.canPop() ? context.pop() : context.go('/stories'),
         ),
         title: Text('SUBMIT STORY',
-            style: GoogleFonts.bebasNeue(fontSize: 22, letterSpacing: 0.5)),
+            style: GoogleFonts.bebasNeue(
+                fontSize: 22, letterSpacing: 0.5, color: AppTheme.lightInk)),
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(20),
         child: Form(
           key: _formKey,
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            // Intro blurb
+          child:
+              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            // Community Standard
             Container(
               padding: const EdgeInsets.all(14),
               decoration: BoxDecoration(
                 color: AppTheme.primary.withValues(alpha: 0.08),
                 borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: AppTheme.primary.withValues(alpha: 0.2)),
+                border:
+                    Border.all(color: AppTheme.primary.withValues(alpha: 0.2)),
               ),
-              child: Text(
-                'Share your adventure with 84,000+ explorers. All stories are reviewed before publishing.',
-                style: GoogleFonts.dmSans(fontSize: 13, color: AppTheme.textSecondary, height: 1.5),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Icon(Icons.shield_outlined,
+                      color: AppTheme.primary, size: 20),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('Community Standard',
+                            style: GoogleFonts.fredoka(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w700,
+                                color: AppTheme.lightInk)),
+                        const SizedBox(height: 4),
+                        Text(
+                          'Share your adventure with 84,000+ explorers. All stories are reviewed before publishing.',
+                          style: GoogleFonts.fredoka(
+                              fontSize: 13,
+                              color: AppTheme.lightMute,
+                              height: 1.5),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
               ),
             ),
             const SizedBox(height: 24),
@@ -129,9 +166,11 @@ class _SubmitStoryScreenState extends State<SubmitStoryScreen> {
             const SizedBox(height: 8),
             TextFormField(
               controller: _titleCtrl,
-              style: GoogleFonts.dmSans(color: AppTheme.textPrimary),
-              decoration: _deco('e.g. 7 Days Alone in the Vietnamese Highlands'),
-              validator: (v) => v == null || v.trim().isEmpty ? 'Required' : null,
+              style: GoogleFonts.fredoka(color: AppTheme.lightInk),
+              decoration:
+                  _deco('e.g. 7 Days Alone in the Vietnamese Highlands'),
+              validator: (v) =>
+                  v == null || v.trim().isEmpty ? 'Required' : null,
             ),
             const SizedBox(height: 16),
 
@@ -140,7 +179,7 @@ class _SubmitStoryScreenState extends State<SubmitStoryScreen> {
             TextFormField(
               controller: _emailCtrl,
               keyboardType: TextInputType.emailAddress,
-              style: GoogleFonts.dmSans(color: AppTheme.textPrimary),
+              style: GoogleFonts.fredoka(color: AppTheme.lightInk),
               decoration: _deco('your@email.com'),
               validator: (v) {
                 if (v == null || v.trim().isEmpty) return 'Required';
@@ -150,27 +189,31 @@ class _SubmitStoryScreenState extends State<SubmitStoryScreen> {
             ),
             const SizedBox(height: 16),
 
-            _Label('ADVENTURE TYPE'),
+            _Label('ADVENTURE TYPE (select any that apply)'),
             const SizedBox(height: 8),
             Wrap(
-              spacing: 8, runSpacing: 8,
+              spacing: 8,
+              runSpacing: 8,
               children: Story.adventureTypes.map((t) {
-                final sel = _adventureType == t;
+                final sel = _adventureTypes.contains(t);
                 return GestureDetector(
-                  onTap: () => setState(() => _adventureType = sel ? null : t),
+                  onTap: () => setState(() =>
+                      sel ? _adventureTypes.remove(t) : _adventureTypes.add(t)),
                   child: AnimatedContainer(
                     duration: const Duration(milliseconds: 150),
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                     decoration: BoxDecoration(
-                      color: sel ? AppTheme.primary : AppTheme.surface,
+                      color: sel ? AppTheme.primary : AppTheme.lightCard,
                       borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: sel ? AppTheme.primary : AppTheme.divider),
+                      border: Border.all(
+                          color: sel ? AppTheme.primary : AppTheme.lightBorder),
                     ),
                     child: Text(
                       '${Story.typeEmoji[t] ?? '📖'}  $t',
-                      style: GoogleFonts.dmSans(
+                      style: GoogleFonts.fredoka(
                         fontSize: 13,
-                        color: sel ? Colors.white : AppTheme.textSecondary,
+                        color: sel ? Colors.white : AppTheme.lightMute,
                         fontWeight: sel ? FontWeight.w600 : FontWeight.w400,
                       ),
                     ),
@@ -184,7 +227,7 @@ class _SubmitStoryScreenState extends State<SubmitStoryScreen> {
             const SizedBox(height: 8),
             TextFormField(
               controller: _locationCtrl,
-              style: GoogleFonts.dmSans(color: AppTheme.textPrimary),
+              style: GoogleFonts.fredoka(color: AppTheme.lightInk),
               decoration: _deco('e.g. Ha Giang Loop, Vietnam'),
             ),
             const SizedBox(height: 16),
@@ -198,12 +241,15 @@ class _SubmitStoryScreenState extends State<SubmitStoryScreen> {
                 return ChoiceChip(
                   label: Text(d),
                   selected: sel,
-                  onSelected: (_) => setState(() => _difficulty = sel ? null : d),
+                  onSelected: (_) =>
+                      setState(() => _difficulty = sel ? null : d),
                   selectedColor: AppTheme.primary,
-                  backgroundColor: AppTheme.surface,
-                  labelStyle: GoogleFonts.dmSans(
-                      color: sel ? Colors.white : AppTheme.textSecondary, fontSize: 13),
-                  side: BorderSide(color: sel ? AppTheme.primary : AppTheme.divider),
+                  backgroundColor: AppTheme.lightCard,
+                  labelStyle: GoogleFonts.fredoka(
+                      color: sel ? Colors.white : AppTheme.lightMute,
+                      fontSize: 13),
+                  side: BorderSide(
+                      color: sel ? AppTheme.primary : AppTheme.lightBorder),
                 );
               }).toList(),
             ),
@@ -215,26 +261,33 @@ class _SubmitStoryScreenState extends State<SubmitStoryScreen> {
             TextFormField(
               controller: _contentCtrl,
               maxLines: 10,
-              style: GoogleFonts.dmSans(color: AppTheme.textPrimary, height: 1.6),
+              style: GoogleFonts.fredoka(color: AppTheme.lightInk, height: 1.6),
               decoration: _deco('Tell your story...'),
-              validator: (v) => v == null || v.trim().isEmpty ? 'Required' : null,
+              validator: (v) =>
+                  v == null || v.trim().isEmpty ? 'Required' : null,
             ),
             const SizedBox(height: 24),
 
             // Reality check section
             Text('REALITY CHECK',
-                style: GoogleFonts.bebasNeue(fontSize: 20, letterSpacing: 0.5)),
+                style: GoogleFonts.bebasNeue(
+                    fontSize: 20,
+                    letterSpacing: 0.5,
+                    color: AppTheme.lightInk)),
             const SizedBox(height: 4),
             Text('Help future adventurers know what to expect',
-                style: GoogleFonts.dmSans(fontSize: 12, color: AppTheme.textSecondary)),
+                style: GoogleFonts.fredoka(
+                    fontSize: 12, color: AppTheme.lightMute)),
             const SizedBox(height: 14),
 
             _Label('LONELINESS LEVEL: $_lonelinessLevel / 5'),
             Slider(
               value: _lonelinessLevel.toDouble(),
-              min: 1, max: 5, divisions: 4,
+              min: 1,
+              max: 5,
+              divisions: 4,
               activeColor: AppTheme.primary,
-              inactiveColor: AppTheme.surface2,
+              inactiveColor: AppTheme.lightCard,
               onChanged: (v) => setState(() => _lonelinessLevel = v.round()),
             ),
             const SizedBox(height: 12),
@@ -248,12 +301,15 @@ class _SubmitStoryScreenState extends State<SubmitStoryScreen> {
                 return ChoiceChip(
                   label: Text(v),
                   selected: sel,
-                  onSelected: (_) => setState(() => _safetyLevel = sel ? null : v),
+                  onSelected: (_) =>
+                      setState(() => _safetyLevel = sel ? null : v),
                   selectedColor: AppTheme.primary,
-                  backgroundColor: AppTheme.surface,
-                  labelStyle: GoogleFonts.dmSans(
-                      color: sel ? Colors.white : AppTheme.textSecondary, fontSize: 12),
-                  side: BorderSide(color: sel ? AppTheme.primary : AppTheme.divider),
+                  backgroundColor: AppTheme.lightCard,
+                  labelStyle: GoogleFonts.fredoka(
+                      color: sel ? Colors.white : AppTheme.lightMute,
+                      fontSize: 12),
+                  side: BorderSide(
+                      color: sel ? AppTheme.primary : AppTheme.lightBorder),
                 );
               }).toList(),
             ),
@@ -268,12 +324,15 @@ class _SubmitStoryScreenState extends State<SubmitStoryScreen> {
                 return ChoiceChip(
                   label: Text(v),
                   selected: sel,
-                  onSelected: (_) => setState(() => _connectivity = sel ? null : v),
+                  onSelected: (_) =>
+                      setState(() => _connectivity = sel ? null : v),
                   selectedColor: AppTheme.primary,
-                  backgroundColor: AppTheme.surface,
-                  labelStyle: GoogleFonts.dmSans(
-                      color: sel ? Colors.white : AppTheme.textSecondary, fontSize: 12),
-                  side: BorderSide(color: sel ? AppTheme.primary : AppTheme.divider),
+                  backgroundColor: AppTheme.lightCard,
+                  labelStyle: GoogleFonts.fredoka(
+                      color: sel ? Colors.white : AppTheme.lightMute,
+                      fontSize: 12),
+                  side: BorderSide(
+                      color: sel ? AppTheme.primary : AppTheme.lightBorder),
                 );
               }).toList(),
             ),
@@ -288,34 +347,47 @@ class _SubmitStoryScreenState extends State<SubmitStoryScreen> {
                 return ChoiceChip(
                   label: Text(v),
                   selected: sel,
-                  onSelected: (_) => setState(() => _aftermath = sel ? null : v),
+                  onSelected: (_) =>
+                      setState(() => _aftermath = sel ? null : v),
                   selectedColor: AppTheme.primary,
-                  backgroundColor: AppTheme.surface,
-                  labelStyle: GoogleFonts.dmSans(
-                      color: sel ? Colors.white : AppTheme.textSecondary, fontSize: 12),
-                  side: BorderSide(color: sel ? AppTheme.primary : AppTheme.divider),
+                  backgroundColor: AppTheme.lightCard,
+                  labelStyle: GoogleFonts.fredoka(
+                      color: sel ? Colors.white : AppTheme.lightMute,
+                      fontSize: 12),
+                  side: BorderSide(
+                      color: sel ? AppTheme.primary : AppTheme.lightBorder),
                 );
               }).toList(),
             ),
-            const SizedBox(height: 32),
-
-            SizedBox(
-              width: double.infinity,
-              height: 52,
-              child: ElevatedButton(
-                onPressed: _submitting ? null : _submit,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppTheme.primary,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                ),
-                child: _submitting
-                    ? const CircularProgressIndicator(color: Colors.white, strokeWidth: 2)
-                    : Text('SUBMIT STORY 📖',
-                        style: GoogleFonts.bebasNeue(fontSize: 20, letterSpacing: 0.5)),
-              ),
-            ),
-            const SizedBox(height: 40),
+            const SizedBox(height: 24),
           ]),
+        ),
+      ),
+      bottomNavigationBar: SafeArea(
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(20, 12, 20, 12),
+          decoration: BoxDecoration(
+            color: AppTheme.lightSurface,
+            border: Border(top: BorderSide(color: AppTheme.lightBorder)),
+          ),
+          child: SizedBox(
+            width: double.infinity,
+            height: 52,
+            child: ElevatedButton(
+              onPressed: _submitting ? null : _submit,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppTheme.primary,
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14)),
+              ),
+              child: _submitting
+                  ? const CircularProgressIndicator(
+                      color: Colors.white, strokeWidth: 2)
+                  : Text('SUBMIT STORY 📖',
+                      style: GoogleFonts.bebasNeue(
+                          fontSize: 20, letterSpacing: 0.5)),
+            ),
+          ),
         ),
       ),
     );
@@ -323,19 +395,21 @@ class _SubmitStoryScreenState extends State<SubmitStoryScreen> {
 
   InputDecoration _deco(String hint) => InputDecoration(
         hintText: hint,
-        hintStyle: GoogleFonts.dmSans(fontSize: 14, color: AppTheme.textSecondary.withValues(alpha: 0.5)),
+        hintStyle: GoogleFonts.fredoka(
+            fontSize: 14, color: AppTheme.lightMute.withValues(alpha: 0.5)),
         filled: true,
-        fillColor: AppTheme.surface,
+        fillColor: AppTheme.lightCard,
         border: OutlineInputBorder(
             borderRadius: BorderRadius.circular(12),
-            borderSide: BorderSide(color: AppTheme.divider)),
+            borderSide: BorderSide(color: AppTheme.lightBorder)),
         enabledBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(12),
-            borderSide: BorderSide(color: AppTheme.divider)),
+            borderSide: BorderSide(color: AppTheme.lightBorder)),
         focusedBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(12),
             borderSide: const BorderSide(color: AppTheme.primary)),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        contentPadding:
+            const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       );
 }
 
@@ -345,5 +419,5 @@ class _Label extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Text(text,
       style: GoogleFonts.jetBrainsMono(
-          fontSize: 10, color: AppTheme.textSecondary, letterSpacing: 0.8));
+          fontSize: 10, color: AppTheme.lightMute, letterSpacing: 0.8));
 }

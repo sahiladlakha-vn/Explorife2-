@@ -40,17 +40,20 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
   Widget build(BuildContext context) {
     if (_loading) {
       return const Scaffold(
-        backgroundColor: AppTheme.bg,
+        backgroundColor: AppTheme.lightSurface,
         body: Center(child: CircularProgressIndicator(color: AppTheme.primary)),
       );
     }
     if (_story == null) {
       return Scaffold(
-        backgroundColor: AppTheme.bg,
-        appBar: AppBar(backgroundColor: AppTheme.bg),
+        backgroundColor: AppTheme.lightSurface,
+        appBar: AppBar(
+          backgroundColor: AppTheme.lightSurface,
+          foregroundColor: AppTheme.lightInk,
+        ),
         body: Center(
           child: Text('Story not found',
-              style: GoogleFonts.dmSans(color: AppTheme.textSecondary)),
+              style: GoogleFonts.fredoka(color: AppTheme.lightMute)),
         ),
       );
     }
@@ -59,14 +62,14 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
     final readMinutes = ((s.body.length / 5) / 200).ceil().clamp(1, 99);
 
     return Scaffold(
-      backgroundColor: AppTheme.bg,
+      backgroundColor: AppTheme.lightSurface,
       body: CustomScrollView(
         slivers: [
           // Hero
           SliverAppBar(
             expandedHeight: s.hasPhoto ? 300 : 120,
             pinned: true,
-            backgroundColor: AppTheme.bg,
+            backgroundColor: AppTheme.lightSurface,
             leading: IconButton(
               icon: Container(
                 padding: const EdgeInsets.all(8),
@@ -106,13 +109,13 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
                           gradient: LinearGradient(
                             begin: Alignment.topCenter,
                             end: Alignment.bottomCenter,
-                            colors: [Colors.transparent, AppTheme.bg],
+                            colors: [Colors.transparent, AppTheme.lightSurface],
                             stops: [0.4, 1.0],
                           ),
                         ),
                       ),
                     ])
-                  : Container(color: AppTheme.surface),
+                  : Container(color: AppTheme.lightCard),
             ),
           ),
 
@@ -155,7 +158,7 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
                 // Title
                 Text(s.title,
                     style: GoogleFonts.bebasNeue(
-                        fontSize: 36, color: AppTheme.textPrimary, letterSpacing: 0.5,
+                        fontSize: 36, color: AppTheme.lightInk, letterSpacing: 0.5,
                         height: 1.05)),
                 const SizedBox(height: 12),
 
@@ -170,19 +173,19 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
                 ]),
                 const SizedBox(height: 20),
 
-                Divider(color: AppTheme.divider),
+                Divider(color: AppTheme.lightBorder),
                 const SizedBox(height: 16),
 
                 // Story body
                 if (s.body.isNotEmpty)
                   Text(s.body,
-                      style: GoogleFonts.dmSans(
-                          fontSize: 15, color: AppTheme.textPrimary,
+                      style: GoogleFonts.fredoka(
+                          fontSize: 15, color: AppTheme.lightInk,
                           height: 1.75, letterSpacing: 0.1))
                 else if (s.excerpt != null)
                   Text(s.excerpt!,
-                      style: GoogleFonts.dmSans(
-                          fontSize: 15, color: AppTheme.textSecondary, height: 1.75)),
+                      style: GoogleFonts.fredoka(
+                          fontSize: 15, color: AppTheme.lightMute, height: 1.75)),
 
                 const SizedBox(height: 24),
 
@@ -198,13 +201,13 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
                     children: s.tags.map((t) => Container(
                       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                       decoration: BoxDecoration(
-                        color: AppTheme.surface2,
+                        color: AppTheme.lightCard,
                         borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: AppTheme.divider),
+                        border: Border.all(color: AppTheme.lightBorder),
                       ),
                       child: Text('#$t',
                           style: GoogleFonts.jetBrainsMono(
-                              fontSize: 11, color: AppTheme.textSecondary)),
+                              fontSize: 11, color: AppTheme.lightMute)),
                     )).toList(),
                   ),
                 ],
@@ -227,9 +230,9 @@ class _MetaChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Row(mainAxisSize: MainAxisSize.min, children: [
-      Icon(icon, size: 13, color: AppTheme.textSecondary),
+      Icon(icon, size: 13, color: AppTheme.lightMute),
       const SizedBox(width: 4),
-      Text(label, style: GoogleFonts.dmSans(fontSize: 13, color: AppTheme.textSecondary)),
+      Text(label, style: GoogleFonts.fredoka(fontSize: 13, color: AppTheme.lightMute)),
     ]);
   }
 }
@@ -243,7 +246,7 @@ class _RealityBox extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: AppTheme.surface,
+        color: AppTheme.lightCard,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: AppTheme.primary.withValues(alpha: 0.3)),
       ),
@@ -293,10 +296,10 @@ class _RealityRow extends StatelessWidget {
         Icon(icon, size: 15, color: AppTheme.primary),
         const SizedBox(width: 8),
         Text('$label: ',
-            style: GoogleFonts.dmSans(fontSize: 13, color: AppTheme.textSecondary)),
+            style: GoogleFonts.fredoka(fontSize: 13, color: AppTheme.lightMute)),
         Text(value,
-            style: GoogleFonts.dmSans(
-                fontSize: 13, color: AppTheme.textPrimary, fontWeight: FontWeight.w600)),
+            style: GoogleFonts.fredoka(
+                fontSize: 13, color: AppTheme.lightInk, fontWeight: FontWeight.w600)),
       ]),
     );
   }

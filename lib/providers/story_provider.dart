@@ -142,12 +142,17 @@ class StoryProvider extends ChangeNotifier {
     }
   }
 
+  /// [adventureTypes] is the full multi-select set, written to `tags` — the
+  /// story detail screen already renders `tags` as a chip row (built before
+  /// this was ever populated). `adventure_type` (singular) stays as whichever
+  /// one is "primary": the first selection, since the feed's filter chips and
+  /// _StoryCard's single pill both key off that one column, not the array.
   Future<bool> submitStory({
     required String title,
     required String content,
     required String email,
     String? location,
-    String? adventureType,
+    List<String> adventureTypes = const [],
     String? difficulty,
     String? imageUrl,
     int lonelinessLevel = 3,
@@ -161,7 +166,9 @@ class StoryProvider extends ChangeNotifier {
         'story_content': content,
         'email': email,
         'location': location,
-        'adventure_type': adventureType,
+        'adventure_type':
+            adventureTypes.isNotEmpty ? adventureTypes.first : null,
+        'tags': adventureTypes,
         'difficulty': difficulty,
         'image_url': imageUrl,
         'loneliness_level': lonelinessLevel,
