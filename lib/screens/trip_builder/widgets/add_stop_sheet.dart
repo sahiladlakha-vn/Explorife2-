@@ -2,6 +2,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
+import '../../../core/services/mapbox_search_service.dart';
+import '../../../core/services/mapbox_tilequery_service.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../models/gem.dart';
 import '../../../providers/gem_provider.dart';
@@ -21,21 +23,31 @@ import '../../../widgets/app_network_image.dart';
 // stops.where(day && slot).length (append-to-end). Nothing here needed a new
 // column or a new provider method.
 //
-// DISCOVERY QUERY: below is not a new query — it's locationFilteredGems /
-// gemMatchesSearch, relocated verbatim from discovery_panel.dart (which is
-// being retired along with discovery_sheet.dart/asset_card.dart/asset_data.dart
-// now that tap replaces drag as the only attach path — see the audit's
-// decision log). "Nearby" stays the existing text-match-against-trip.location
-// behavior, not a geo radius: trips have no lat/lng, and the app's one real
-// distance mechanism (GemProvider.nearbyGems) is anchored to live device GPS,
-// the wrong anchor for planning a trip to a different city — confirmed with
-// the user rather than silently geocoding trip.location on the fly.
+// DISCOVERY QUERY: curated gems still use locationFilteredGems /
+// gemMatchesSearch (relocated verbatim from the retired discovery_panel.dart
+// — see the audit's decision log), but that's no longer the whole story.
+// This sheet used to be curated-gems-only because trips had no coordinates
+// to query real places around; Trip now carries locationLat/locationLng
+// (added for the destination-prefill work), so "Discover [city]" also pulls
+// real nearby places via the SAME shared MapboxTilequeryService/
+// MapboxSearchService already used by the destination landing page and
+// Home's category search sheet — no new API integration here, just reusing
+// it with this trip's destination as the proximity center (falling back to
+// the Ho Chi Minh City coordinates other screens use when a trip predates
+// this field). Real places are still added as customPayload stops, not
+// Gems — there's no row to look up later — but now WITH lat/lng carried
+// through into the payload whenever Mapbox has them (immediately for a
+// Tilequery nearby result; resolved via one retrieve() call on tap for a
+// Search Box suggestion), which is what makes them show up on the trip map
+// (trip_route.dart's `_syntheticPlottableGem`). Only a genuinely-typed
+// custom stop (the "+ Add a custom stop" fallback below) stays coordinate-
+// less and map-invisible — that's a real gap (no location was ever
+// searched), not a bug.
 
 /// Below this many location-tagged matches, discovery gives up on the
-/// location filter and shows the whole catalogue (with a banner). A trip
-/// whose city has only one or two tagged gems is better served by the full
-/// list than by a near-empty sheet — the user came here to *build*, not to
-/// admire scarcity.
+/// location filter and shows the whole catalogue instead. A trip whose city
+/// has only one or two tagged gems is better served by the full list than by
+/// a near-empty one — the user came here to *build*, not to admire scarcity.
 const int locationFallbackThreshold = 3;
 
 /// Case-insensitive name/tagline/description match.
@@ -166,7 +178,31 @@ class _AddStopSheetState extends State<AddStopSheet> {
   String _query = '';
   String _activeCategory = 'all';
   Gem? _selectedGem;
+  _RealPlace? _selectedPlace;
+  // Name of the place row currently awaiting MapboxSearchService.retrieve()
+  // (resolving its real coordinates on tap — see _selectPlace) — drives a
+  // small inline spinner on that one row instead of a silent pause.
+  String? _resolvingPlaceName;
   bool _customMode = false;
+
+  final MapboxTilequeryService _tilequery = MapboxTilequeryService();
+  final MapboxSearchService _search = MapboxSearchService();
+  List<NearbyPoi> _nearby = [];
+  bool _nearbyLoading = true;
+  List<PlaceSuggestion> _searchResults = [];
+  bool _searching = false;
+
+  // Ho Chi Minh City centre — same fallback listings_screen.dart and
+  // destination_landing_screen.dart use, for a trip whose location predates
+  // the locationLat/locationLng columns.
+  static const double _fallbackLat = 10.7769;
+  static const double _fallbackLng = 106.7009;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadNearby();
+  }
 
   @override
   void dispose() {
@@ -176,10 +212,36 @@ class _AddStopSheetState extends State<AddStopSheet> {
     super.dispose();
   }
 
+  (double, double) get _proximity {
+    final trip = context.read<TripProvider>().tripById(widget.tripId);
+    return (trip?.locationLat ?? _fallbackLat, trip?.locationLng ?? _fallbackLng);
+  }
+
+  Future<void> _loadNearby() async {
+    final (lat, lng) = _proximity;
+    final pois = await _tilequery.nearby(lat, lng, radiusMeters: 5000, limit: 25);
+    if (mounted) setState(() { _nearby = pois; _nearbyLoading = false; });
+  }
+
+  Future<void> _runPlaceSearch(String query) async {
+    if (query.isEmpty) {
+      setState(() { _searchResults = []; _searching = false; });
+      return;
+    }
+    setState(() => _searching = true);
+    final (lat, lng) = _proximity;
+    final results =
+        await _search.suggest(query, proximityLat: lat, proximityLng: lng, types: 'poi');
+    if (mounted) setState(() { _searchResults = results; _searching = false; });
+  }
+
   void _onSearchChanged(String v) {
     _debounce?.cancel();
     _debounce = Timer(const Duration(milliseconds: 250), () {
-      if (mounted) setState(() => _query = v.trim());
+      if (!mounted) return;
+      final q = v.trim();
+      setState(() => _query = q);
+      _runPlaceSearch(q);
     });
   }
 
@@ -196,19 +258,71 @@ class _AddStopSheetState extends State<AddStopSheet> {
     HapticFeedback.selectionClick();
     setState(() {
       _selectedGem = _selectedGem?.id == g.id ? null : g; // tap again to deselect
-      if (_selectedGem != null) _customMode = false;
+      if (_selectedGem != null) {
+        _customMode = false;
+        _selectedPlace = null;
+      }
+    });
+  }
+
+  // Real (non-Gem) place from Tilequery/Search Box. Nearby-sourced places
+  // already carry lat/lng (Tilequery returns them up front); search-sourced
+  // suggestions don't (Search Box's /suggest step never does — only
+  // /retrieve resolves real coordinates, see MapboxSearchService's doc
+  // comment on session-token billing), so this resolves them now, at
+  // selection time, same as DestinationProvider.resolve does for the
+  // destination detail page — not for every suggestion in the list. Without
+  // real coordinates the place still gets added (as a title-only stop,
+  // exactly like a manual custom entry — see _confirm), it just won't be
+  // plottable on the trip map.
+  Future<void> _selectPlace(_RealPlace place) async {
+    if (_selectedPlace?.name == place.name) {
+      HapticFeedback.selectionClick();
+      setState(() => _selectedPlace = null);
+      return;
+    }
+    if ((place.lat != null && place.lng != null) || place.mapboxId == null) {
+      HapticFeedback.selectionClick();
+      setState(() {
+        _selectedPlace = place;
+        _selectedGem = null;
+        _customMode = false;
+      });
+      return;
+    }
+    setState(() => _resolvingPlaceName = place.name);
+    final details = await _search.retrieve(place.mapboxId!);
+    if (!mounted) return;
+    HapticFeedback.selectionClick();
+    setState(() {
+      _resolvingPlaceName = null;
+      _selectedGem = null;
+      _customMode = false;
+      _selectedPlace = details == null
+          ? place
+          : _RealPlace(
+              name: place.name,
+              category: place.category,
+              subtitle: place.subtitle,
+              lat: details.lat,
+              lng: details.lng,
+            );
     });
   }
 
   void _toggleCustomMode() {
     setState(() {
       _customMode = !_customMode;
-      if (_customMode) _selectedGem = null;
+      if (_customMode) {
+        _selectedGem = null;
+        _selectedPlace = null;
+      }
     });
   }
 
   bool get _canAdd =>
       _selectedGem != null ||
+      _selectedPlace != null ||
       (_customMode && _customNameCtrl.text.trim().isNotEmpty);
 
   // Fire-and-forget: addStop is optimistic and self-rolls-back on error,
@@ -223,6 +337,19 @@ class _AddStopSheetState extends State<AddStopSheet> {
             day: widget.day,
             slot: _slot,
             gemId: _selectedGem!.id,
+            startTime: _time,
+          );
+    } else if (_selectedPlace != null) {
+      final place = _selectedPlace!;
+      context.read<TripProvider>().addStop(
+            tripId: widget.tripId,
+            day: widget.day,
+            slot: _slot,
+            customPayload: {
+              'title': place.name,
+              if (place.lat != null && place.lng != null) 'lat': place.lat,
+              if (place.lat != null && place.lng != null) 'lng': place.lng,
+            },
             startTime: _time,
           );
     } else {
@@ -249,6 +376,20 @@ class _AddStopSheetState extends State<AddStopSheet> {
           g.category?.toLowerCase() == _activeCategory;
       return catOk && gemMatchesSearch(g, _query);
     }).toList();
+
+    // Real Mapbox places sit alongside curated gems, same as elsewhere in the
+    // app — but only in the unfiltered 'All' category view: Mapbox's POI
+    // categories (restaurant, monument, park…) don't map onto Gem's fixed
+    // 8-category taxonomy, so a specific category chip only ever filters
+    // gems (same call listings_screen.dart already made for its merged grid).
+    final showRealPlaces = _activeCategory == 'all';
+    final realPlaces = !showRealPlaces
+        ? const <_RealPlace>[]
+        : _query.isEmpty
+            ? _nearby.map(_RealPlace.fromPoi).toList()
+            : _searchResults.map(_RealPlace.fromSuggestion).toList();
+    final realPlacesLoading =
+        showRealPlaces && (_query.isEmpty ? _nearbyLoading : _searching);
 
     return DraggableScrollableSheet(
       initialChildSize: 0.85,
@@ -333,7 +474,7 @@ class _AddStopSheetState extends State<AddStopSheet> {
                                 fontWeight: FontWeight.w800)),
                       ),
                       const SizedBox(width: 8),
-                      Text('${filtered.length} nearby',
+                      Text('${filtered.length + realPlaces.length} nearby',
                           style: TextStyle(
                               color: palette.mute,
                               fontSize: 12,
@@ -341,14 +482,16 @@ class _AddStopSheetState extends State<AddStopSheet> {
                     ],
                   ),
                   const SizedBox(height: 10),
-                  // --- 4. Search (debounced ~250ms) ---
+                  // --- 4. Search (debounced ~250ms; queries this app's own
+                  // gems client-side AND Mapbox Search Box for real places,
+                  // proximity-biased to the trip's destination) ---
                   TextField(
                     controller: _searchCtrl,
                     onChanged: _onSearchChanged,
                     style: TextStyle(color: palette.ink, fontSize: 14),
                     decoration: InputDecoration(
                       isDense: true,
-                      hintText: 'Search gems',
+                      hintText: 'Search gems & places',
                       hintStyle: TextStyle(color: palette.mute, fontSize: 14),
                       prefixIcon:
                           Icon(Icons.search, color: palette.mute, size: 20),
@@ -405,23 +548,18 @@ class _AddStopSheetState extends State<AddStopSheet> {
                     ),
                   ),
                   const SizedBox(height: 12),
-                  if (located.fellBack)
-                    _FallbackBanner(
-                        location: location,
-                        matched: located.matched,
-                        palette: palette),
-                  // --- 6. Results ---
-                  if (filtered.isEmpty)
+                  // --- 6. Results: curated gems, then real Mapbox places ---
+                  if (filtered.isEmpty && realPlaces.isEmpty && !realPlacesLoading)
                     Padding(
                       padding: const EdgeInsets.symmetric(vertical: 24),
                       child: Center(
                         child: Text(
-                            'No gems match. Try clearing filters, or add a custom stop below.',
+                            'No results. Try clearing filters, or add a custom stop below.',
                             textAlign: TextAlign.center,
                             style: TextStyle(color: palette.mute, fontSize: 13)),
                       ),
                     )
-                  else
+                  else ...[
                     for (final g in filtered) ...[
                       _GemResultRow(
                         gem: g,
@@ -431,6 +569,29 @@ class _AddStopSheetState extends State<AddStopSheet> {
                       ),
                       const SizedBox(height: 8),
                     ],
+                    for (final p in realPlaces) ...[
+                      _PlaceResultRow(
+                        place: p,
+                        selected: _selectedPlace?.name == p.name,
+                        resolving: _resolvingPlaceName == p.name,
+                        palette: palette,
+                        onTap: () => _selectPlace(p),
+                      ),
+                      const SizedBox(height: 8),
+                    ],
+                  ],
+                  if (realPlacesLoading)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      child: Center(
+                        child: SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(
+                              strokeWidth: 2, color: AppTheme.primary.withValues(alpha: 0.6)),
+                        ),
+                      ),
+                    ),
                   const SizedBox(height: 4),
                   // --- 7. Custom stop fallback ---
                   GestureDetector(
@@ -490,6 +651,7 @@ class _AddStopSheetState extends State<AddStopSheet> {
               slot: _slot,
               time: _time,
               selectionLabel: _selectedGem?.gemName ??
+                  _selectedPlace?.name ??
                   (_customMode && _customNameCtrl.text.trim().isNotEmpty
                       ? _customNameCtrl.text.trim()
                       : null),
@@ -547,11 +709,14 @@ class _SlotChip extends StatelessWidget {
   }
 }
 
-/// One discovery result: thumb, name, and a `category · duration · Cost TBD`
-/// meta line. Cost is unconditionally TBD — a gem carries no price of its
-/// own (price is per-placed-stop, set after attaching, same as a dropped
-/// gem's PriceEditPill) — kept as a static column for prototype visual
-/// parity per the resolved Phase 0 decision, not because it varies.
+/// One discovery result: thumb, name, and a `GEM · category · duration ·
+/// Cost TBD` meta line. The "GEM · " prefix is the same tell used for
+/// curated content elsewhere (listings_screen.dart's grid, e.g.) now that
+/// this list also mixes in generic real places via [_PlaceResultRow] — cost
+/// is unconditionally TBD — a gem carries no price of its own (price is
+/// per-placed-stop, set after attaching, same as a dropped gem's
+/// PriceEditPill) — kept as a static column for prototype visual parity per
+/// the resolved Phase 0 decision, not because it varies.
 class _GemResultRow extends StatelessWidget {
   const _GemResultRow({
     required this.gem,
@@ -568,7 +733,7 @@ class _GemResultRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final metaParts = <String>[
-      gem.displayCategory,
+      'GEM · ${gem.displayCategory}',
       if (gem.estDurationMin != null) '${gem.estDurationMin}m',
       'Cost TBD',
     ];
@@ -628,38 +793,145 @@ class _GemResultRow extends StatelessWidget {
   }
 }
 
-class _FallbackBanner extends StatelessWidget {
-  const _FallbackBanner(
-      {required this.location, required this.matched, required this.palette});
+/// A generic real place from Tilequery (nearby, no query typed) or Search Box
+/// (query typed) — normalized to one shape so [_PlaceResultRow] doesn't need
+/// to know which source it came from. [maki] carries through only for
+/// Tilequery results (Search Box's own POI-category vocabulary has no
+/// equivalent icon-glyph field); [NearbyPoi.iconForMaki] already treats null
+/// as "use the generic pin," so this needs no separate fallback path.
+///
+/// [lat]/[lng]: Tilequery results have them from the start; a Search Box
+/// suggestion doesn't until [_AddStopSheetState._selectPlace] resolves it via
+/// `MapboxSearchService.retrieve` on tap (hence [mapboxId] — the resolve
+/// target). Whatever ends up here is exactly what gets written into the
+/// stop's custom_payload, which is what makes it plottable on the trip map
+/// (see trip_route.dart's `_syntheticPlottableGem`) — a place with no
+/// resolvable coordinates still gets added, just as a title-only stop, same
+/// as a manual custom entry.
+class _RealPlace {
+  final String name;
+  final String? category;
+  final String? maki;
+  final String? distanceLabel;
+  final String? subtitle;
+  final double? lat;
+  final double? lng;
+  final String? mapboxId;
 
-  final String? location;
-  final int matched;
+  const _RealPlace({
+    required this.name,
+    this.category,
+    this.maki,
+    this.distanceLabel,
+    this.subtitle,
+    this.lat,
+    this.lng,
+    this.mapboxId,
+  });
+
+  factory _RealPlace.fromPoi(NearbyPoi p) => _RealPlace(
+        name: p.name,
+        category: p.category,
+        maki: p.maki,
+        distanceLabel: p.distanceMeters != null ? '${p.distanceMeters!.round()}m away' : null,
+        lat: p.lat,
+        lng: p.lng,
+      );
+
+  factory _RealPlace.fromSuggestion(PlaceSuggestion s) => _RealPlace(
+        name: s.name,
+        category: s.category,
+        subtitle: s.placeFormatted.isNotEmpty ? s.placeFormatted : null,
+        mapboxId: s.mapboxId,
+      );
+}
+
+/// Same row shape as [_GemResultRow] (thumb + name + meta line) for a real,
+/// non-curated place — deliberately WITHOUT the "GEM · " prefix or a photo
+/// thumb (Mapbox has none, see mapbox_tilequery_service.dart), the same
+/// curated-vs-generic tell used on the Discovery grid. [resolving] shows a
+/// small spinner in place of the thumb icon while this row's coordinates are
+/// being resolved (see `_selectPlace`) — brief, but real enough over a slow
+/// connection to leave silently tapping-and-waiting otherwise.
+class _PlaceResultRow extends StatelessWidget {
+  const _PlaceResultRow({
+    required this.place,
+    required this.selected,
+    required this.resolving,
+    required this.palette,
+    required this.onTap,
+  });
+
+  final _RealPlace place;
+  final bool selected;
+  final bool resolving;
   final _SheetPalette palette;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    final place = location ?? "this trip's location";
-    final lead = matched == 0
-        ? 'No gems tagged $place yet.'
-        : 'Only $matched gem${matched == 1 ? '' : 's'} tagged $place.';
-    return Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      decoration: BoxDecoration(
-        color: palette.card,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: palette.border),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(Icons.public, color: palette.mute, size: 18),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Text('$lead Showing all gems below.',
-                style: TextStyle(color: palette.mute, fontSize: 12, height: 1.3)),
-          ),
-        ],
+    final metaParts = <String>[
+      (place.category != null && place.category!.isNotEmpty)
+          ? place.category![0].toUpperCase() + place.category!.substring(1)
+          : 'Nearby place',
+      if (place.distanceLabel != null) place.distanceLabel!,
+      if (place.subtitle != null) place.subtitle!,
+    ];
+    return GestureDetector(
+      onTap: resolving ? null : onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 120),
+        padding: const EdgeInsets.all(8),
+        decoration: BoxDecoration(
+          color: selected ? AppTheme.primarySoft : palette.card,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+              color: selected ? AppTheme.primary : palette.border,
+              width: selected ? 1.5 : 1),
+        ),
+        child: Row(
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: Container(
+                width: 44,
+                height: 44,
+                color: palette.surface,
+                alignment: Alignment.center,
+                child: resolving
+                    ? SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(
+                            strokeWidth: 2, color: palette.mute),
+                      )
+                    : Icon(NearbyPoi.iconForMaki(place.maki), size: 20, color: palette.mute),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(place.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                          color: palette.ink,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w700)),
+                  const SizedBox(height: 2),
+                  Text(metaParts.join(' · '),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(color: palette.mute, fontSize: 11)),
+                ],
+              ),
+            ),
+            if (selected && !resolving)
+              const Icon(Icons.check_circle, color: AppTheme.primary, size: 20),
+          ],
+        ),
       ),
     );
   }

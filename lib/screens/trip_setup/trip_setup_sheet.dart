@@ -16,14 +16,30 @@ import 'step_two_template.dart';
 /// Header/handle dims match the app's canonical sheet (drop_gem_sheet):
 /// 28px top radius, centered 44×5 handle, boxed 44×44 close button.
 class TripSetupSheet extends StatefulWidget {
-  const TripSetupSheet({super.key});
+  const TripSetupSheet({
+    super.key,
+    this.initialLocation,
+    this.initialLat,
+    this.initialLng,
+  });
+
+  /// Pre-fills Step 1's "Where to?" field — e.g. the Home "Where to next?"
+  /// destination browser jumping straight into trip creation for a tapped
+  /// city. Implements the `/trips/new` route's own `?location=` param (see
+  /// trip_routes.dart); null for every other, still-blank entry point.
+  final String? initialLocation;
+  final double? initialLat;
+  final double? initialLng;
 
   @override
   State<TripSetupSheet> createState() => _TripSetupSheetState();
 }
 
 class _TripSetupSheetState extends State<TripSetupSheet> {
-  final TripDraft _draft = TripDraft();
+  late final TripDraft _draft = TripDraft()
+    ..location = widget.initialLocation
+    ..locationLat = widget.initialLat
+    ..locationLng = widget.initialLng;
   int _step = 0; // 0 = init, 1 = who's coming, 2 = template
   bool _isCreating = false;
 

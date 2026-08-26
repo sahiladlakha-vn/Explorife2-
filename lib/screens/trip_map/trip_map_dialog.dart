@@ -1,5 +1,6 @@
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:provider/provider.dart';
@@ -46,12 +47,12 @@ class TripMapDialog extends StatelessWidget {
     } else if (error != null) {
       body = const Center(
         child: Text("Couldn't load this trip.",
-            style: TextStyle(color: AppTheme.textSecondary)),
+            style: TextStyle(color: AppTheme.lightMute)),
       );
     } else {
       body = const Center(
         child: Text("This trip doesn't exist or isn't yours.",
-            style: TextStyle(color: AppTheme.textSecondary)),
+            style: TextStyle(color: AppTheme.lightMute)),
       );
     }
 
@@ -60,7 +61,7 @@ class TripMapDialog extends StatelessWidget {
     final height = size.height * 0.72;
 
     return Dialog(
-      backgroundColor: AppTheme.surface,
+      backgroundColor: AppTheme.lightSurface,
       insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 40),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
       clipBehavior: Clip.antiAlias,
@@ -91,7 +92,7 @@ class _Header extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.fromLTRB(16, 12, 12, 12),
       decoration: const BoxDecoration(
-        border: Border(bottom: BorderSide(color: AppTheme.divider)),
+        border: Border(bottom: BorderSide(color: AppTheme.lightBorder)),
       ),
       child: Row(
         children: [
@@ -106,13 +107,13 @@ class _Header extends StatelessWidget {
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
-                              color: AppTheme.textPrimary,
+                              color: AppTheme.lightInk,
                               fontSize: 15,
                               fontWeight: FontWeight.w700)),
                       if (subtitle != null)
                         Text(subtitle!,
                             style: const TextStyle(
-                                color: AppTheme.textSecondary, fontSize: 11)),
+                                color: AppTheme.lightMute, fontSize: 11)),
                     ],
                   ),
           ),
@@ -123,12 +124,12 @@ class _Header extends StatelessWidget {
               width: 40,
               height: 40,
               decoration: BoxDecoration(
-                color: AppTheme.surface2,
+                color: AppTheme.lightCard,
                 borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: AppTheme.divider),
+                border: Border.all(color: AppTheme.lightBorder),
               ),
               child: const Icon(Icons.close,
-                  color: AppTheme.textPrimary, size: 20),
+                  color: AppTheme.lightInk, size: 20),
             ),
           ),
         ],
@@ -147,6 +148,20 @@ class _TripMapView extends StatefulWidget {
 
 class _TripMapViewState extends State<_TripMapView> {
   static final String _token = dotenv.env['MAPBOX_TOKEN'] ?? '';
+
+  // Standard Style (3D buildings/landmarks + dynamic lighting) only renders
+  // through a real Mapbox GL runtime — web has one (Mapbox GL JS), native's
+  // flutter_map raster fallback doesn't (confirmed against Mapbox's own
+  // endpoints; see explore_screen.dart's _autoStyle for the same finding).
+  // Native keeps the flat 'outdoors-v12' this dialog always used.
+  String get _styleId => kIsWeb ? 'standard' : 'outdoors-v12';
+
+  // Defaults to 'day' — this is the trip-planning map, so legibility across
+  // every stop and route color matters more than an ambient/immersive look
+  // (unlike Explore's map, which auto-matches real time-of-day; see that
+  // screen's _autoLightPreset). Only meaningful on web; see _LightingPill,
+  // which this dialog doesn't even show on native.
+  String _lightPreset = 'day';
 
   MapEngineController? _controller;
   String? _fittedKey;
@@ -278,14 +293,30 @@ class _TripMapViewState extends State<_TripMapView> {
 
     _maybeFit(pinMarkers);
 
-    return MapEngineView(
-      markers: [...pinMarkers, ...decorationMarkers],
-      routes: routes,
-      styleId: 'outdoors-v12',
-      token: _token,
-      onMarkerTap: (id) => _onMarkerTap(id, plotted),
-      onReady: _onReady,
-      onCalloutClosed: _onCalloutClosed,
+    return Stack(
+      children: [
+        MapEngineView(
+          markers: [...pinMarkers, ...decorationMarkers],
+          routes: routes,
+          styleId: _styleId,
+          lightPreset: _lightPreset,
+          token: _token,
+          onMarkerTap: (id) => _onMarkerTap(id, plotted),
+          onReady: _onReady,
+          onCalloutClosed: _onCalloutClosed,
+        ),
+        // Lighting preset only exists on Standard Style (web); native's flat
+        // 'outdoors-v12' has nothing for this control to drive.
+        if (kIsWeb)
+          Positioned(
+            top: 10,
+            right: 10,
+            child: _LightingPill(
+              selected: _lightPreset,
+              onSelect: (p) => setState(() => _lightPreset = p),
+            ),
+          ),
+      ],
     );
   }
 }
@@ -301,19 +332,82 @@ class _EmptyMapState extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.map_outlined, size: 48, color: AppTheme.textSecondary),
+            Icon(Icons.map_outlined, size: 48, color: AppTheme.lightMute),
             SizedBox(height: 16),
             Text('No stops planned yet',
                 style: TextStyle(
-                    color: AppTheme.textPrimary,
+                    color: AppTheme.lightInk,
                     fontSize: 17,
                     fontWeight: FontWeight.w700)),
             SizedBox(height: 6),
             Text('Add stops to this trip to see them mapped here.',
                 textAlign: TextAlign.center,
-                style: TextStyle(color: AppTheme.textSecondary, fontSize: 13)),
+                style: TextStyle(color: AppTheme.lightMute, fontSize: 13)),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// Floating Dawn/Day/Dusk/Night control for Standard Style's lighting, one
+/// icon-only button per preset in a rounded white pill over the map's
+/// top-right corner — this dialog had no layer/style chrome at all before
+/// Standard, so this is new UI rather than a repurposed existing control
+/// (contrast explore_screen.dart, where the same choice slots into an
+/// already-existing layers sheet). Icon-only + a fixed 4-wide row keeps it
+/// small enough not to compete with the map itself in this compact dialog.
+class _LightingPill extends StatelessWidget {
+  const _LightingPill({required this.selected, required this.onSelect});
+
+  final String selected;
+  final ValueChanged<String> onSelect;
+
+  static const _presets = ['dawn', 'day', 'dusk', 'night'];
+
+  IconData _iconFor(String preset) => switch (preset) {
+        'dawn' || 'dusk' => Icons.wb_twilight,
+        'day' => Icons.wb_sunny,
+        _ => Icons.nightlight_round,
+      };
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(3),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.92),
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+              color: Colors.black.withValues(alpha: 0.18),
+              blurRadius: 8,
+              offset: const Offset(0, 2)),
+        ],
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          for (final p in _presets)
+            GestureDetector(
+              onTap: () => onSelect(p),
+              child: Tooltip(
+                message: p[0].toUpperCase() + p.substring(1),
+                child: Container(
+                  width: 30,
+                  height: 30,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: selected == p ? AppTheme.primary : Colors.transparent,
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(_iconFor(p),
+                      size: 16,
+                      color: selected == p ? Colors.white : AppTheme.lightMute),
+                ),
+              ),
+            ),
+        ],
       ),
     );
   }

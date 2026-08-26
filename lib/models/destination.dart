@@ -1,53 +1,49 @@
+import '../core/services/mapbox_search_service.dart';
+
+/// A real place from Mapbox Search Box — a searchable "destination" distinct
+/// from [Gem] (this app's own crowdsourced hidden spots; see
+/// lib/models/gem.dart). Mapbox has no pricing/reviews/amenities data, so
+/// this only carries what's actually real: identity, location, and Mapbox's
+/// own POI category. [latitude]/[longitude] are 0 until resolved — see
+/// [hasCoords] — because Search Box's `/suggest` step (which builds the
+/// picklist) deliberately omits coordinates; only retrieving one specific
+/// suggestion via [DestinationProvider.resolve] fetches them.
 class Destination {
-  final String id;
+  final String id; // Mapbox's mapbox_id
   final String name;
-  final String country;
-  final String description;
-  final String imageUrl;
+  final String placeFormatted;
   final double latitude;
   final double longitude;
-  final double rating;
-  final int reviewCount;
-  final String category;
-  final List<String> tags;
-  final double pricePerNight;
+  final String? category;
   bool isSaved;
 
   Destination({
     required this.id,
     required this.name,
-    required this.country,
-    required this.description,
-    required this.imageUrl,
-    required this.latitude,
-    required this.longitude,
-    required this.rating,
-    required this.reviewCount,
-    required this.category,
-    required this.tags,
-    required this.pricePerNight,
+    required this.placeFormatted,
+    this.latitude = 0,
+    this.longitude = 0,
+    this.category,
     this.isSaved = false,
   });
 
-  String get location => '$name, $country';
-}
+  factory Destination.fromSuggestion(PlaceSuggestion s, {bool isSaved = false}) => Destination(
+        id: s.mapboxId,
+        name: s.name,
+        placeFormatted: s.placeFormatted,
+        category: s.category,
+        isSaved: isSaved,
+      );
 
-class Review {
-  final String id;
-  final String userId;
-  final String userName;
-  final String userAvatar;
-  final double rating;
-  final String comment;
-  final DateTime date;
+  factory Destination.fromPlaceDetails(PlaceDetails d, {bool isSaved = false}) => Destination(
+        id: d.mapboxId,
+        name: d.name,
+        placeFormatted: d.placeFormatted,
+        latitude: d.lat,
+        longitude: d.lng,
+        category: d.category,
+        isSaved: isSaved,
+      );
 
-  const Review({
-    required this.id,
-    required this.userId,
-    required this.userName,
-    required this.userAvatar,
-    required this.rating,
-    required this.comment,
-    required this.date,
-  });
+  bool get hasCoords => latitude != 0 || longitude != 0;
 }

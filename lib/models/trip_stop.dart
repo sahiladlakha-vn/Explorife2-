@@ -16,7 +16,13 @@ class TripStop {
   /// References `saved_gems.id` when this stop is a gem; null for custom stops.
   final String? gemId;
 
-  /// Freeform stop data (e.g. {'title': …, 'note': …}) when [gemId] is null.
+  /// Freeform stop data (e.g. {'title': …}) when [gemId] is null. When the
+  /// stop was picked from a real Mapbox place (AddStopSheet's nearby/search
+  /// results) rather than typed as a pure freeform name, it also carries
+  /// `lat`/`lng` — the only thing that makes a custom stop plottable on the
+  /// trip map (see trip_route.dart's `_syntheticPlottableGem`). A stop with
+  /// just a title and no lat/lng simply doesn't appear on the map, same as
+  /// it always has.
   final Map<String, dynamic>? customPayload;
 
   /// VND cost of this stop. MONEY CONTRACT (matches trip_bookings.amountVnd

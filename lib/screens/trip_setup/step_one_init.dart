@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:image_picker/image_picker.dart';
+import '../../core/logic/currency.dart';
 import '../../core/services/geocoding_service.dart';
 import '../../core/theme/app_theme.dart';
 import '../../providers/trip_provider.dart';
@@ -24,10 +26,11 @@ class StepOneInit extends StatefulWidget {
   final ScrollController scrollController;
   final VoidCallback onChanged;
 
-  /// Location + a valid (non-zero-night) date span + positive budget + a vibe.
-  /// The date span must be at least one night — a zero/negative span would
-  /// divide-by-zero in the per-day helper downstream.
+  /// Title + location + a valid (non-zero-night) date span + positive budget
+  /// + a vibe. The date span must be at least one night — a zero/negative
+  /// span would divide-by-zero in the per-day helper downstream.
   static bool isValid(TripDraft d) =>
+      (d.title?.trim().isNotEmpty ?? false) &&
       (d.location?.trim().isNotEmpty ?? false) &&
       d.dateStart != null &&
       d.dateEnd != null &&
@@ -45,10 +48,13 @@ class _StepOneInitState extends State<StepOneInit> {
     'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
   ];
 
+  late final TextEditingController _titleCtrl;
+  late final TextEditingController _descriptionCtrl;
   late final TextEditingController _locationCtrl;
   late final TextEditingController _budgetCtrl;
   final _locationFocus = FocusNode();
   final _geo = GeocodingService();
+  final _picker = ImagePicker();
   Timer? _geoDebounce;
   List<GeoPlace> _suggestions = [];
   bool _searching = false;
@@ -60,6 +66,9 @@ class _StepOneInitState extends State<StepOneInit> {
   void initState() {
     super.initState();
     // Seed from the draft so the fields survive a Back trip from Step 2.
+    _titleCtrl = TextEditingController(text: widget.draft.title ?? '');
+    _descriptionCtrl =
+        TextEditingController(text: widget.draft.description ?? '');
     _locationCtrl = TextEditingController(text: widget.draft.location ?? '');
     _budgetCtrl = TextEditingController(
         text: widget.draft.budgetVnd > 0 ? widget.draft.budgetVnd.toString() : '');
@@ -83,6 +92,8 @@ class _StepOneInitState extends State<StepOneInit> {
   @override
   void dispose() {
     _geoDebounce?.cancel();
+    _titleCtrl.dispose();
+    _descriptionCtrl.dispose();
     _locationCtrl.dispose();
     _budgetCtrl.dispose();
     _locationFocus.dispose();
@@ -153,9 +164,61 @@ class _StepOneInitState extends State<StepOneInit> {
 
   String _fmt(DateTime d) => '${_months[d.month - 1]} ${d.day}';
 
-  String _perDayLabel(int budget, int nights) {
+  String _perDayLabel(int budget, int nights, String symbol) {
     if (nights <= 0) return '';
-    return 'about ₫${Trip.formatVnd((budget / nights).round(), short: true)} per day';
+    return 'about $symbol${Trip.formatVnd((budget / nights).round(), short: true)} per day';
+  }
+
+  /// Reads the picked file's bytes immediately for a synchronous preview,
+  /// and stores both the file (for upload at create/save time) and the
+  /// bytes on the draft — same shape as DropGemSheet's cover picker — so
+  /// they survive a Back-then-forward trip through the wizard's steps.
+  Future<void> _pickCoverImage() async {
+    try {
+      final x = await _picker.pickImage(source: ImageSource.gallery, imageQuality: 85);
+      if (x == null) return;
+      final bytes = await x.readAsBytes();
+      if (!mounted) return;
+      widget.draft.coverImageFile = x;
+      widget.draft.coverImageBytes = bytes;
+      widget.onChanged();
+      setState(() {});
+    } catch (e) {
+      // Logged (not just swallowed to a generic message) so a real failure
+      // is diagnosable from the browser console instead of a dead end —
+      // this app has no native iOS/Android build right now (no Info.plist,
+      // no AndroidManifest.xml — just leftover flutter-create boilerplate),
+      // so on this platform there's no OS photo-library permission being
+      // requested/denied here; a real exception (not a permission prompt)
+      // is the only way this can fail.
+      debugPrint('StepOneInit._pickCoverImage error: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not add the photo: $e')),
+        );
+      }
+    }
+  }
+
+  void _removeCoverImage() {
+    widget.draft.coverImageFile = null;
+    widget.draft.coverImageBytes = null;
+    widget.draft.coverImageUrl = null;
+    widget.onChanged();
+    setState(() {});
+  }
+
+  Future<void> _pickCurrency() async {
+    final picked = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _CurrencySheet(selected: widget.draft.currency),
+    );
+    if (picked != null) {
+      widget.draft.currency = picked;
+      widget.onChanged();
+      setState(() {});
+    }
   }
 
   Future<void> _pickDates() async {
@@ -179,11 +242,44 @@ class _StepOneInitState extends State<StepOneInit> {
   Widget build(BuildContext context) {
     final d = widget.draft;
     final nights = _datesValid ? d.dateEnd!.difference(d.dateStart!).inDays : 0;
+    final currency = currencyFor(d.currency);
 
     return ListView(
       controller: widget.scrollController,
       padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
       children: [
+        _label('Cover Image'),
+        const SizedBox(height: 8),
+        _coverImagePicker(),
+        const SizedBox(height: 24),
+        _label('Title *'),
+        const SizedBox(height: 8),
+        TextField(
+          controller: _titleCtrl,
+          textCapitalization: TextCapitalization.sentences,
+          style: const TextStyle(color: AppTheme.lightInk, fontSize: 15),
+          decoration: _lightDecoration(hintText: 'e.g. Summer in Japan'),
+          onChanged: (v) {
+            d.title = v;
+            widget.onChanged();
+          },
+        ),
+        const SizedBox(height: 24),
+        _label('Description'),
+        const SizedBox(height: 8),
+        TextField(
+          controller: _descriptionCtrl,
+          minLines: 3,
+          maxLines: 3,
+          textCapitalization: TextCapitalization.sentences,
+          style: const TextStyle(color: AppTheme.lightInk, fontSize: 15),
+          decoration: _lightDecoration(hintText: 'What is this trip about?'),
+          onChanged: (v) {
+            d.description = v;
+            widget.onChanged();
+          },
+        ),
+        const SizedBox(height: 24),
         _label('Where to?'),
         const SizedBox(height: 8),
         TextField(
@@ -224,13 +320,13 @@ class _StepOneInitState extends State<StepOneInit> {
           style: const TextStyle(color: AppTheme.lightInk, fontSize: 15),
           decoration: _lightDecoration(
             hintText: '0',
-            prefixText: '₫ ',
+            prefixText: '${currency.symbol} ',
             // Scale hint — the raw field accepts bare digits, so anchor the
-            // magnitude a real VND budget lives at. Comma grouping matches the
+            // magnitude a real budget lives at. Comma grouping matches the
             // formatted echo below (Trip.formatVnd) and the app-wide
             // convention; kept always-on so the field height doesn't jump on
             // the first keystroke.
-            helperText: 'Example: 5,000,000 = ₫5M',
+            helperText: 'Example: 5,000,000 = ${currency.symbol}5M',
           ),
           onChanged: (v) {
             d.budgetVnd = int.tryParse(v) ?? 0;
@@ -242,11 +338,40 @@ class _StepOneInitState extends State<StepOneInit> {
           const SizedBox(height: 6),
           Text(
             nights > 0
-                ? '₫${Trip.formatVnd(d.budgetVnd)} · ${_perDayLabel(d.budgetVnd, nights)}'
-                : '₫${Trip.formatVnd(d.budgetVnd)}',
+                ? '${currency.symbol}${Trip.formatVnd(d.budgetVnd)} · ${_perDayLabel(d.budgetVnd, nights, currency.symbol)}'
+                : '${currency.symbol}${Trip.formatVnd(d.budgetVnd)}',
             style: const TextStyle(color: AppTheme.lightMute, fontSize: 12),
           ),
         ],
+        const SizedBox(height: 24),
+        _label('Currency'),
+        const SizedBox(height: 8),
+        InkWell(
+          onTap: _pickCurrency,
+          borderRadius: BorderRadius.circular(12),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+            decoration: BoxDecoration(
+              color: AppTheme.lightCard,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: AppTheme.lightBorder),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.payments_outlined,
+                    size: 18, color: AppTheme.lightMute),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(currency.label,
+                      style: const TextStyle(
+                          color: AppTheme.lightInk, fontSize: 15)),
+                ),
+                const Icon(Icons.keyboard_arrow_down,
+                    size: 20, color: AppTheme.lightMute),
+              ],
+            ),
+          ),
+        ),
         const SizedBox(height: 24),
         _label('What\'s the vibe?'),
         const SizedBox(height: 8),
@@ -260,6 +385,80 @@ class _StepOneInitState extends State<StepOneInit> {
   Widget _label(String text) => Text(text,
       style: const TextStyle(
           color: AppTheme.lightInk, fontSize: 15, fontWeight: FontWeight.w700));
+
+  /// Optional cover photo. No chosen image falls back to whatever
+  /// _heroImageUrl already does downstream (map-thumbnail, then a
+  /// location-seeded picsum placeholder) — nothing here needs a fallback
+  /// asset of its own, an empty [TripDraft.coverImageUrl]/[coverImageFile]
+  /// is the "no image chosen" state.
+  Widget _coverImagePicker() {
+    final d = widget.draft;
+    final bytes = d.coverImageBytes;
+    final existingUrl = d.coverImageUrl;
+
+    Widget? preview;
+    if (bytes != null) {
+      preview = Image.memory(bytes, width: double.infinity, height: 140, fit: BoxFit.cover);
+    } else if (existingUrl != null && existingUrl.isNotEmpty) {
+      preview = Image.network(existingUrl,
+          width: double.infinity, height: 140, fit: BoxFit.cover);
+    }
+
+    if (preview != null) {
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(12),
+        child: Stack(
+          children: [
+            preview,
+            Positioned(
+              top: 8,
+              right: 8,
+              child: GestureDetector(
+                onTap: _removeCoverImage,
+                child: Container(
+                  padding: const EdgeInsets.all(6),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.55),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(Icons.close, color: Colors.white, size: 18),
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return GestureDetector(
+      onTap: _pickCoverImage,
+      child: Container(
+        height: 140,
+        width: double.infinity,
+        decoration: BoxDecoration(
+          color: AppTheme.lightCard,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: AppTheme.lightBorder),
+        ),
+        child: const Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.add_photo_alternate_outlined,
+                size: 30, color: AppTheme.lightMute),
+            SizedBox(height: 8),
+            Text('Add cover image',
+                style: TextStyle(
+                    color: AppTheme.lightInk,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700)),
+            SizedBox(height: 2),
+            Text('Tap to upload a photo',
+                style: TextStyle(color: AppTheme.lightMute, fontSize: 12)),
+          ],
+        ),
+      ),
+    );
+  }
 
   /// Inline (not floating) so it can't overlap Step 1's later fields inside
   /// the surrounding ListView — same choice AddStopSheet/TravelerLookupSheet
@@ -499,6 +698,92 @@ class _DateField extends StatelessWidget {
                   style: TextStyle(
                       color: hasValue ? AppTheme.lightInk : AppTheme.lightMute, fontSize: 15)),
             ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Simple pick-one-of-N sheet for the Currency field. Light colorway, matching
+/// the rest of the trip-setup flow's bottom sheets (see date_range_sheet.dart).
+class _CurrencySheet extends StatelessWidget {
+  const _CurrencySheet({required this.selected});
+
+  final String selected;
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: Container(
+        margin: const EdgeInsets.only(top: 60),
+        decoration: const BoxDecoration(
+          color: AppTheme.lightSurface,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 10),
+            Center(
+              child: Container(
+                width: 44,
+                height: 5,
+                decoration: BoxDecoration(
+                  color: AppTheme.lightMute,
+                  borderRadius: BorderRadius.circular(3),
+                ),
+              ),
+            ),
+            const Padding(
+              padding: EdgeInsets.fromLTRB(20, 14, 20, 6),
+              child: Row(
+                children: [
+                  Text('Currency',
+                      style: TextStyle(
+                          color: AppTheme.lightInk,
+                          fontSize: 16,
+                          fontWeight: FontWeight.w700)),
+                ],
+              ),
+            ),
+            Flexible(
+              child: ListView.separated(
+                shrinkWrap: true,
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                itemCount: appCurrencies.length,
+                separatorBuilder: (_, __) =>
+                    const Divider(height: 1, color: AppTheme.lightBorder),
+                itemBuilder: (context, i) {
+                  final c = appCurrencies[i];
+                  final isSelected = c.code == selected;
+                  return InkWell(
+                    onTap: () => Navigator.of(context).pop(c.code),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 14),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Text(c.label,
+                                style: TextStyle(
+                                    color: AppTheme.lightInk,
+                                    fontSize: 15,
+                                    fontWeight: isSelected
+                                        ? FontWeight.w700
+                                        : FontWeight.w400)),
+                          ),
+                          if (isSelected)
+                            const Icon(Icons.check,
+                                size: 20, color: AppTheme.primary),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+            const SizedBox(height: 8),
           ],
         ),
       ),

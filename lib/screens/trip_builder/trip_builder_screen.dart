@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
+import '../../core/layout/breakpoints.dart';
+import '../../core/logic/currency.dart';
 import '../../core/theme/app_theme.dart';
 import '../../models/trip.dart';
 import '../../providers/trip_provider.dart';
@@ -22,6 +24,44 @@ void _exitToItinerary(BuildContext context, {String? tripId}) {
 
 /// Matches [SummarySidebar]'s `_MobilePeek` fixed height.
 const double _kSummaryPeekHeight = 120;
+
+/// Floating bottom-right confirm-and-exit affordance. Every stop already
+/// writes to Supabase the moment it's added (see _exitToItinerary's doc
+/// comment above) — there is no batched/deferred itinerary state left to
+/// persist here, so this button has nothing to actually save. It exists as a
+/// deliberate "I'm done" moment for the user, and reuses the exact same
+/// _exitToItinerary navigation the header close icon and system back gesture
+/// already use, so every exit path — tap here, tap close, swipe back — lands
+/// in the same place.
+class _SaveTripButton extends StatelessWidget {
+  const _SaveTripButton({required this.tripId});
+  final String tripId;
+
+  void _onTap(BuildContext context) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Trip saved')),
+    );
+    _exitToItinerary(context, tripId: tripId);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ElevatedButton.icon(
+      onPressed: () => _onTap(context),
+      style: ElevatedButton.styleFrom(
+        backgroundColor: AppTheme.primary,
+        foregroundColor: Colors.white,
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        elevation: 4,
+        shadowColor: AppTheme.primary.withValues(alpha: 0.4),
+      ),
+      icon: const Icon(Icons.check, size: 18),
+      label: const Text('Save trip',
+          style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700)),
+    );
+  }
+}
 
 /// Boxed icon affordance — pixel-identical to the "+ New Trip" wizard's close
 /// button (trip_setup_sheet.dart's header), reused here so the builder's exit
@@ -114,56 +154,73 @@ class _TripBuilderScreenState extends State<TripBuilderScreen> {
     // Computed once so the header's height/layout and the body breakpoints agree
     // on a single source of truth (width is identical either side of the app bar,
     // so there's no mismatch to reconcile).
-    final isMobile = MediaQuery.of(context).size.width < 900;
+    final isMobile = MediaQuery.of(context).size.width < Breakpoints.desktop;
     return Scaffold(
       backgroundColor: AppTheme.lightSurface,
       appBar: _TripBuilderHeader(tripId: widget.tripId, isMobile: isMobile),
-      body: LayoutBuilder(
-        builder: (context, constraints) {
-          final w = constraints.maxWidth;
-          if (w >= 900) {
-            final right = w >= 1100 ? 320.0 : 280.0;
-            return Row(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Expanded(
-                  child: ItineraryCanvas(
+      // Stack, not just the LayoutBuilder directly: _SaveTripButton floats in
+      // the bottom-right corner over whichever layout is active below, rather
+      // than being squeezed into SummarySidebar's already-tappable, height-
+      // constrained mobile peek bar (see _kSummaryPeekHeight) or reworked into
+      // the desktop sidebar's own Row/Column — one placement, both breakpoints.
+      body: Stack(
+        children: [
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final w = constraints.maxWidth;
+              if (w >= Breakpoints.desktop) {
+                final right = w >= 1100 ? 320.0 : 280.0;
+                return Row(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Expanded(
+                      child: ItineraryCanvas(
+                        tripId: widget.tripId,
+                        activeDay: _activeDay,
+                        onDayChanged: _onDayChanged,
+                      ),
+                    ),
+                    const VerticalDivider(width: 1, color: AppTheme.lightBorder),
+                    SizedBox(
+                      width: right,
+                      child: SummarySidebar(
+                          tripId: widget.tripId, activeDay: _activeDay),
+                    ),
+                  ],
+                );
+              }
+              // < 900: itinerary fills the space above the Summary peek. No more
+              // floating Discovery layer to reserve room for — AddStopSheet is a
+              // modal (showModalBottomSheet from each slot's "+ Add"), not a
+              // persistent overlay, so a plain Column replaces the old
+              // Stack/Positioned composition entirely.
+              return Column(
+                children: [
+                  Expanded(
+                    child: ItineraryCanvas(
+                      tripId: widget.tripId,
+                      activeDay: _activeDay,
+                      onDayChanged: _onDayChanged,
+                    ),
+                  ),
+                  SummarySidebar(
                     tripId: widget.tripId,
                     activeDay: _activeDay,
-                    onDayChanged: _onDayChanged,
+                    collapsed: true, // peek mode at mobile widths
                   ),
-                ),
-                const VerticalDivider(width: 1, color: AppTheme.lightBorder),
-                SizedBox(
-                  width: right,
-                  child: SummarySidebar(
-                      tripId: widget.tripId, activeDay: _activeDay),
-                ),
-              ],
-            );
-          }
-          // < 900: itinerary fills the space above the Summary peek. No more
-          // floating Discovery layer to reserve room for — AddStopSheet is a
-          // modal (showModalBottomSheet from each slot's "+ Add"), not a
-          // persistent overlay, so a plain Column replaces the old
-          // Stack/Positioned composition entirely.
-          return Column(
-            children: [
-              Expanded(
-                child: ItineraryCanvas(
-                  tripId: widget.tripId,
-                  activeDay: _activeDay,
-                  onDayChanged: _onDayChanged,
-                ),
-              ),
-              SummarySidebar(
-                tripId: widget.tripId,
-                activeDay: _activeDay,
-                collapsed: true, // peek mode at mobile widths
-              ),
-            ],
-          );
-        },
+                ],
+              );
+            },
+          ),
+          Positioned(
+            right: 16,
+            // Clears SummarySidebar's mobile peek bar (fixed _kSummaryPeekHeight)
+            // plus a 16px gap; on desktop the sidebar is a scrollable panel with
+            // no fixed bottom bar to clear, so just the screen-edge margin.
+            bottom: (isMobile ? _kSummaryPeekHeight : 0) + 16,
+            child: _SaveTripButton(tripId: widget.tripId),
+          ),
+        ],
       ),
     );
   }
@@ -191,7 +248,7 @@ class _TripBuilderScreenState extends State<TripBuilderScreen> {
         ),
       ),
       body: LayoutBuilder(
-        builder: (context, c) => c.maxWidth >= 900
+        builder: (context, c) => c.maxWidth >= Breakpoints.desktop
             ? Row(children: [
                 Expanded(child: block()),
                 SizedBox(width: 300, child: block()),
@@ -362,7 +419,10 @@ class _TripBuilderHeader extends StatelessWidget implements PreferredSizeWidget 
               start: trip.startDate, end: trip.endDate, nights: trip.nights),
           const SizedBox(width: 10),
         ],
-        _BudgetPill(budgetVnd: trip.budgetVnd, spent: spent),
+        _BudgetPill(
+            budgetVnd: trip.budgetVnd,
+            spent: spent,
+            symbol: currencyFor(trip.currency).symbol),
         const SizedBox(width: 8),
         _HeaderIconBox(
           icon: Icons.share_outlined,
@@ -426,10 +486,12 @@ class _DateChip extends StatelessWidget {
 ///   < 90%    → primary border, '₫X of ₫Y' with the cap muted
 /// Two-tone via [Text.rich] so the spent figure reads first. Short-form money.
 class _BudgetPill extends StatelessWidget {
-  const _BudgetPill({required this.budgetVnd, required this.spent});
+  const _BudgetPill(
+      {required this.budgetVnd, required this.spent, required this.symbol});
 
   final int budgetVnd;
   final int spent;
+  final String symbol;
 
   @override
   Widget build(BuildContext context) {
@@ -438,16 +500,16 @@ class _BudgetPill extends StatelessWidget {
     final accent = status.accent;
 
     final spentSpan = TextSpan(
-      text: '₫${Trip.formatVnd(spent, short: true)}',
+      text: '$symbol${Trip.formatVnd(spent, short: true)}',
       style: TextStyle(color: accent, fontWeight: FontWeight.w700),
     );
     final tail = over
         ? TextSpan(
-            text: ' · ₫${Trip.formatVnd(spent - budgetVnd, short: true)} over',
+            text: ' · $symbol${Trip.formatVnd(spent - budgetVnd, short: true)} over',
             style: const TextStyle(
                 color: AppTheme.danger, fontWeight: FontWeight.w600))
         : TextSpan(
-            text: ' of ₫${Trip.formatVnd(budgetVnd, short: true)}',
+            text: ' of $symbol${Trip.formatVnd(budgetVnd, short: true)}',
             style: const TextStyle(color: AppTheme.lightMute));
 
     return Container(

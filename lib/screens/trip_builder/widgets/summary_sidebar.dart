@@ -1,6 +1,7 @@
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import '../../../core/logic/currency.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../models/gem.dart';
 import '../../../models/trip.dart';
@@ -72,6 +73,7 @@ class _SidebarBody extends StatelessWidget {
       );
     }
 
+    final symbol = currencyFor(trip.currency).symbol;
     final dayCount = trip.nights + 1;
     final safeDay = activeDay.clamp(1, dayCount);
     final totalSpent = p.totalSpent(tripId);
@@ -113,11 +115,12 @@ class _SidebarBody extends StatelessWidget {
         ),
         _Section(
           title: 'Budget',
-          child: _BudgetBar(spent: totalSpent, budgetVnd: trip.budgetVnd),
+          child: _BudgetBar(
+              spent: totalSpent, budgetVnd: trip.budgetVnd, symbol: symbol),
         ),
         _Section(
           title: 'By category',
-          child: _CategoryBreakdown(totals: totals),
+          child: _CategoryBreakdown(totals: totals, symbol: symbol),
         ),
         _Section(
           title: 'By day',
@@ -317,10 +320,12 @@ class _AlsoToday extends StatelessWidget {
 /// thresholds, same accent, different shape. Fill is clamped so an over-budget
 /// trip pins full-red rather than overflowing the track.
 class _BudgetBar extends StatelessWidget {
-  const _BudgetBar({required this.spent, required this.budgetVnd});
+  const _BudgetBar(
+      {required this.spent, required this.budgetVnd, required this.symbol});
 
   final int spent;
   final int budgetVnd;
+  final String symbol;
 
   @override
   Widget build(BuildContext context) {
@@ -329,15 +334,15 @@ class _BudgetBar extends StatelessWidget {
     final remaining = budgetVnd - spent;
 
     final tail = status.over
-        ? '₫${Trip.formatVnd(-remaining, short: true)} over'
-        : '₫${Trip.formatVnd(remaining, short: true)} left';
+        ? '$symbol${Trip.formatVnd(-remaining, short: true)} over'
+        : '$symbol${Trip.formatVnd(remaining, short: true)} left';
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Row(
           children: [
-            Text('₫${Trip.formatVnd(spent, short: true)}',
+            Text('$symbol${Trip.formatVnd(spent, short: true)}',
                 style: TextStyle(
                     color: status.accent,
                     fontSize: 18,
@@ -345,7 +350,7 @@ class _BudgetBar extends StatelessWidget {
             const SizedBox(width: 6),
             Padding(
               padding: const EdgeInsets.only(bottom: 2),
-              child: Text('of ₫${Trip.formatVnd(budgetVnd, short: true)}',
+              child: Text('of $symbol${Trip.formatVnd(budgetVnd, short: true)}',
                   style: const TextStyle(
                       color: AppTheme.lightMute, fontSize: 12)),
             ),
@@ -390,9 +395,10 @@ class _BudgetBar extends StatelessWidget {
 /// total so relative magnitude reads at a glance ("stays dominate"). Fixed order
 /// matches categoryTotals' stable key order.
 class _CategoryBreakdown extends StatelessWidget {
-  const _CategoryBreakdown({required this.totals});
+  const _CategoryBreakdown({required this.totals, required this.symbol});
 
   final Map<String, int> totals;
+  final String symbol;
 
   static const _rows = [
     ('stay', 'Stays', AppTheme.primary),
@@ -415,6 +421,7 @@ class _CategoryBreakdown extends StatelessWidget {
               label: label,
               color: color,
               value: totals[key] ?? 0,
+              symbol: symbol,
               // Empty state (no spend anywhere) → all bars flat, not a crash.
               fraction: maxVal == 0 ? 0.0 : (totals[key] ?? 0) / maxVal,
             ),
@@ -429,12 +436,14 @@ class _CategoryRow extends StatelessWidget {
     required this.label,
     required this.color,
     required this.value,
+    required this.symbol,
     required this.fraction,
   });
 
   final String label;
   final Color color;
   final int value;
+  final String symbol;
   final double fraction;
 
   @override
@@ -464,7 +473,7 @@ class _CategoryRow extends StatelessWidget {
         const SizedBox(width: 8),
         SizedBox(
           width: 52,
-          child: Text('₫${Trip.formatVnd(value, short: true)}',
+          child: Text('$symbol${Trip.formatVnd(value, short: true)}',
               textAlign: TextAlign.end,
               style: const TextStyle(
                   color: AppTheme.lightMute,
@@ -625,6 +634,7 @@ class _MobilePeek extends StatelessWidget {
   Widget build(BuildContext context) {
     final p = context.watch<TripProvider>();
     final trip = p.tripById(tripId);
+    final symbol = currencyFor(trip?.currency).symbol;
     final safeDay =
         trip == null ? activeDay : activeDay.clamp(1, trip.nights + 1);
     final status = BudgetStatus.of(
@@ -652,7 +662,7 @@ class _MobilePeek extends StatelessWidget {
               Row(
                 children: [
                   Expanded(
-                    child: Text(_dayStatusLine(p, tripId, safeDay),
+                    child: Text(_dayStatusLine(p, tripId, safeDay, symbol),
                         style: const TextStyle(
                             color: AppTheme.lightMute, fontSize: 13)),
                   ),
@@ -665,7 +675,7 @@ class _MobilePeek extends StatelessWidget {
                 TextSpan(children: [
                   TextSpan(
                     text:
-                        '₫${Trip.formatVnd(p.totalSpent(tripId), short: true)}',
+                        '$symbol${Trip.formatVnd(p.totalSpent(tripId), short: true)}',
                     style: TextStyle(
                         color: status.accent,
                         fontSize: 20,
@@ -673,7 +683,7 @@ class _MobilePeek extends StatelessWidget {
                   ),
                   TextSpan(
                     text:
-                        ' of ₫${Trip.formatVnd(trip?.budgetVnd ?? 0, short: true)}',
+                        ' of $symbol${Trip.formatVnd(trip?.budgetVnd ?? 0, short: true)}',
                     style: const TextStyle(
                         color: AppTheme.lightMute, fontSize: 13),
                   ),
@@ -691,10 +701,10 @@ class _MobilePeek extends StatelessWidget {
 
 /// Active-day status line: "3 stops · ₫1.2M today". Shared so the peek and any
 /// future day-status surface phrase it identically.
-String _dayStatusLine(TripProvider p, String tripId, int day) {
+String _dayStatusLine(TripProvider p, String tripId, int day, String symbol) {
   final n = p.stopsForDay(tripId, day).length;
   final stops = n == 1 ? '1 stop' : '$n stops';
-  return '$stops · ₫${Trip.formatVnd(p.dayTotal(tripId, day), short: true)} today';
+  return '$stops · $symbol${Trip.formatVnd(p.dayTotal(tripId, day), short: true)} today';
 }
 
 /// Label for a non-mappable stop in the "Also today" list.

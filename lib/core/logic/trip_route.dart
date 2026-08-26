@@ -24,17 +24,39 @@ class PlottedStop {
   double get lng => gem.longitude!;
 }
 
-/// Resolves a stop to its plottable Gem — null for a custom stop (no
-/// coordinates exist for those; see [TripStop.isCustom]) or a gem missing
+/// Resolves a stop to its plottable Gem — for a custom stop ([TripStop.isCustom]),
+/// that's [_syntheticPlottableGem] (null unless its payload carries real
+/// coordinates); for a gem stop, null if the gem itself is missing
 /// coordinates. Linear scan over the trip's gem set; fine at this scale (one
 /// trip's stops against the catalogue), same as the join summary_sidebar.dart
 /// already used before this was extracted.
 Gem? _resolveStopGem(TripStop stop, List<Gem> gems) {
-  if (stop.isCustom) return null;
+  if (stop.isCustom) return _syntheticPlottableGem(stop);
   for (final g in gems) {
     if (g.id == stop.gemId) return g.hasCoords ? g : null;
   }
   return null;
+}
+
+/// A custom (non-Gem) stop only plots when its own payload carries real
+/// coordinates — set when it was picked from a real Mapbox place
+/// (AddStopSheet's nearby/search results) rather than typed as a pure
+/// freeform name, which has nowhere to point on a map. Wrapped in a
+/// throwaway [Gem] (real id/savedAt aren't meaningful here) so this reuses
+/// the exact same marker/route/callout pipeline as a curated-gem stop
+/// instead of forking a second "plot a name+coords" path through every
+/// [plotStops] consumer (trip_map_dialog.dart, overview_tab.dart).
+Gem? _syntheticPlottableGem(TripStop stop) {
+  final lat = (stop.customPayload?['lat'] as num?)?.toDouble();
+  final lng = (stop.customPayload?['lng'] as num?)?.toDouble();
+  if (lat == null || lng == null) return null;
+  return Gem(
+    id: 'custom-${stop.id}',
+    gemName: stop.customTitle ?? 'Custom stop',
+    latitude: lat,
+    longitude: lng,
+    savedAt: DateTime.now(),
+  );
 }
 
 /// Resolves [orderedStops] (chronological — e.g. TripProvider.allStopsOrdered)

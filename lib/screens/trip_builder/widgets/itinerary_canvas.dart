@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
+import '../../../core/logic/currency.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../models/gem.dart';
 import '../../../models/trip.dart';
@@ -182,6 +183,9 @@ class DayCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final dayTotal =
         context.select<TripProvider, int>((p) => p.dayTotal(tripId, day));
+    final symbol = currencyFor(
+            context.select<TripProvider, String?>((p) => p.tripById(tripId)?.currency))
+        .symbol;
 
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 24),
@@ -226,7 +230,7 @@ class DayCard extends StatelessWidget {
                 ],
               ),
             ),
-            _DayTotalPill(totalVnd: dayTotal),
+            _DayTotalPill(totalVnd: dayTotal, symbol: symbol),
           ],
         ),
         const SizedBox(height: 16),
@@ -244,11 +248,12 @@ class DayCard extends StatelessWidget {
   }
 }
 
-/// Compact day-spend chip. Free gems keep this at ₫0 until prices are set.
+/// Compact day-spend chip. Free gems keep this at 0 until prices are set.
 class _DayTotalPill extends StatelessWidget {
-  const _DayTotalPill({required this.totalVnd});
+  const _DayTotalPill({required this.totalVnd, required this.symbol});
 
   final int totalVnd;
+  final String symbol;
 
   @override
   Widget build(BuildContext context) {
@@ -259,7 +264,7 @@ class _DayTotalPill extends StatelessWidget {
         borderRadius: BorderRadius.circular(20),
         border: Border.all(color: AppTheme.lightBorder),
       ),
-      child: Text('₫${Trip.formatVnd(totalVnd, short: true)}',
+      child: Text('$symbol${Trip.formatVnd(totalVnd, short: true)}',
           style: const TextStyle(
               color: AppTheme.lightInk,
               fontSize: 13,
@@ -459,6 +464,9 @@ class ItineraryItemCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final (title, subtitle) = _titleFor();
+    final symbol = currencyFor(context
+            .select<TripProvider, String?>((p) => p.tripById(stop.tripId)?.currency))
+        .symbol;
 
     return Container(
       padding: const EdgeInsets.all(8),
@@ -504,6 +512,7 @@ class ItineraryItemCard extends StatelessWidget {
           const SizedBox(width: 8),
           PriceEditPill(
             priceVnd: stop.priceVnd,
+            symbol: symbol,
             onChanged: (v) =>
                 context.read<TripProvider>().updateStopPrice(stop.id, v),
           ),
@@ -574,9 +583,13 @@ class _Thumb extends StatelessWidget {
 /// priced → the amount.
 class PriceEditPill extends StatefulWidget {
   const PriceEditPill(
-      {super.key, required this.priceVnd, required this.onChanged});
+      {super.key,
+      required this.priceVnd,
+      required this.symbol,
+      required this.onChanged});
 
   final int? priceVnd;
+  final String symbol;
   final ValueChanged<int?> onChanged;
 
   @override
@@ -629,7 +642,7 @@ class _PriceEditPillState extends State<PriceEditPill> {
           onTapOutside: (_) => _commit(),
           decoration: InputDecoration(
             isDense: true,
-            prefixText: '₫',
+            prefixText: widget.symbol,
             prefixStyle:
                 const TextStyle(color: AppTheme.lightMute, fontSize: 13),
             contentPadding:
@@ -668,7 +681,7 @@ class _PriceEditPillState extends State<PriceEditPill> {
               ? 'Set price'
               : (widget.priceVnd == 0
                   ? 'Free'
-                  : '₫${Trip.formatVnd(widget.priceVnd!, short: true)}'),
+                  : '${widget.symbol}${Trip.formatVnd(widget.priceVnd!, short: true)}'),
           style: TextStyle(
               color: confirmed ? AppTheme.primary : AppTheme.lightMute,
               fontSize: 12,

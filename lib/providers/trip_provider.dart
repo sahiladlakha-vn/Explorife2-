@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/trip.dart';
 import '../models/trip_stop.dart';
@@ -296,25 +297,37 @@ class TripProvider extends ChangeNotifier {
   /// checklist failure is logged to [error] and swallowed rather than rethrown —
   /// createTrip only rethrows for failures that mean "no trip was created".
   Future<Trip> createTrip(TripDraft draft) async {
+    // Upload before the insert (rather than a two-step insert-then-patch) so
+    // the row is created with its cover photo already attached. Best-effort:
+    // a failed upload falls back to whatever coverImageUrl already holds
+    // (null for a fresh pick) rather than failing trip creation outright.
+    final coverUrl = draft.coverImageFile != null
+        ? await uploadCoverImage(draft.coverImageFile!) ?? draft.coverImageUrl
+        : draft.coverImageUrl;
+
     final row = await _supabase
         .from('trips')
         .insert({
           'owner_id': _currentUserId,
-          // Empty name is valid (column is NOT NULL, not non-empty); Trip
-          // .displayName supplies the "<location> escape" fallback in the UI.
-          'name': '',
+          // Empty name is valid (column is NOT NULL, not non-empty) — Trip
+          // .displayName still supplies the "<location> escape" fallback for
+          // a trip whose Title was left blank pre-this-field, or by a caller
+          // that skips it entirely.
+          'name': draft.title ?? '',
           'location': draft.location ?? '',
           'location_lat': draft.locationLat,
           'location_lng': draft.locationLng,
+          'description': draft.description,
           'start_date':
               (draft.dateStart ?? DateTime.now()).toIso8601String().substring(0, 10),
           'end_date':
               (draft.dateEnd ?? DateTime.now()).toIso8601String().substring(0, 10),
           'budget_vnd': draft.budgetVnd,
-          'currency': 'VND',
+          'currency': draft.currency,
           'vibe': draft.vibe?.key,
           'template_id':
               draft.templateChoice == 'blueprint' ? draft.blueprintId : null,
+          'cover_image_url': coverUrl,
         })
         .select()
         .single();
@@ -393,53 +406,105 @@ class TripProvider extends ChangeNotifier {
   /// createTrip there's real prior state here to roll back to on failure.
   Future<void> updateTrip(
     String tripId, {
+    String? title,
     required String location,
     double? locationLat,
     double? locationLng,
+    String? description,
     required DateTime startDate,
     required DateTime endDate,
     required int budgetVnd,
+    String? currency,
     required TripVibe? vibe,
+    XFile? coverImageFile,
+    String? coverImageUrl,
   }) async {
     final old = _trips[tripId];
     if (old == null) return;
+    // Upload (if a new photo was picked) before the optimistic state swap —
+    // the resolved URL is the value that goes into Trip.coverImageUrl, so
+    // there's no way to be optimistic about it ahead of the network call the
+    // way the other fields are. Best-effort: a failed upload keeps whatever
+    // coverImageUrl already holds (the prior photo, or null) rather than
+    // blocking the rest of the edit.
+    final resolvedCoverUrl = coverImageFile != null
+        ? await uploadCoverImage(coverImageFile) ?? coverImageUrl
+        : coverImageUrl;
+
     // Built directly rather than via copyWith: location and its coordinates
     // change as one unit here, and null is a legitimate new value for
     // locationLat/Lng (the user retyped the field without picking a fresh
     // suggestion) — copyWith's `param ?? this.field` convention can't express
-    // "clear this", only "leave unchanged".
+    // "clear this", only "leave unchanged". description has the same
+    // clear-to-null need (the user deleted what they'd written).
     _trips[tripId] = Trip(
       id: old.id,
       ownerId: old.ownerId,
-      name: old.name,
+      name: title ?? old.name,
       location: location,
       locationLat: locationLat,
       locationLng: locationLng,
+      description: description,
       startDate: startDate,
       endDate: endDate,
       budgetVnd: budgetVnd,
-      currency: old.currency,
+      currency: currency ?? old.currency,
       vibe: vibe,
       templateId: old.templateId,
       createdAt: old.createdAt,
+      coverImageUrl: resolvedCoverUrl,
     );
     notifyListeners();
 
     try {
       await _supabase.from('trips').update({
+        if (title != null) 'name': title,
         'location': location,
         'location_lat': locationLat,
         'location_lng': locationLng,
+        'description': description,
         'start_date': startDate.toIso8601String().substring(0, 10),
         'end_date': endDate.toIso8601String().substring(0, 10),
         'budget_vnd': budgetVnd,
+        if (currency != null) 'currency': currency,
         'vibe': vibe?.key,
+        'cover_image_url': resolvedCoverUrl,
       }).eq('id', tripId);
     } catch (e) {
       _trips[tripId] = old; // rollback
       _lastError = e.toString();
       notifyListeners();
       rethrow;
+    }
+  }
+
+  /// Storage bucket for uploaded trip cover photos — mirrors
+  /// GemRepository.photosBucket's convention (see supabase/migrations/
+  /// 20260815000200_add_cover_image_to_trips.sql for the bucket + policies).
+  static const String coverImagesBucket = 'trip-covers';
+
+  /// Uploads a trip cover photo to the public [coverImagesBucket] and returns
+  /// its public URL, or null on failure — non-fatal, callers fall back to
+  /// whatever cover URL they already had. Reads bytes (not a path) so it
+  /// works on web and native alike, same as GemRepository.uploadPhotos.
+  Future<String?> uploadCoverImage(XFile file) async {
+    try {
+      final bytes = await file.readAsBytes();
+      final dot = file.name.lastIndexOf('.');
+      final ext = dot >= 0 ? file.name.substring(dot + 1).toLowerCase() : 'jpg';
+      final path = '$_currentUserId/${DateTime.now().millisecondsSinceEpoch}.$ext';
+      await _supabase.storage.from(coverImagesBucket).uploadBinary(
+            path,
+            bytes,
+            fileOptions: FileOptions(
+              contentType: file.mimeType ?? 'image/jpeg',
+              upsert: false,
+            ),
+          );
+      return _supabase.storage.from(coverImagesBucket).getPublicUrl(path);
+    } catch (e) {
+      debugPrint('TripProvider.uploadCoverImage error: $e');
+      return null;
     }
   }
 
@@ -1001,6 +1066,12 @@ class PendingTraveler {
 
 /// Transient builder for Setup Steps 1–3. Not persisted; consumed by createTrip.
 class TripDraft {
+  /// Maps to trips.name — required (Step 1's Title field), unlike every
+  /// other draft field here. Nullable only because it starts unset; Step 1's
+  /// isValid requires it non-empty before Continue works.
+  String? title;
+  String? description;
+
   String? location;
 
   /// Set only when [location] came from picking an autocomplete suggestion
@@ -1012,8 +1083,28 @@ class TripDraft {
   DateTime? dateStart;
   DateTime? dateEnd;
   int budgetVnd = 0;
+
+  /// Per-trip currency, no conversion — see lib/core/logic/currency.dart.
+  /// Every amount on this trip (budget, stop prices, expenses) is a whole
+  /// unit of whatever currency this is, not VND converted.
+  String currency = 'VND';
+
   TripVibe? vibe;
   String templateChoice = 'fresh'; // 'fresh' | 'blueprint'
   String? blueprintId;
   List<PendingTraveler> pendingTravelers = [];
+
+  /// A newly picked cover photo pending upload — set by StepOneInit's Cover
+  /// Image field, cleared once createTrip/updateTrip has uploaded it.
+  /// [coverImageBytes] is the same file's bytes, cached at pick time purely
+  /// for an immediate preview (re-reading an XFile's bytes is async, so the
+  /// UI can't do it synchronously in initState).
+  XFile? coverImageFile;
+  Uint8List? coverImageBytes;
+
+  /// An already-uploaded cover photo URL — null for a brand-new trip, seeded
+  /// from Trip.coverImageUrl when EditTripSheet opens an existing one. Explicit
+  /// null (rather than merely absent) means "remove the current photo": the
+  /// user tapped the field's remove button.
+  String? coverImageUrl;
 }

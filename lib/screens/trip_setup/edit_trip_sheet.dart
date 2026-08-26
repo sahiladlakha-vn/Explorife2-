@@ -30,13 +30,17 @@ class _EditTripSheetState extends State<EditTripSheet> {
     super.initState();
     final t = widget.trip;
     _draft = TripDraft()
+      ..title = t.name
+      ..description = t.description
       ..location = t.location
       ..locationLat = t.locationLat
       ..locationLng = t.locationLng
       ..dateStart = t.startDate
       ..dateEnd = t.endDate
       ..budgetVnd = t.budgetVnd
-      ..vibe = t.vibe;
+      ..currency = t.currency
+      ..vibe = t.vibe
+      ..coverImageUrl = t.coverImageUrl;
   }
 
   Future<void> _save() async {
@@ -46,13 +50,20 @@ class _EditTripSheetState extends State<EditTripSheet> {
     try {
       await context.read<TripProvider>().updateTrip(
             widget.trip.id,
+            title: _draft.title?.trim(),
             location: _draft.location!.trim(),
             locationLat: _draft.locationLat,
             locationLng: _draft.locationLng,
+            description: _draft.description?.trim().isEmpty ?? true
+                ? null
+                : _draft.description!.trim(),
             startDate: _draft.dateStart!,
             endDate: _draft.dateEnd!,
             budgetVnd: _draft.budgetVnd,
+            currency: _draft.currency,
             vibe: _draft.vibe,
+            coverImageFile: _draft.coverImageFile,
+            coverImageUrl: _draft.coverImageUrl,
           );
       if (!mounted) return;
       navigator.pop();

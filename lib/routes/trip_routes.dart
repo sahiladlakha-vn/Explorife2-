@@ -22,12 +22,23 @@ List<RouteBase> tripRoutes() => [
         builder: (context, state) => const TripsListScreen(),
       ),
       GoRoute(
-        // TODO(prefill): accept a ?location= query param to seed the draft.
+        // ?location=&lat=&lng= seeds Step 1's destination field — e.g. Home's
+        // "Where to next?" destination browser jumping straight into trip
+        // creation for a tapped city (see destination_browser_sheet.dart).
+        // Every other call site omits these and gets the same blank draft
+        // as before.
         path: '/trips/new',
-        pageBuilder: (context, state) => _ModalSheetPage(
-          key: state.pageKey,
-          child: const TripSetupSheet(),
-        ),
+        pageBuilder: (context, state) {
+          final q = state.uri.queryParameters;
+          return _ModalSheetPage(
+            key: state.pageKey,
+            child: TripSetupSheet(
+              initialLocation: q['location'],
+              initialLat: double.tryParse(q['lat'] ?? ''),
+              initialLng: double.tryParse(q['lng'] ?? ''),
+            ),
+          );
+        },
       ),
       // Explicit `/summary` alias, registered before the bare `:id` canonical so
       // the more-specific path is matched first.
