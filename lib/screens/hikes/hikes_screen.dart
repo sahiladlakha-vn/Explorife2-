@@ -38,12 +38,12 @@ class _HikesScreenState extends State<HikesScreen> {
     final totalEle = hikes.fold(0.0, (s, h) => s + (h.elevationGainM ?? 0));
 
     return Scaffold(
-      backgroundColor: AppTheme.bg,
+      backgroundColor: AppTheme.lightSurface,
       body: CustomScrollView(
         slivers: [
           SliverAppBar(
             pinned: true,
-            backgroundColor: AppTheme.bg,
+            backgroundColor: AppTheme.lightSurface,
             title: Text('MY HIKES',
                 style: GoogleFonts.bebasNeue(fontSize: 24, letterSpacing: 0.5)),
             actions: [
@@ -61,18 +61,18 @@ class _HikesScreenState extends State<HikesScreen> {
                 margin: const EdgeInsets.fromLTRB(16, 0, 16, 8),
                 padding: const EdgeInsets.symmetric(vertical: 16),
                 decoration: BoxDecoration(
-                  color: AppTheme.surface,
+                  color: AppTheme.lightCard,
                   borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: AppTheme.divider),
+                  border: Border.all(color: AppTheme.lightBorder),
                 ),
                 child: Row(children: [
                   _StatCell(value: '${totalKm.toStringAsFixed(1)}km', label: 'DISTANCE'),
-                  Container(width: 1, height: 40, color: AppTheme.divider),
+                  Container(width: 1, height: 40, color: AppTheme.lightBorder),
                   _StatCell(
                     value: _formatDuration(totalSecs),
                     label: 'TIME',
                   ),
-                  Container(width: 1, height: 40, color: AppTheme.divider),
+                  Container(width: 1, height: 40, color: AppTheme.lightBorder),
                   _StatCell(
                     value: '${totalEle.toInt()}m',
                     label: 'ELEVATION',
@@ -124,7 +124,7 @@ class _HikesScreenState extends State<HikesScreen> {
               backgroundColor: AppTheme.primary,
               icon: const Icon(Icons.add, color: Colors.white),
               label: Text('Log Hike',
-                  style: GoogleFonts.dmSans(
+                  style: GoogleFonts.fredoka(
                       color: Colors.white, fontWeight: FontWeight.w600)),
             )
           : null,
@@ -150,7 +150,7 @@ class _StatCell extends StatelessWidget {
               style: GoogleFonts.bebasNeue(fontSize: 22, color: AppTheme.primary)),
           Text(label,
               style: GoogleFonts.jetBrainsMono(
-                  fontSize: 9, color: AppTheme.textSecondary, letterSpacing: 0.5)),
+                  fontSize: 9, color: AppTheme.lightMute, letterSpacing: 0.5)),
         ]),
       );
 }
@@ -165,9 +165,9 @@ class _HikeCard extends StatelessWidget {
       margin: const EdgeInsets.only(bottom: 10),
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: AppTheme.surface,
+        color: AppTheme.lightCard,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: AppTheme.divider),
+        border: Border.all(color: AppTheme.lightBorder),
       ),
       child: Row(children: [
         Container(
@@ -182,36 +182,36 @@ class _HikeCard extends StatelessWidget {
         Expanded(
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text(hike.title,
-                style: GoogleFonts.dmSans(
+                style: GoogleFonts.fredoka(
                     fontSize: 14, fontWeight: FontWeight.w600,
-                    color: AppTheme.textPrimary),
+                    color: AppTheme.lightInk),
                 maxLines: 1, overflow: TextOverflow.ellipsis),
             const SizedBox(height: 4),
             Row(children: [
               if (hike.distanceKm != null) ...[
-                const Icon(Icons.straighten, size: 12, color: AppTheme.textSecondary),
+                const Icon(Icons.straighten, size: 12, color: AppTheme.lightMute),
                 const SizedBox(width: 3),
                 Text('${hike.distanceKm!.toStringAsFixed(1)} km',
-                    style: GoogleFonts.dmSans(fontSize: 12, color: AppTheme.textSecondary)),
+                    style: GoogleFonts.fredoka(fontSize: 12, color: AppTheme.lightMute)),
                 const SizedBox(width: 12),
               ],
-              const Icon(Icons.schedule, size: 12, color: AppTheme.textSecondary),
+              const Icon(Icons.schedule, size: 12, color: AppTheme.lightMute),
               const SizedBox(width: 3),
               Text(hike.durationFormatted,
-                  style: GoogleFonts.dmSans(fontSize: 12, color: AppTheme.textSecondary)),
+                  style: GoogleFonts.fredoka(fontSize: 12, color: AppTheme.lightMute)),
               if (hike.elevationGainM != null) ...[
                 const SizedBox(width: 12),
-                const Icon(Icons.trending_up, size: 12, color: AppTheme.textSecondary),
+                const Icon(Icons.trending_up, size: 12, color: AppTheme.lightMute),
                 const SizedBox(width: 3),
                 Text('↑${hike.elevationGainM!.toInt()}m',
-                    style: GoogleFonts.dmSans(fontSize: 12, color: AppTheme.textSecondary)),
+                    style: GoogleFonts.fredoka(fontSize: 12, color: AppTheme.lightMute)),
               ],
             ]),
           ]),
         ),
         Text(
           '${hike.startedAt.day}/${hike.startedAt.month}',
-          style: GoogleFonts.jetBrainsMono(fontSize: 11, color: AppTheme.textSecondary),
+          style: GoogleFonts.jetBrainsMono(fontSize: 11, color: AppTheme.lightMute),
         ),
       ]),
     );
@@ -234,13 +234,13 @@ class _EmptyState extends StatelessWidget {
           const SizedBox(height: 16),
           Text(title,
               style: GoogleFonts.bebasNeue(
-                  fontSize: 22, color: AppTheme.textSecondary, letterSpacing: 0.5)),
+                  fontSize: 22, color: AppTheme.lightMute, letterSpacing: 0.5)),
           const SizedBox(height: 20),
           ElevatedButton(
             onPressed: onAction,
             style: ElevatedButton.styleFrom(backgroundColor: AppTheme.primary),
             child: Text(action,
-                style: GoogleFonts.dmSans(
+                style: GoogleFonts.fredoka(
                     fontWeight: FontWeight.w600, color: Colors.white)),
           ),
         ]),

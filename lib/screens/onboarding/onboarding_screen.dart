@@ -47,7 +47,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     // navigation side effect here, which previously fired stale go() calls
     // during the cold-boot auth race.
     return Scaffold(
-      backgroundColor: AppTheme.bg,
+      backgroundColor: AppTheme.lightSurface,
       body: Stack(
         children: [
           PageView.builder(
@@ -66,7 +66,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                 gradient: LinearGradient(
                   begin: Alignment.topCenter,
                   end: Alignment.bottomCenter,
-                  colors: [Colors.transparent, AppTheme.bg.withValues(alpha: 0.98)],
+                  colors: [Colors.transparent, AppTheme.lightSurface.withValues(alpha: 0.98)],
                 ),
               ),
               child: Column(children: [
@@ -79,7 +79,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                     width: i == _page ? 24 : 8,
                     height: 8,
                     decoration: BoxDecoration(
-                      color: i == _page ? AppTheme.primary : AppTheme.surface2,
+                      color: i == _page ? AppTheme.primary : AppTheme.lightCard,
                       borderRadius: BorderRadius.circular(4),
                     ),
                   )),
@@ -104,8 +104,8 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                 TextButton(
                   onPressed: () => context.go('/auth'),
                   child: Text('Skip',
-                      style: GoogleFonts.dmSans(
-                          fontSize: 14, color: AppTheme.textSecondary)),
+                      style: GoogleFonts.fredoka(
+                          fontSize: 14, color: AppTheme.lightMute)),
                 ),
               ]),
             ),
@@ -132,12 +132,12 @@ class _OnboardPage extends StatelessWidget {
           const SizedBox(height: 24),
           Text(title,
               style: GoogleFonts.bebasNeue(
-                  fontSize: 48, color: AppTheme.textPrimary,
+                  fontSize: 48, color: AppTheme.lightInk,
                   letterSpacing: 0.5, height: 1.0)),
           const SizedBox(height: 16),
           Text(body,
-              style: GoogleFonts.dmSans(
-                  fontSize: 16, color: AppTheme.textSecondary, height: 1.7)),
+              style: GoogleFonts.fredoka(
+                  fontSize: 16, color: AppTheme.lightMute, height: 1.7)),
         ],
       ),
     );

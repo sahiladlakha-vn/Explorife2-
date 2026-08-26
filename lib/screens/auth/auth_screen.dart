@@ -79,7 +79,7 @@ class _AuthScreenState extends State<AuthScreen> {
                   Text(
                     'Join 84,000+ adventurers discovering\nhidden trails around the world',
                     textAlign: TextAlign.center,
-                    style: GoogleFonts.dmSans(fontSize: 14, color: AppTheme.textSecondary, height: 1.5),
+                    style: GoogleFonts.fredoka(fontSize: 14, color: AppTheme.textSecondary, height: 1.5),
                   ),
                   const SizedBox(height: 40),
 
@@ -91,7 +91,7 @@ class _AuthScreenState extends State<AuthScreen> {
                         borderRadius: BorderRadius.circular(10),
                         border: Border.all(color: Colors.red.withValues(alpha: 0.3)),
                       ),
-                      child: Text(_error!, style: GoogleFonts.dmSans(color: Colors.red, fontSize: 13)),
+                      child: Text(_error!, style: GoogleFonts.fredoka(color: Colors.red, fontSize: 13)),
                     ),
                     const SizedBox(height: 16),
                   ],
@@ -118,7 +118,7 @@ class _AuthScreenState extends State<AuthScreen> {
                   Text(
                     'By continuing you agree to our Terms of Service\nand Privacy Policy',
                     textAlign: TextAlign.center,
-                    style: GoogleFonts.dmSans(fontSize: 11, color: AppTheme.textSecondary),
+                    style: GoogleFonts.fredoka(fontSize: 11, color: AppTheme.textSecondary),
                   ),
                   const SizedBox(height: 32),
                 ],
@@ -172,7 +172,7 @@ class _OAuthButton extends StatelessWidget {
             const SizedBox(width: 10),
             Text(
               label,
-              style: GoogleFonts.dmSans(
+              style: GoogleFonts.fredoka(
                 fontSize: 15,
                 fontWeight: FontWeight.w600,
                 color: dark ? Colors.white : const Color(0xFF1A1A1A),

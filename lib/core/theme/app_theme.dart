@@ -25,11 +25,6 @@ class AppTheme {
   static const Color warn = Color(0xFFFAC775);
   static const Color danger = Color(0xFFE24B4A);
 
-  /// Opacity of the bottom-nav "warm pill" behind the selected item — orange
-  /// (`primary`) laid over the near-black bar at 16%. Single source of truth so
-  /// the pill tint stays in lockstep with the brand colour.
-  static const double navPillOpacity = 0.16;
-
   // Light-sheet sub-palette — the discovery feed renders on a white sheet that
   // sits over the dark map, so it needs its own ink/surface tokens rather than
   // the dark-theme greys. Named here so the sheet/cards stop hardcoding hex.
@@ -53,7 +48,7 @@ class AppTheme {
   static const Color lightInk = Color(0xFF1A1A1A);
   static const Color lightMute = Color(0xFF8A8A8A);
 
-  static TextTheme get _textTheme => GoogleFonts.dmSansTextTheme(
+  static TextTheme get _textTheme => GoogleFonts.fredokaTextTheme(
         const TextTheme(
           displayLarge: TextStyle(color: textPrimary),
           displayMedium: TextStyle(color: textPrimary),
@@ -92,7 +87,7 @@ class AppTheme {
           elevation: 0,
           scrolledUnderElevation: 0,
           centerTitle: false,
-          titleTextStyle: GoogleFonts.dmSans(
+          titleTextStyle: GoogleFonts.fredoka(
             fontSize: 20,
             fontWeight: FontWeight.w700,
             color: textPrimary,
@@ -104,7 +99,7 @@ class AppTheme {
             foregroundColor: Colors.white,
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
             padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 24),
-            textStyle: GoogleFonts.dmSans(fontWeight: FontWeight.w600, fontSize: 15),
+            textStyle: GoogleFonts.fredoka(fontWeight: FontWeight.w600, fontSize: 15),
           ),
         ),
         inputDecorationTheme: InputDecorationTheme(
@@ -138,9 +133,9 @@ class AppTheme {
           indicatorColor: primary.withValues(alpha: 0.15),
           labelTextStyle: WidgetStateProperty.resolveWith((states) {
             if (states.contains(WidgetState.selected)) {
-              return GoogleFonts.dmSans(fontSize: 10, fontWeight: FontWeight.w600, color: primary);
+              return GoogleFonts.fredoka(fontSize: 10, fontWeight: FontWeight.w600, color: primary);
             }
-            return GoogleFonts.dmSans(fontSize: 10, color: textSecondary);
+            return GoogleFonts.fredoka(fontSize: 10, color: textSecondary);
           }),
           iconTheme: WidgetStateProperty.resolveWith((states) {
             if (states.contains(WidgetState.selected)) {
@@ -157,7 +152,7 @@ class AppTheme {
         chipTheme: ChipThemeData(
           backgroundColor: surface2,
           selectedColor: primary,
-          labelStyle: GoogleFonts.dmSans(fontSize: 12, fontWeight: FontWeight.w600),
+          labelStyle: GoogleFonts.fredoka(fontSize: 12, fontWeight: FontWeight.w600),
           side: const BorderSide(color: divider),
           shape: const StadiumBorder(),
         ),

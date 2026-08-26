@@ -32,14 +32,14 @@ class Skeleton extends StatelessWidget {
       width: width,
       height: height,
       decoration: BoxDecoration(
-        color: AppTheme.surface2,
+        color: AppTheme.lightCard,
         borderRadius: BorderRadius.circular(radius),
       ),
     );
     if (MediaQuery.of(context).disableAnimations) return block;
     return Shimmer.fromColors(
-      baseColor: AppTheme.surface2,
-      highlightColor: const Color(0xFF2C2C2C),
+      baseColor: AppTheme.lightCard,
+      highlightColor: Colors.white,
       child: block,
     );
   }
@@ -92,9 +92,9 @@ class TrailListSkeleton extends StatelessWidget {
             margin: const EdgeInsets.only(bottom: 10),
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: AppTheme.surface,
+              color: AppTheme.lightCard,
               borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: AppTheme.divider),
+              border: Border.all(color: AppTheme.lightBorder),
             ),
             child: const Row(
               children: [
@@ -142,7 +142,7 @@ class ErrorStateView extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.cloud_off_rounded, size: 36, color: AppTheme.textSecondary),
+            const Icon(Icons.cloud_off_rounded, size: 36, color: AppTheme.lightMute),
             const SizedBox(height: 14),
             Text(
               "Couldn't load destinations",
@@ -150,14 +150,14 @@ class ErrorStateView extends StatelessWidget {
               style: GoogleFonts.bebasNeue(
                 fontSize: 24,
                 letterSpacing: 0.5,
-                color: AppTheme.textPrimary,
+                color: AppTheme.lightInk,
               ),
             ),
             const SizedBox(height: 6),
             Text(
               message ?? 'Check your connection and try again.',
               textAlign: TextAlign.center,
-              style: GoogleFonts.dmSans(fontSize: 13, color: AppTheme.textSecondary, height: 1.5),
+              style: GoogleFonts.fredoka(fontSize: 13, color: AppTheme.lightMute, height: 1.5),
             ),
             const SizedBox(height: 18),
             // Min 44-high tap target.
@@ -201,12 +201,12 @@ class EmptyStateView extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, size: 30, color: AppTheme.textSecondary),
+            Icon(icon, size: 30, color: AppTheme.lightMute),
             const SizedBox(height: 12),
             Text(
               text,
               textAlign: TextAlign.center,
-              style: GoogleFonts.dmSans(fontSize: 13, color: AppTheme.textSecondary, height: 1.5),
+              style: GoogleFonts.fredoka(fontSize: 13, color: AppTheme.lightMute, height: 1.5),
             ),
             if (onAction != null && actionLabel != null) ...[
               const SizedBox(height: 16),
