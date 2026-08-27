@@ -269,8 +269,9 @@ class _ListingsScreenState extends State<ListingsScreen> {
     setState(() => _resolvingDestination = false);
 
     final place = results.isNotEmpty ? results.first : null;
-    final label =
-        (place != null && place.fullName.isNotEmpty) ? place.fullName : cityName;
+    final label = (place != null && place.fullName.isNotEmpty)
+        ? place.fullName
+        : cityName;
 
     final uri = Uri(path: '/destinations/explore', queryParameters: {
       'name': label,
@@ -339,8 +340,9 @@ class _ListingsScreenState extends State<ListingsScreen> {
     // so it stays exactly what this screen already did before this tab
     // existed: one Gems grid, no tabs.
     final showDestTabs = _query.trim().isNotEmpty;
-    final destMatches =
-        showDestTabs ? _matchingDestinations(_query) : const <_DestinationMatch>[];
+    final destMatches = showDestTabs
+        ? _matchingDestinations(_query)
+        : const <_DestinationMatch>[];
     var effectiveTab = _resultTab;
     if (showDestTabs) {
       final gemsEmpty = items.isEmpty && !nearbyStillLoading;
@@ -379,12 +381,13 @@ class _ListingsScreenState extends State<ListingsScreen> {
                   focusNode: _focusNode,
                   autofocus: widget.autofocusSearch,
                   onChanged: _setQuery,
-                  style: const TextStyle(color: AppTheme.lightInk, fontSize: 15),
+                  style:
+                      const TextStyle(color: AppTheme.lightInk, fontSize: 15),
                   decoration: InputDecoration(
                     isDense: true,
                     hintText: 'Search places, activities, gems…',
-                    hintStyle:
-                        const TextStyle(color: AppTheme.lightMute, fontSize: 15),
+                    hintStyle: const TextStyle(
+                        color: AppTheme.lightMute, fontSize: 15),
                     prefixIcon: const Icon(Icons.search,
                         color: AppTheme.lightMute, size: 20),
                     filled: true,
@@ -725,8 +728,7 @@ class _ResultTabBar extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 6),
       child: Row(
         children: [
-          Expanded(
-              child: _tab(context, 0, 'Destinations', destCount)),
+          Expanded(child: _tab(context, 0, 'Destinations', destCount)),
           const SizedBox(width: 8),
           Expanded(child: _tab(context, 1, 'Gems', gemCount)),
         ],
@@ -1116,83 +1118,90 @@ class PoiResultCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        color: AppTheme.lightCard,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppTheme.lightBorder),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Expanded(
-            child: Stack(
-              children: [
-                Positioned.fill(
-                  child: ClipRRect(
-                    borderRadius:
-                        const BorderRadius.vertical(top: Radius.circular(16)),
-                    child: Container(
-                      color: AppTheme.lightBorder.withValues(alpha: 0.4),
-                      alignment: Alignment.center,
-                      // Maki-based icon (see NearbyPoi.iconForMaki) instead of
-                      // a single generic pin — kept grey/neutral, not orange,
-                      // to preserve the GEM-vs-generic-POI tell above.
-                      child: Icon(NearbyPoi.iconForMaki(poi.maki),
-                          size: 32, color: AppTheme.lightMute),
-                    ),
-                  ),
-                ),
-                if (poi.category != null)
-                  Positioned(
-                    top: 8,
-                    left: 8,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 8, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: AppTheme.lightMute.withValues(alpha: 0.85),
-                        borderRadius: BorderRadius.circular(8),
+    return Semantics(
+      button: true,
+      label: poi.name,
+      child: GestureDetector(
+        onTap: () => context.push('/gems/poi', extra: poi),
+        child: Container(
+          decoration: BoxDecoration(
+            color: AppTheme.lightCard,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: AppTheme.lightBorder),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Stack(
+                  children: [
+                    Positioned.fill(
+                      child: ClipRRect(
+                        borderRadius: const BorderRadius.vertical(
+                            top: Radius.circular(16)),
+                        child: Container(
+                          color: AppTheme.lightBorder.withValues(alpha: 0.4),
+                          alignment: Alignment.center,
+                          // Maki-based icon (see NearbyPoi.iconForMaki) instead of
+                          // a single generic pin — kept grey/neutral, not orange,
+                          // to preserve the GEM-vs-generic-POI tell above.
+                          child: Icon(NearbyPoi.iconForMaki(poi.maki),
+                              size: 32, color: AppTheme.lightMute),
+                        ),
                       ),
-                      child: Text(poi.category!,
-                          style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 10,
-                              fontWeight: FontWeight.w600)),
                     ),
-                  ),
-              ],
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.all(10),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(poi.name,
-                    style: const TextStyle(
-                        fontWeight: FontWeight.w600,
-                        fontSize: 13,
-                        color: AppTheme.lightInk),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis),
-                if (poi.distanceMeters != null) ...[
-                  const SizedBox(height: 2),
-                  Row(
-                    children: [
-                      const Icon(Icons.location_on,
-                          size: 12, color: AppTheme.lightMute),
-                      const SizedBox(width: 2),
-                      Text('${poi.distanceMeters!.round()}m away',
-                          style: const TextStyle(
-                              color: AppTheme.lightMute, fontSize: 11)),
+                    if (poi.category != null)
+                      Positioned(
+                        top: 8,
+                        left: 8,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: AppTheme.lightMute.withValues(alpha: 0.85),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Text(poi.category!,
+                              style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w600)),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.all(10),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(poi.name,
+                        style: const TextStyle(
+                            fontWeight: FontWeight.w600,
+                            fontSize: 13,
+                            color: AppTheme.lightInk),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis),
+                    if (poi.distanceMeters != null) ...[
+                      const SizedBox(height: 2),
+                      Row(
+                        children: [
+                          const Icon(Icons.location_on,
+                              size: 12, color: AppTheme.lightMute),
+                          const SizedBox(width: 2),
+                          Text('${poi.distanceMeters!.round()}m away',
+                              style: const TextStyle(
+                                  color: AppTheme.lightMute, fontSize: 11)),
+                        ],
+                      ),
                     ],
-                  ),
-                ],
-              ],
-            ),
+                  ],
+                ),
+              ),
+            ],
           ),
-        ],
+        ),
       ),
     );
   }
