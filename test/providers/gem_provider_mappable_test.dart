@@ -50,7 +50,9 @@ class _SeededRepo implements GemRepository {
   Future<List<Gem>> fetchRelated(String category, String excludeId) async => [];
   @override
   Future<Gem> create(GemDraft draft,
-          {required String userId, List<String> photoUrls = const []}) =>
+          {required String userId,
+          List<String> photoUrls = const [],
+          Map<String, String> photoCaptions = const {}}) =>
       throw UnimplementedError();
   @override
   Future<List<String>> uploadPhotos(String userId, List<XFile> files) async =>

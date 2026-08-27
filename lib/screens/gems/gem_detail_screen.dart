@@ -226,7 +226,7 @@ class _GemDetailScreenState extends State<GemDetailScreen> {
                   const SizedBox(height: 20),
 
                   if (gem.description != null) ...[
-                    Text('About',
+                    Text('What to Expect',
                         style: GoogleFonts.bebasNeue(
                             fontSize: 20,
                             letterSpacing: 0.5,
@@ -245,6 +245,11 @@ class _GemDetailScreenState extends State<GemDetailScreen> {
                         icon: Icons.wb_sunny_outlined,
                         label: 'Best Time',
                         value: gem.bestTimeToVisit!),
+                    const SizedBox(height: 20),
+                  ],
+
+                  if (gem.goodToKnow.isNotEmpty) ...[
+                    _GoodToKnowSection(tips: gem.goodToKnow),
                     const SizedBox(height: 20),
                   ],
 
@@ -280,6 +285,11 @@ class _GemDetailScreenState extends State<GemDetailScreen> {
     required VoidCallback onToggleSave,
   }) {
     final hasGallery = photos.length > 1;
+    // Curated-gem-only content — every Mapbox-sourced photo (there are none
+    // today, but defensively) and every gem no one has captioned yet just
+    // has nothing here, so the caption row below doesn't render.
+    final currentCaption =
+        photos.isNotEmpty ? gem.captionFor(photos[_photoIndex]) : null;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -352,6 +362,15 @@ class _GemDetailScreenState extends State<GemDetailScreen> {
             ],
           ),
         ),
+        if (currentCaption != null)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+            child: Text(currentCaption,
+                style: GoogleFonts.fredoka(
+                    fontSize: 12.5,
+                    fontStyle: FontStyle.italic,
+                    color: AppTheme.lightMute)),
+          ),
         if (hasGallery)
           Container(
             color: AppTheme.lightSurface,
@@ -474,6 +493,61 @@ class _GetDirectionsButton extends StatelessWidget {
             style:
                 GoogleFonts.fredoka(fontSize: 14, fontWeight: FontWeight.w600)),
       ),
+    );
+  }
+}
+
+/// Bulleted practical-tips section ("best time to visit", "what to bring",
+/// entry requirements, ...) — editorial content curated per gem, never
+/// fabricated. Only ever rendered when [tips] is non-empty; the caller is
+/// responsible for omitting this widget entirely otherwise, same rule as
+/// every other optional section on this screen.
+class _GoodToKnowSection extends StatelessWidget {
+  final List<String> tips;
+  const _GoodToKnowSection({required this.tips});
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('Good to Know',
+            style: GoogleFonts.bebasNeue(
+                fontSize: 20, letterSpacing: 0.5, color: AppTheme.lightInk)),
+        const SizedBox(height: 10),
+        Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: AppTheme.lightCard,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: AppTheme.lightBorder),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              for (var i = 0; i < tips.length; i++)
+                Padding(
+                  padding: EdgeInsets.only(top: i == 0 ? 0 : 10),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Icon(Icons.check_circle_outline,
+                          size: 16, color: AppTheme.primary),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(tips[i],
+                            style: GoogleFonts.fredoka(
+                                fontSize: 13.5,
+                                color: AppTheme.lightMute,
+                                height: 1.5)),
+                      ),
+                    ],
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 }

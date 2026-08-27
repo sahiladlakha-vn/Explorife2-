@@ -98,6 +98,7 @@ class GemRepository {
     GemDraft draft, {
     required String userId,
     List<String> photoUrls = const [],
+    Map<String, String> photoCaptions = const {},
   }) async {
     final payload = draft.toGem().toInsert(
           userId: userId,
@@ -107,6 +108,9 @@ class GemRepository {
     if (photoUrls.isNotEmpty) {
       payload['photo_url'] = photoUrls.first;
       payload['photo_urls'] = photoUrls;
+    }
+    if (photoCaptions.isNotEmpty) {
+      payload['photo_captions'] = photoCaptions;
     }
     final inserted = await _db.from(table).insert(payload).select().single();
     return Gem.fromJson(inserted);

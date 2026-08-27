@@ -27,6 +27,11 @@ class GemDraft {
   final String? address;
   final bool hasPhoto;
 
+  /// Raw "Good to Know" textarea content — one tip per line, as typed. Use
+  /// [normalizedGoodToKnow] to get the cleaned list; this field exists so
+  /// the form can round-trip the exact text the user is editing.
+  final String? goodToKnowRaw;
+
   const GemDraft({
     required this.name,
     required this.category,
@@ -36,6 +41,7 @@ class GemDraft {
     this.description,
     this.address,
     this.hasPhoto = false,
+    this.goodToKnowRaw,
   });
 
   static const int maxTaglineLength = 80;
@@ -63,6 +69,15 @@ class GemDraft {
   String? get normalizedTagline => _nullIfBlank(tagline);
   String? get normalizedDescription => _nullIfBlank(description);
 
+  /// Splits the raw "one tip per line" textarea into a clean list — blank
+  /// lines dropped, each tip trimmed. Empty input yields an empty list, not
+  /// a list containing one blank string.
+  List<String> get normalizedGoodToKnow => (goodToKnowRaw ?? '')
+      .split('\n')
+      .map((l) => l.trim())
+      .where((l) => l.isNotEmpty)
+      .toList();
+
   static String? _nullIfBlank(String? s) {
     final t = s?.trim();
     return (t == null || t.isEmpty) ? null : t;
@@ -80,6 +95,7 @@ class GemDraft {
         tagline: normalizedTagline,
         description: normalizedDescription,
         gemLocation: address,
+        goodToKnow: normalizedGoodToKnow,
         savedAt: DateTime.now(),
       );
 

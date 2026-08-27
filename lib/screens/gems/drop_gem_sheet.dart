@@ -48,12 +48,19 @@ class _DropGemSheetState extends State<DropGemSheet> {
   final _nameCtrl = TextEditingController();
   final _taglineCtrl = TextEditingController();
   final _descCtrl = TextEditingController();
+  final _goodToKnowCtrl = TextEditingController();
   final _picker = ImagePicker();
   final GeocodingService _geo = GeocodingService();
 
   String _category = Gem.categories.first;
   final List<XFile> _photos = [];
   final List<Uint8List> _photoBytes = [];
+
+  /// One caption controller per photo, same index alignment as [_photos] —
+  /// kept in sync in [_addPhotos]/[_removePhotoAt]. Captions are optional;
+  /// an empty controller just means that photo has none.
+  final List<TextEditingController> _captionCtrls = [];
+
   bool _publishing = false;
   String? _address;
 
@@ -76,6 +83,10 @@ class _DropGemSheetState extends State<DropGemSheet> {
     _nameCtrl.dispose();
     _taglineCtrl.dispose();
     _descCtrl.dispose();
+    _goodToKnowCtrl.dispose();
+    for (final c in _captionCtrls) {
+      c.dispose();
+    }
     super.dispose();
   }
 
@@ -90,6 +101,7 @@ class _DropGemSheetState extends State<DropGemSheet> {
         description: _descCtrl.text,
         address: _address,
         hasPhoto: _photos.isNotEmpty,
+        goodToKnowRaw: _goodToKnowCtrl.text,
       );
 
   bool get _canPublish => !_publishing && _buildDraft().canPublish;
@@ -117,6 +129,8 @@ class _DropGemSheetState extends State<DropGemSheet> {
         setState(() {
           _photos.addAll(toAdd);
           _photoBytes.addAll(bytes);
+          _captionCtrls.addAll(
+              List.generate(toAdd.length, (_) => TextEditingController()));
         });
         if (picked.length > toAdd.length) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -137,6 +151,7 @@ class _DropGemSheetState extends State<DropGemSheet> {
     setState(() {
       _photos.removeAt(i);
       _photoBytes.removeAt(i);
+      _captionCtrls.removeAt(i).dispose();
     });
   }
 
@@ -156,6 +171,7 @@ class _DropGemSheetState extends State<DropGemSheet> {
           draft,
           userId: auth.user!.id,
           photos: _photos,
+          photoCaptions: _captionCtrls.map((c) => c.text).toList(),
         );
 
     if (!mounted) return;
@@ -230,6 +246,10 @@ class _DropGemSheetState extends State<DropGemSheet> {
                     ),
                     const SizedBox(height: 10),
                     _photosPicker(),
+                    if (_photos.isNotEmpty) ...[
+                      const SizedBox(height: 12),
+                      _captionsList(),
+                    ],
                     const SizedBox(height: 24),
 
                     // 04 — Tagline
@@ -256,6 +276,14 @@ class _DropGemSheetState extends State<DropGemSheet> {
                     _field(_descCtrl,
                         'What makes it worth the pin. Local intel only.',
                         maxLines: 5, maxLength: GemDraft.maxDescriptionLength),
+                    const SizedBox(height: 24),
+
+                    // 06 — Good to Know
+                    const _NumLabel(num: '06', title: 'GOOD TO KNOW'),
+                    const SizedBox(height: 10),
+                    _field(_goodToKnowCtrl,
+                        'One tip per line — best time to visit, what to bring, entry requirements…',
+                        maxLines: 4),
                     const SizedBox(height: 28),
 
                     // Publish
@@ -542,6 +570,59 @@ class _DropGemSheetState extends State<DropGemSheet> {
           );
         },
       ),
+    );
+  }
+
+  // ── one caption field per photo, thumbnail alongside so it's clear which
+  // photo it belongs to — optional, blank means that photo has no caption.
+  Widget _captionsList() {
+    return Column(
+      children: [
+        for (var i = 0; i < _photos.length; i++)
+          Padding(
+            padding: EdgeInsets.only(bottom: i == _photos.length - 1 ? 0 : 8),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(10),
+                  child: Image.memory(_photoBytes[i],
+                      width: 44, height: 44, fit: BoxFit.cover),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: TextField(
+                    controller: _captionCtrls[i],
+                    style: GoogleFonts.fredoka(
+                        fontSize: 13, color: const Color(0xFF111111)),
+                    decoration: InputDecoration(
+                      isDense: true,
+                      hintText: 'Caption for this photo (optional)',
+                      hintStyle: GoogleFonts.fredoka(
+                          fontSize: 13, color: const Color(0xFFAAAAAA)),
+                      filled: true,
+                      fillColor: const Color(0xFFF5F5F5),
+                      contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 10),
+                      border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(10),
+                          borderSide:
+                              const BorderSide(color: Color(0xFFE6E6E6))),
+                      enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(10),
+                          borderSide:
+                              const BorderSide(color: Color(0xFFE6E6E6))),
+                      focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(10),
+                          borderSide: const BorderSide(
+                              color: AppTheme.primary, width: 1.5)),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+      ],
     );
   }
 }

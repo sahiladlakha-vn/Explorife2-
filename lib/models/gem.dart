@@ -15,8 +15,24 @@ class Gem {
   /// photos, however many there are" should use [allPhotos] rather than this
   /// directly.
   final List<String> photoUrls;
+
+  /// Optional one-line caption per photo, keyed by the photo's own URL
+  /// (never by array index/position — a positional array would silently
+  /// misalign if photos are ever reordered or removed; a URL key can't).
+  /// Empty for every gem — curated or Mapbox-sourced — that hasn't had
+  /// captions written for it, which today is all of them: this is
+  /// editorial content with no source to auto-populate it from.
+  final Map<String, String> photoCaptions;
+
   final String? difficulty;
   final String? bestTimeToVisit;
+
+  /// Short practical tips (best time to visit, what to bring, entry
+  /// requirements, ...) shown as a bulleted "Good to Know" section on the
+  /// detail screen. Empty means the section is omitted entirely, same rule
+  /// as [bestTimeToVisit] — never fabricated for a place with no curated
+  /// content, which is every Mapbox-sourced POI and most curated gems too.
+  final List<String> goodToKnow;
 
   /// Estimated visit duration in minutes, for the Itinerary's spot meta line
   /// and day-summary planned-time rollup. Null means unknown/uncatalogued —
@@ -56,8 +72,10 @@ class Gem {
     this.description,
     this.photoUrl,
     this.photoUrls = const [],
+    this.photoCaptions = const {},
     this.difficulty,
     this.bestTimeToVisit,
+    this.goodToKnow = const [],
     this.estDurationMin,
     required this.savedAt,
     this.userId,
@@ -99,8 +117,11 @@ class Gem {
       description: json['description'] as String?,
       photoUrl: json['photo_url'] as String?,
       photoUrls: (json['photo_urls'] as List?)?.cast<String>() ?? const [],
+      photoCaptions:
+          (json['photo_captions'] as Map?)?.cast<String, String>() ?? const {},
       difficulty: json['difficulty'] as String?,
       bestTimeToVisit: json['best_time_to_visit'] as String?,
+      goodToKnow: (json['good_to_know'] as List?)?.cast<String>() ?? const [],
       estDurationMin: (json['est_duration_min'] as num?)?.toInt(),
       savedAt: DateTime.tryParse(json['saved_at'] as String? ?? '') ??
           DateTime.now(),
@@ -123,8 +144,10 @@ class Gem {
         'description': description,
         'photo_url': photoUrl,
         'photo_urls': photoUrls,
+        'photo_captions': photoCaptions,
         'difficulty': difficulty,
         'best_time_to_visit': bestTimeToVisit,
+        'good_to_know': goodToKnow,
         'est_duration_min': estDurationMin,
         'user_id': userId,
       };
@@ -163,4 +186,7 @@ class Gem {
   /// includes the cover when it's populated.
   List<String> get allPhotos =>
       photoUrls.isNotEmpty ? photoUrls : (photoUrl != null ? [photoUrl!] : []);
+
+  /// The caption for [photoUrl], or null when none was written for it.
+  String? captionFor(String photoUrl) => photoCaptions[photoUrl];
 }

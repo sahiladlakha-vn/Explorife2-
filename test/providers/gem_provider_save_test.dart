@@ -38,7 +38,9 @@ class FakeGemRepository implements GemRepository {
 
   @override
   Future<Gem> create(GemDraft draft,
-          {required String userId, List<String> photoUrls = const []}) =>
+          {required String userId,
+          List<String> photoUrls = const [],
+          Map<String, String> photoCaptions = const {}}) =>
       throw UnimplementedError();
 
   @override

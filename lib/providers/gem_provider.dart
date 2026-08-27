@@ -554,10 +554,18 @@ class GemProvider extends ChangeNotifier {
   /// and optimistically adds the persisted gem to the list (the realtime echo
   /// is deduped by [_upsert]). Never throws — failures come back in the
   /// returned [GemPublishResult].
+  ///
+  /// [photoCaptions], if given, must be the same length and order as
+  /// [photos] (one caption per photo, empty string for "no caption") — it's
+  /// zipped against the URLs [uploadPhotos] returns to build the URL-keyed
+  /// map the database actually stores. Zipped only up to however many URLs
+  /// actually came back, so a partial upload failure can't misattribute a
+  /// caption to the wrong photo.
   Future<GemPublishResult> publish(
     GemDraft draft, {
     required String userId,
     List<XFile> photos = const [],
+    List<String> photoCaptions = const [],
   }) async {
     try {
       var photoFailed = false;
@@ -566,8 +574,13 @@ class GemProvider extends ChangeNotifier {
         photoUrls = await _repo.uploadPhotos(userId, photos);
         if (photoUrls.isEmpty) photoFailed = true;
       }
-      final gem =
-          await _repo.create(draft, userId: userId, photoUrls: photoUrls);
+      final captionsByUrl = <String, String>{
+        for (var i = 0; i < photoUrls.length && i < photoCaptions.length; i++)
+          if (photoCaptions[i].trim().isNotEmpty)
+            photoUrls[i]: photoCaptions[i].trim(),
+      };
+      final gem = await _repo.create(draft,
+          userId: userId, photoUrls: photoUrls, photoCaptions: captionsByUrl);
       _upsert(gem);
       return GemPublishResult(
           success: true, photoFailed: photoFailed, gem: gem);
