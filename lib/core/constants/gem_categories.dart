@@ -25,6 +25,8 @@ class GemCategories {
     'cave': Icons.landscape,
     'coastal': Icons.water,
     'nature': Icons.park,
+    'heritage': Icons.museum,
+    'landmark': Icons.filter_hdr,
   };
 
   /// Icon for [category], falling back to a generic pin for unknown/null values.

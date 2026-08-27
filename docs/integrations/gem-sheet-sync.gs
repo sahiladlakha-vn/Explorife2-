@@ -18,7 +18,8 @@
  *   A Gem Name          (required)
  *   B Location          (freeform, e.g. "Hanoi, Vietnam" or a street address)
  *   C Category          (one of: hiking, camping, viewpoint, food, temple,
- *                         cave, coastal, nature — anything else is rejected)
+ *                         cave, coastal, nature, heritage, landmark —
+ *                         anything else is rejected)
  *   D Tagline
  *   E Description
  *   F Difficulty
@@ -104,8 +105,13 @@ const COL = {
   LAT: 10, LNG: 11, GEM_ID: 12, STATUS: 13,
 };
 const HEADER_ROW = 1;
+// 10 categories as of the heritage/landmark addition — must stay in sync
+// with Gem.categories (lib/models/gem.dart) on the app side. heritage
+// covers old towns/museums/cultural sites; landmark covers iconic natural
+// wonders/scenic must-see spots, distinct from the more generic `nature`.
 const VALID_CATEGORIES = [
   'hiking', 'camping', 'viewpoint', 'food', 'temple', 'cave', 'coastal', 'nature',
+  'heritage', 'landmark',
 ];
 
 // ── menu (manual sync entry points) ───────────────────────────────────────

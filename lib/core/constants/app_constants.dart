@@ -34,19 +34,4 @@ class AppConstants {
     Icons.account_balance,
     Icons.hiking,
   ];
-
-  /// Gem-category → Material icon, shared by Search and Discover. Lives here
-  /// (not on the Gem model) so the data model stays free of a Flutter import.
-  /// Emoji don't render reliably under CanvasKit on web, so the UI uses the
-  /// bundled icon font instead. Keys match [Gem.categories].
-  static const Map<String, IconData> gemCategoryIcons = {
-    'hiking': Icons.directions_walk,
-    'camping': Icons.cabin,
-    'viewpoint': Icons.photo_camera,
-    'food': Icons.restaurant,
-    'temple': Icons.temple_buddhist,
-    'cave': Icons.landscape,
-    'coastal': Icons.waves,
-    'nature': Icons.park,
-  };
 }

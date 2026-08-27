@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import '../../core/constants/app_constants.dart';
+import '../../core/constants/gem_categories.dart';
 import '../../core/theme/app_theme.dart';
 import '../../models/gem.dart';
 
@@ -33,8 +33,11 @@ class CategoryChipRow extends StatelessWidget {
           final cat = cats[i];
           final isAll = cat == 'all';
           final isSelected = selected == cat;
-          final icon =
-              isAll ? Icons.public : AppConstants.gemCategoryIcons[cat]!;
+          // GemCategories.iconFor (not a raw map lookup) so a category never
+          // silently crashes this row if a new one is ever added to
+          // Gem.categories without a matching icon entry — it falls back to
+          // a generic pin instead.
+          final icon = isAll ? Icons.public : GemCategories.iconFor(cat);
           final label =
               isAll ? 'All' : cat[0].toUpperCase() + cat.substring(1);
           return Padding(

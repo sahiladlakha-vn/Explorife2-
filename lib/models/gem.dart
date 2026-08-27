@@ -161,8 +161,16 @@ class Gem {
     'cave': '🗿',
     'coastal': '🌊',
     'nature': '🌿',
+    'heritage': '🏛️',
+    'landmark': '🌄',
   };
 
+  // 10 categories as of the heritage/landmark addition — see
+  // gem-sheet-sync.gs's VALID_CATEGORIES (the spreadsheet-side source these
+  // must stay in sync with) and this list's own doc note there for the
+  // mapping rationale: heritage covers old towns/museums/cultural sites,
+  // landmark covers iconic natural wonders/scenic must-see spots (distinct
+  // from the more generic `nature`).
   static const List<String> categories = [
     'hiking',
     'camping',
@@ -172,6 +180,8 @@ class Gem {
     'cave',
     'coastal',
     'nature',
+    'heritage',
+    'landmark',
   ];
 
   String get emoji => categoryEmoji[category] ?? '📍';
