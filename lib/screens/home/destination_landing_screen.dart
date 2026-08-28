@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 import '../../core/services/mapbox_tilequery_service.dart';
+import '../../core/services/poi_category_filter.dart';
 import '../../core/theme/app_theme.dart';
 import '../../providers/gem_provider.dart';
 import '../../widgets/gems/category_chip_row.dart';
@@ -34,6 +35,13 @@ import '../listings/listings_screen.dart' show GemResultCard, PoiResultCard;
 /// separate "Top things to do"/"Top attractions" rails — a presentation
 /// merge only; curated Gems and Mapbox POIs remain two distinct data
 /// sources, still rendered with their own honest "GEM" vs. plain badge.
+/// POIs are also filtered to travel-relevant categories before they ever
+/// reach this feed (see [filterTravelRelevantPois]) — Tilequery otherwise
+/// returns government offices, parking, and utility infrastructure right
+/// alongside actual points of interest. Gems always render before the
+/// filtered POI fill-in (see the grid's index math in build()), never
+/// interleaved, so a curated place never gets buried next to an
+/// auto-pulled one.
 class DestinationLandingScreen extends StatefulWidget {
   const DestinationLandingScreen({
     super.key,
@@ -72,10 +80,23 @@ class _DestinationLandingScreenState extends State<DestinationLandingScreen> {
       return;
     }
     final pois =
-        await _tilequery.nearby(lat, lng, radiusMeters: 5000, limit: 30);
+        await _tilequery.nearby(lat, lng, radiusMeters: 5000, limit: 50);
+    // Tilequery returns everything nearby it knows about — government
+    // offices, parking, utility infrastructure — not just things a
+    // traveler would want to see. This feed presents POIs as if they were
+    // gems, so only travel-relevant categories belong here (unlike Add
+    // Stop's own Tilequery fetch, which intentionally shows everything).
+    //
+    // limit: 50 (Tilequery's actual max — confirmed against the live API,
+    // it rejects anything higher) rather than the smaller limit this screen
+    // used pre-filtering: Tilequery sorts nearest-first and a city center
+    // is often dense with the exact office/government buildings this
+    // filter drops, so a small raw sample can filter down to almost
+    // nothing even when real gems-worthy places exist slightly farther out.
+    final relevant = filterTravelRelevantPois(pois);
     if (mounted)
       setState(() {
-        _pois = pois;
+        _pois = relevant;
         _loading = false;
       });
   }

@@ -7,6 +7,7 @@ import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../core/services/geocoding_service.dart';
 import '../../core/services/mapbox_tilequery_service.dart';
+import '../../core/services/poi_category_filter.dart';
 import '../../core/theme/app_theme.dart';
 import '../../models/gem.dart';
 import '../../models/trip.dart';
@@ -146,11 +147,15 @@ class _GemDetailScreenState extends State<GemDetailScreen> {
     if (resolvedGem.hasCoords) {
       nearby = await _tilequery.nearby(
           resolvedGem.latitude!, resolvedGem.longitude!,
-          radiusMeters: 800, limit: 12);
+          radiusMeters: 800, limit: 50);
       // Tilequery has no notion of "this exact place" to exclude — drop
       // anything suspiciously close (< 15m) so the gem itself doesn't show
       // up in its own "Nearby Experiences" rail.
       nearby = nearby.where((p) => (p.distanceMeters ?? 999) > 15).toList();
+      // Same allowlist Destination Detail and Listings apply — this rail
+      // presents POIs as travel-worthy "experiences," so government
+      // offices/parking/etc. don't belong here either.
+      nearby = filterTravelRelevantPois(nearby);
     }
     if (mounted) {
       setState(() {

@@ -6,6 +6,7 @@ import '../../core/theme/app_theme.dart';
 import '../../core/constants/curated_destinations.dart';
 import '../../core/services/geocoding_service.dart';
 import '../../core/services/mapbox_tilequery_service.dart';
+import '../../core/services/poi_category_filter.dart';
 import '../../providers/gem_provider.dart';
 import '../../models/gem.dart';
 import '../../widgets/app_network_image.dart';
@@ -180,10 +181,20 @@ class _ListingsScreenState extends State<ListingsScreen> {
       // shouldn't leave this section empty, just less personalized.
     }
     final pois =
-        await _tilequery.nearby(lat, lng, radiusMeters: 2000, limit: 20);
+        await _tilequery.nearby(lat, lng, radiusMeters: 2000, limit: 50);
+    // Same allowlist Destination Detail's scoped feed uses — this grid
+    // presents POIs alongside real Gems, so government offices, parking,
+    // and other non-travel-relevant Tilequery noise don't belong here
+    // either. See poi_category_filter.dart.
+    //
+    // limit: 50 (Tilequery's actual max) rather than the smaller limit
+    // this screen used pre-filtering — same reasoning as
+    // destination_landing_screen.dart: a small nearest-first raw sample can
+    // filter down to almost nothing in an office-dense area.
+    final relevant = filterTravelRelevantPois(pois);
     if (mounted)
       setState(() {
-        _nearby = pois;
+        _nearby = relevant;
         _nearbyLoading = false;
       });
   }
