@@ -23,17 +23,50 @@ import 'mapbox_tilequery_service.dart';
 /// stays under that gap while still covering realistic geocoding drift.
 const dedupRadiusMeters = 30.0;
 
-/// Whether [gem] and [poi] are plausibly the exact same physical place —
-/// requires BOTH close proximity AND a name match, so two merely-adjacent
-/// but genuinely different places (e.g. a cafe next to a monument, both
-/// well within 30m) don't get wrongly conflated just because proximity
-/// alone would allow it.
-bool sameRealPlace(Gem gem, NearbyPoi poi) {
+/// Whether [gem] is plausibly the same physical place as a candidate
+/// location described by [name]/[lat]/[lng] — requires BOTH close
+/// proximity AND a name match, so two merely-adjacent but genuinely
+/// different places (e.g. a cafe next to a monument, both well within
+/// 30m) don't get wrongly conflated just because proximity alone would
+/// allow it. The shared core behind [sameRealPlace] (Tilequery POI dedup)
+/// and Attraction's own "this looks like an existing place" check at
+/// listing-creation time (attraction_form_screen.dart) — one matching
+/// rule for "is this the same real place as a Gem," not two.
+bool placeLikelyMatchesGem(
+  Gem gem, {
+  required String name,
+  required double lat,
+  required double lng,
+}) {
   if (!gem.hasCoords) return false;
   final distance =
-      Geolocator.distanceBetween(gem.latitude!, gem.longitude!, poi.lat, poi.lng);
+      Geolocator.distanceBetween(gem.latitude!, gem.longitude!, lat, lng);
   if (distance > dedupRadiusMeters) return false;
-  return placeNamesLikelyMatch(gem.gemName, poi.name);
+  return placeNamesLikelyMatch(gem.gemName, name);
+}
+
+/// Whether [gem] and [poi] are plausibly the exact same physical place —
+/// see [placeLikelyMatchesGem].
+bool sameRealPlace(Gem gem, NearbyPoi poi) =>
+    placeLikelyMatchesGem(gem, name: poi.name, lat: poi.lat, lng: poi.lng);
+
+/// The first Gem in [gems] that plausibly describes the same real place as
+/// [name]/[lat]/[lng], or null if none do — backs Attraction's "this looks
+/// like an existing place — link it?" prompt at listing-creation time.
+/// Not a guarantee (a genuine coincidence — two differently-run cafes 20m
+/// apart with similar names — is possible, however unlikely), which is
+/// exactly why this surfaces as a confirm-or-decline prompt to the
+/// business owner rather than an automatic silent link.
+Gem? findLikelyGemMatch(
+  List<Gem> gems, {
+  required String name,
+  required double lat,
+  required double lng,
+}) {
+  for (final gem in gems) {
+    if (placeLikelyMatchesGem(gem, name: name, lat: lat, lng: lng)) return gem;
+  }
+  return null;
 }
 
 /// Drops any [pois] that plausibly duplicate a place already covered by
