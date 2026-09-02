@@ -1,6 +1,9 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
+import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../models/role.dart';
+import '../repositories/admin_profile_repository.dart';
 
 class AuthUser {
   final String id;
@@ -10,6 +13,12 @@ class AuthUser {
   final String? provider;
   final String? username;
 
+  /// Defaults to [Role.traveler] until the real `profiles.role` value
+  /// loads — every account has exactly one role (see role.dart), so this
+  /// default only ever reflects "not loaded yet," never a genuinely
+  /// roleless account.
+  final Role role;
+
   const AuthUser({
     required this.id,
     required this.name,
@@ -17,6 +26,7 @@ class AuthUser {
     this.avatarUrl,
     this.provider,
     this.username,
+    this.role = Role.traveler,
   });
 }
 
@@ -45,6 +55,7 @@ class AuthProvider extends ChangeNotifier {
   AuthUser? get user => _user;
   bool get loading => _loading;
   bool get isAuthenticated => _user != null;
+  Role get role => _user?.role ?? Role.traveler;
 
   static final _supabase = Supabase.instance.client;
 
@@ -76,6 +87,7 @@ class AuthProvider extends ChangeNotifier {
     // Listen for auth state changes (login, logout, token refresh)
     _authSubscription = _supabase.auth.onAuthStateChange.listen((data) async {
       final session = data.session;
+      final wasSignedIn = _user != null;
       if (session?.user == null) {
         _user = null;
       } else {
@@ -83,6 +95,12 @@ class AuthProvider extends ChangeNotifier {
           _user = await _loadProfile(session!.user);
         } catch (_) {
           _user = _quickUser(session!.user);
+        }
+        // Real sign-in transition (not a token refresh on an already-loaded
+        // session) for an admin-tier account — record it. Never blocks or
+        // fails sign-in itself; see recordLastLoginIfAdmin's own doc.
+        if (!wasSignedIn && _user != null && _user!.role.isAdminTier) {
+          unawaited(_recordLastLoginIfAdmin(_user!.id));
         }
       }
       _loading = false;
@@ -93,7 +111,7 @@ class AuthProvider extends ChangeNotifier {
   Future<AuthUser> _loadProfile(User authUser) async {
     final data = await _supabase
         .from('profiles')
-        .select('display_name, avatar_url, username')
+        .select('display_name, avatar_url, username, role')
         .eq('id', authUser.id)
         .maybeSingle();
 
@@ -112,6 +130,7 @@ class AuthProvider extends ChangeNotifier {
           (meta['picture'] as String?),
       provider: authUser.appMetadata['provider'] as String?,
       username: data?['username'] as String?,
+      role: Role.fromWire(data?['role'] as String?),
     );
   }
 
@@ -126,7 +145,30 @@ class AuthProvider extends ChangeNotifier {
           'Explorer',
       avatarUrl: (meta['avatar_url'] as String?) ?? (meta['picture'] as String?),
       provider: authUser.appMetadata['provider'] as String?,
+      // role deliberately left at its Role.traveler default here — this is
+      // the "profiles row failed to load" fallback path, and defaulting an
+      // admin account to the LEAST-privileged role on a load failure is the
+      // safe direction to fail in, not a real signal about the account.
     );
+  }
+
+  /// Best-effort "Last Login"/"Last Login IP" update for admin_profiles —
+  /// see AdminProfileRepository.recordLogin's own doc comment for why the
+  /// IP is client-reported (a Flutter client has no other way to learn its
+  /// own public IP) rather than server-verified. Swallows all errors: this
+  /// is an audit nicety, never something that should block or fail a
+  /// sign-in.
+  Future<void> _recordLastLoginIfAdmin(String userId) async {
+    String? ip;
+    try {
+      final res = await http
+          .get(Uri.parse('https://api.ipify.org'))
+          .timeout(const Duration(seconds: 3));
+      if (res.statusCode == 200 && res.body.trim().isNotEmpty) ip = res.body.trim();
+    } catch (_) {
+      // No IP this time — last_login itself still gets recorded below.
+    }
+    await AdminProfileRepository().recordLogin(userId, ip: ip);
   }
 
   Future<void> signInWithGoogle() async {
@@ -162,6 +204,7 @@ class AuthProvider extends ChangeNotifier {
       avatarUrl: _user!.avatarUrl,
       provider: _user!.provider,
       username: _user!.username,
+      role: _user!.role,
     );
     notifyListeners();
   }
@@ -183,6 +226,7 @@ class AuthProvider extends ChangeNotifier {
       avatarUrl: _user!.avatarUrl,
       provider: _user!.provider,
       username: normalized,
+      role: _user!.role,
     );
     notifyListeners();
   }
