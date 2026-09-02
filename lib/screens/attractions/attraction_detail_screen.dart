@@ -101,8 +101,15 @@ class _AttractionDetailScreenState extends State<AttractionDetailScreen> {
       );
     }
 
-    final userId = context.watch<AuthProvider>().user?.id;
+    final auth = context.watch<AuthProvider>();
+    final userId = auth.user?.id;
     final isOwner = userId != null && userId == attraction.ownerId;
+    // An admin can reach this screen for someone else's listing too (e.g.
+    // following a link while investigating it) via RLS's admin SELECT
+    // policy — the RETRACTED badge should tell them the truth about what
+    // they're looking at just as much as it tells the owner, not only
+    // gate on ownership.
+    final canSeeRetractedBadge = isOwner || auth.role.isAdminTier;
 
     return Scaffold(
       backgroundColor: AppTheme.lightSurface,
@@ -181,7 +188,7 @@ class _AttractionDetailScreenState extends State<AttractionDetailScreen> {
                   Text(attraction.description,
                       style: GoogleFonts.fredoka(
                           fontSize: 14, color: AppTheme.lightMute, height: 1.5)),
-                  if (isOwner && attraction.isRetracted) ...[
+                  if (canSeeRetractedBadge && attraction.isRetracted) ...[
                     const SizedBox(height: 16),
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
