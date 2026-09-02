@@ -189,3 +189,54 @@ This DELETE-policy question will very likely recur for Restaurant (the next
 business type) — the same soft-delete pattern (a `deleted_at` column + an
 owner-or-admin RPC that only logs the admin path) should be reused rather
 than re-decided from scratch.
+
+## Post-review fix 2 — full `deleted_at` audit (2026-09-04, second pass)
+
+A follow-up review flagged the real underlying issue: `retract_attraction`
+sets `deleted_at` but deliberately does NOT change `verification_status` (a
+retracted listing stays whatever status it had — confirmed live, see below).
+So any read path that filters on `verification_status` alone, running under
+a session RLS's owner/admin SELECT policies let through (RLS was
+deliberately left permissive there — see Fix 1), would treat a retracted
+listing as still live. Every `attractions` read path in the codebase was
+audited:
+
+| Method | Filters on | RLS-protected for anon? | Needed a fix? |
+|---|---|---|---|
+| `fetchVerified` (public browse feed) | `verification_status='verified'` | Yes (central policy) | Already had `deleted_at is null` (Fix 1); now also passes results through `liveVerifiedAttraction` as a client-side backstop |
+| `fetchVerifiedForGem` (Gem Detail's business card) | `verification_status='verified'` + `gem_id` | Yes for anon; **NOT for the listing's own owner or any admin viewing the same Gem** — the actual gap | **Fixed**: query already had `deleted_at is null` from Fix 1; now also passes the result through `liveVerifiedAttraction` (see below) |
+| `fetchPending` (moderation queue) | `verification_status='pending'` | N/A — admin-only surface by RLS, not a public/anon concern; **but a retracted-while-pending listing (owner withdraws before review) was NOT excluded** | **Fixed** — added `.filter('deleted_at', 'is', null)`; a real bug found during this audit, distinct from the Gem Detail case |
+| `fetchById` (standalone detail screen + owner's edit/retract flow) | none | Yes for anon (RLS denies non-owned+retracted); intentionally unfiltered for the owner/admin, who need to see their own listing regardless of status | No fix — **intentionally** unfiltered, documented in the repository method's own doc comment |
+| `fetchOwnedByCurrentUser` (future "my listings" view) | none | N/A — owner-only by RLS | No fix — **intentionally** unfiltered, same reasoning as `fetchById` |
+
+New: `liveVerifiedAttraction(Attraction?)` (`lib/repositories/attraction_repository.dart`)
+— a top-level, pure, unit-tested function (same convention as
+`gemDistanceLabel`/`mapPoiToGemCategory` elsewhere in this app) that returns
+null for anything retracted or not verified. This is defense-in-depth behind
+the query-level filter: even if a future edit accidentally dropped the
+`deleted_at is null` filter from a query, no caller can still end up
+treating a retracted row as live. `fetchVerified`/`fetchVerifiedForGem` both
+route their results through it now.
+
+Also extended: the "RETRACTED" badge on `AttractionDetailScreen` now shows
+for an admin-tier viewer too, not just the listing's own owner (an admin
+can reach a retracted listing via their own broader SELECT policy and
+deserves to know what they're looking at, same as the owner does).
+
+**Verified live, end-to-end** (real Supabase, real accounts, same pattern as
+Fix 1's verification): linked a verified Attraction to the real "Thap Rua"
+Gem, confirmed the Gem Detail card query returned it for the owner, the real
+Super Admin, AND the anon key. Retracted it as the owner — confirmed
+`verification_status` stayed `'verified'` (the exact gap scenario) while
+`deleted_at` was set. Re-ran the card query as owner, admin, and anon: **all
+three now correctly return zero rows** — the fix closes the gap for the two
+sessions RLS alone didn't protect (owner, admin), and the anon case (already
+protected) shows no regression. Separately: inserted a fresh `pending`
+listing, confirmed the (pre-fix-shaped) moderation query would have returned
+it, withdrew it via `retract_attraction` while still pending, and confirmed
+the fixed `fetchPending` query correctly excludes it. All test data cleaned
+up afterward.
+
+349 tests pass project-wide (4 new: `test/repositories/attraction_repository_test.dart`
+covering `liveVerifiedAttraction`), `flutter analyze` clean (no new
+warnings/errors beyond the same pre-existing pattern noted above).
