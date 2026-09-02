@@ -1,0 +1,202 @@
+import 'package:flutter/foundation.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import '../models/attraction.dart';
+
+/// Defense-in-depth for any "this business listing is currently live"
+/// query — `retract_attraction` sets `deleted_at` but deliberately does
+/// NOT change `verification_status` (a retracted listing stays whatever
+/// status it had), so a query that only checks `verification_status` can
+/// still return a retracted row. The primary defense is the query filter
+/// itself (`.filter('deleted_at', 'is', null)`, see [fetchVerifiedForGem]
+/// below) — this is the belt-and-suspenders backstop: even if that filter
+/// were ever accidentally dropped from a future edit, no caller of this
+/// function can end up treating a retracted listing as live. Top-level and
+/// pure so it's unit-testable with no network/mock, same convention as
+/// gemDistanceLabel/mapPoiToGemCategory elsewhere in this app.
+Attraction? liveVerifiedAttraction(Attraction? attraction) {
+  if (attraction == null) return null;
+  if (attraction.isRetracted) return null;
+  if (attraction.verificationStatus != AttractionVerificationStatus.verified) {
+    return null;
+  }
+  return attraction;
+}
+
+/// The Supabase-aware layer for `attractions` — mirrors TourRepository's
+/// layering. RLS (not client-side filtering) is what actually scopes
+/// ownership/visibility here — see the migration's policies — this class
+/// just shapes the queries.
+class AttractionRepository {
+  AttractionRepository({SupabaseClient? client})
+      : _db = client ?? Supabase.instance.client;
+
+  final SupabaseClient _db;
+
+  static const String table = 'attractions';
+
+  /// The public feed — RLS already restricts this to verified,
+  /// not-retracted listings for non-owners/non-admins, but the explicit
+  /// filter keeps the query's own intent honest even for an owner/admin
+  /// session that could technically see more (RLS's owner/admin SELECT
+  /// policies are deliberately NOT restricted by deleted_at — see the
+  /// migration — since those sessions need to see their own/all listings
+  /// including retracted ones elsewhere).
+  Future<List<Attraction>> fetchVerified({String? category}) async {
+    try {
+      var query = _db
+          .from(table)
+          .select()
+          .eq('verification_status', 'verified')
+          .filter('deleted_at', 'is', null);
+      if (category != null) query = query.eq('category', category);
+      final data = await query.order('created_at', ascending: false);
+      return (data as List)
+          .map((e) => Attraction.fromJson(e as Map<String, dynamic>))
+          .where((a) => liveVerifiedAttraction(a) != null)
+          .toList();
+    } catch (e) {
+      debugPrint('AttractionRepository.fetchVerified error: $e');
+      return [];
+    }
+  }
+
+  /// Deliberately NOT filtered by verification_status or deleted_at — this
+  /// backs both the standalone public detail screen (RLS itself is what
+  /// protects an anonymous/non-owner/non-admin viewer from seeing a
+  /// retracted or unverified listing here — see the 3 SELECT policies) AND
+  /// the owner's own "view/edit/retract my listing" flow, which
+  /// INTENTIONALLY needs to see the listing regardless of its status
+  /// (including already-retracted, to show the "RETRACTED" badge and let
+  /// them still review what they submitted). Do not add a deleted_at/
+  /// verification_status filter here — that would break the owner's own
+  /// view of their own listing.
+  Future<Attraction?> fetchById(String id) async {
+    try {
+      final data = await _db.from(table).select().eq('id', id).maybeSingle();
+      return data == null ? null : Attraction.fromJson(data);
+    } catch (e) {
+      debugPrint('AttractionRepository.fetchById error: $e');
+      return null;
+    }
+  }
+
+  /// A Gem's linked Attraction, if one exists, is verified, AND is not
+  /// retracted — the query Gem Detail's additional section runs. Null (not
+  /// an error) when no business has claimed/verified this place yet, OR
+  /// when the linked business retracted its listing after being verified
+  /// (a real case: `retract_attraction` leaves `verification_status`
+  /// untouched, so without BOTH the query filter and the
+  /// [liveVerifiedAttraction] backstop, a traveller could see a stale
+  /// business-info card for a business that pulled its own listing).
+  /// This is the highest-visibility instance of that gap — it's the one
+  /// traveller-facing surface reading `attractions` directly, and RLS
+  /// alone only protects an anonymous/non-owner/non-admin session; the
+  /// listing's own owner or any admin-tier account viewing that same Gem
+  /// would otherwise still see it via their own broader SELECT policies.
+  Future<Attraction?> fetchVerifiedForGem(String gemId) async {
+    try {
+      final data = await _db
+          .from(table)
+          .select()
+          .eq('gem_id', gemId)
+          .eq('verification_status', 'verified')
+          .filter('deleted_at', 'is', null)
+          .maybeSingle();
+      return liveVerifiedAttraction(data == null ? null : Attraction.fromJson(data));
+    } catch (e) {
+      debugPrint('AttractionRepository.fetchVerifiedForGem error: $e');
+      return null;
+    }
+  }
+
+  /// Deliberately NOT filtered by verification_status or deleted_at — this
+  /// is meant to back a future "my listings" management view showing the
+  /// owner ALL of their own listings (pending/verified/rejected/retracted
+  /// alike), the same "show the owner their own history" intent as
+  /// [fetchById]. Do not add a filter here for the same reason.
+  Future<List<Attraction>> fetchOwnedByCurrentUser() async {
+    final userId = _db.auth.currentUser?.id;
+    if (userId == null) return [];
+    try {
+      final data = await _db
+          .from(table)
+          .select()
+          .eq('owner_id', userId)
+          .order('created_at', ascending: false);
+      return (data as List)
+          .map((e) => Attraction.fromJson(e as Map<String, dynamic>))
+          .toList();
+    } catch (e) {
+      debugPrint('AttractionRepository.fetchOwnedByCurrentUser error: $e');
+      return [];
+    }
+  }
+
+  /// The moderation queue — relies on RLS's "admins can view all
+  /// attractions" policy (a non-admin session gets an empty list, not an
+  /// error, since the underlying query itself is the same either way).
+  ///
+  /// The `deleted_at is null` filter here matters for a real case found in
+  /// the deleted_at audit: `retract_attraction` lets an owner retract a
+  /// listing at ANY verification status, including 'pending' — a business
+  /// owner can withdraw a submission before an admin ever reviews it.
+  /// Without this filter, RLS's admin SELECT policy (correctly, since it
+  /// has no reason to hide retracted rows from admins in general) would
+  /// let a withdrawn-but-still-'pending' listing keep showing up in this
+  /// queue, wasting a moderator's attention on a submission that no longer
+  /// exists from the owner's point of view.
+  Future<List<Attraction>> fetchPending() async {
+    try {
+      final data = await _db
+          .from(table)
+          .select()
+          .eq('verification_status', 'pending')
+          .filter('deleted_at', 'is', null)
+          .order('created_at', ascending: true);
+      return (data as List)
+          .map((e) => Attraction.fromJson(e as Map<String, dynamic>))
+          .toList();
+    } catch (e) {
+      debugPrint('AttractionRepository.fetchPending error: $e');
+      return [];
+    }
+  }
+
+  Future<Attraction> create(Attraction attraction) async {
+    final inserted =
+        await _db.from(table).insert(attraction.toInsert()).select().single();
+    return Attraction.fromJson(inserted);
+  }
+
+  /// Verification-status fields are deliberately excluded from this
+  /// payload — see the DB trigger's own doc comment for why an owner's
+  /// plain update can never touch them regardless of what a client sends.
+  Future<void> update(Attraction attraction) async {
+    await _db.from(table).update(attraction.toInsert()).eq('id', attraction.id);
+  }
+
+  /// The only sanctioned way to approve/reject a listing — calls the
+  /// `verify_attraction` RPC (security definer: checks the caller is
+  /// admin-tier, updates the row, AND writes a real admin_action_log
+  /// entry in one transaction). Throws (surfacing the RPC's own exception
+  /// message) if the caller isn't Content Moderator/Regional Admin/Super
+  /// Admin.
+  Future<Attraction> verify(String attractionId, {required bool approve}) async {
+    final data = await _db.rpc('verify_attraction', params: {
+      'p_attraction_id': attractionId,
+      'p_approve': approve,
+    });
+    return Attraction.fromJson(data as Map<String, dynamic>);
+  }
+
+  /// Soft-deletes a listing — the owner (any time, any status) or an
+  /// admin-tier account (moderation power) may call this; anyone else's
+  /// call is rejected by the RPC itself. Only logs to admin_action_log
+  /// when the caller is admin-tier, not for an owner retracting their own
+  /// listing — see the RPC's own doc comment for why.
+  Future<Attraction> retract(String attractionId) async {
+    final data = await _db
+        .rpc('retract_attraction', params: {'p_attraction_id': attractionId});
+    return Attraction.fromJson(data as Map<String, dynamic>);
+  }
+}

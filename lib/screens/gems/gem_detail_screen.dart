@@ -9,12 +9,15 @@ import '../../core/services/geocoding_service.dart';
 import '../../core/services/mapbox_tilequery_service.dart';
 import '../../core/services/poi_category_filter.dart';
 import '../../core/theme/app_theme.dart';
+import '../../models/attraction.dart';
 import '../../models/gem.dart';
 import '../../models/trip.dart';
 import '../../models/trip_stop.dart';
 import '../../providers/gem_provider.dart';
 import '../../providers/trip_provider.dart';
+import '../../repositories/attraction_repository.dart';
 import '../../widgets/app_network_image.dart';
+import '../../widgets/common/photo_carousel.dart';
 import '../explore/feed_metrics.dart';
 
 /// Which collapsible section is open — single-open accordion, so this is a
@@ -76,8 +79,14 @@ class _GemDetailScreenState extends State<GemDetailScreen> {
   List<NearbyPoi> _nearby = [];
   bool _loading = true;
 
-  final PageController _photoController = PageController();
-  int _photoIndex = 0;
+  /// A verified business listing linked to this Gem, if one exists — see
+  /// the class doc note added below and
+  /// docs/audits/attraction-business-profile-2026-09-04.md for the full
+  /// decision. Null (the common case, at least until businesses start
+  /// claiming places) just means no business has verified this place —
+  /// never an error, and the existing curated content above is never
+  /// affected by its presence or absence.
+  Attraction? _linkedAttraction;
 
   // Straight-line distance to the gem — best-effort location, same
   // permission-check/request/fallback shape used elsewhere in this app
@@ -98,12 +107,6 @@ class _GemDetailScreenState extends State<GemDetailScreen> {
     super.initState();
     _load();
     _loadUserLocation();
-  }
-
-  @override
-  void dispose() {
-    _photoController.dispose();
-    super.dispose();
   }
 
   /// Builds a transient, never-persisted Gem straight from a Mapbox POI —
@@ -157,10 +160,16 @@ class _GemDetailScreenState extends State<GemDetailScreen> {
       // offices/parking/etc. don't belong here either.
       nearby = filterTravelRelevantPois(nearby);
     }
+    // A POI-derived gem has no saved_gems row, so it can't have a linked
+    // Attraction either (gem_id references saved_gems specifically).
+    final linkedAttraction = resolvedGem.isFromPoi
+        ? null
+        : await AttractionRepository().fetchVerifiedForGem(resolvedGem.id);
     if (mounted) {
       setState(() {
         _gem = resolvedGem;
         _nearby = nearby;
+        _linkedAttraction = linkedAttraction;
         _loading = false;
         _openSection = _defaultSection(resolvedGem);
       });
@@ -218,12 +227,6 @@ class _GemDetailScreenState extends State<GemDetailScreen> {
     if (pos == null || !gem.hasCoords) return null;
     return gemDistanceLabel(Geolocator.distanceBetween(
         pos.latitude, pos.longitude, gem.latitude!, gem.longitude!));
-  }
-
-  void _jumpToPhoto(int i) {
-    setState(() => _photoIndex = i);
-    _photoController.animateToPage(i,
-        duration: const Duration(milliseconds: 220), curve: Curves.easeOut);
   }
 
   Future<void> _openDirections(Gem gem) async {
@@ -434,6 +437,16 @@ class _GemDetailScreenState extends State<GemDetailScreen> {
                       onTap: () => _toggleSection(_Section.location),
                       child: _locationContent(gem, distance),
                     ),
+                  // A verified business listing for this same place, if one
+                  // exists — deliberately NOT folded into the accordion
+                  // above: the curated content there is untouched by
+                  // whether a business has claimed this place, and this
+                  // reads as its own distinct, business-attributed section
+                  // rather than editorial content.
+                  if (_linkedAttraction != null) ...[
+                    const SizedBox(height: 16),
+                    _AttractionInfoCard(attraction: _linkedAttraction!),
+                  ],
                   const SizedBox(height: 4),
                 ],
               ),
@@ -598,128 +611,28 @@ class _GemDetailScreenState extends State<GemDetailScreen> {
     required bool isSaved,
     required VoidCallback onToggleSave,
   }) {
-    final count = photos.length;
-    final hasMultiple = count > 1;
-    // Curated-gem-only content — every Mapbox-sourced photo (there are none
-    // today, but defensively) and every gem no one has captioned yet just
-    // has nothing here, so the caption row below doesn't render.
-    final currentCaption =
-        photos.isNotEmpty ? gem.captionFor(photos[_photoIndex]) : null;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        AspectRatio(
-          aspectRatio: 4 / 3,
-          child: Stack(
-            fit: StackFit.expand,
-            children: [
-              if (photos.isEmpty)
-                Container(
-                  color: AppTheme.lightCard,
-                  child: Center(
-                    // A POI-derived gem carries Mapbox's own Maki icon —
-                    // the same specific glyph (building, parking, etc.) its
-                    // card already shows — instead of the generic pin emoji
-                    // a catalogue gem with no photo falls back to.
-                    child: gem.maki != null
-                        ? Icon(NearbyPoi.iconForMaki(gem.maki),
-                            size: 64, color: AppTheme.lightMute)
-                        : Text(gem.emoji, style: const TextStyle(fontSize: 64)),
-                  ),
-                )
-              else
-                PageView.builder(
-                  controller: _photoController,
-                  physics: hasMultiple
-                      ? const PageScrollPhysics()
-                      : const NeverScrollableScrollPhysics(),
-                  itemCount: count,
-                  onPageChanged: (i) => setState(() => _photoIndex = i),
-                  itemBuilder: (_, i) => AppNetworkImage(
-                      url: photos[i], semanticLabel: gem.gemName),
-                ),
-              // Scrim so the floating icons stay legible over a bright photo.
-              const Positioned(
-                top: 0,
-                left: 0,
-                right: 0,
-                height: 96,
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: [Color(0x59000000), Colors.transparent],
-                    ),
-                  ),
-                ),
-              ),
-              SafeArea(
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      _HeaderIcon(
-                          icon: Icons.arrow_back, onTap: onBack, label: 'Back'),
-                      Row(children: [
-                        _HeaderIcon(
-                          icon:
-                              isSaved ? Icons.bookmark : Icons.bookmark_outline,
-                          onTap: onToggleSave,
-                          iconColor: isSaved ? AppTheme.primary : Colors.white,
-                          label: isSaved ? 'Saved' : 'Save',
-                        ),
-                        const SizedBox(width: 8),
-                        _HeaderIcon(
-                            icon: Icons.link_rounded,
-                            onTap: onCopyLink,
-                            label: 'Copy link'),
-                      ]),
-                    ],
-                  ),
-                ),
-              ),
-              if (photos.isNotEmpty)
-                Positioned(
-                  bottom: 14,
-                  left: 0,
-                  right: 0,
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      for (var i = 0; i < count; i++)
-                        GestureDetector(
-                          onTap: () => _jumpToPhoto(i),
-                          child: AnimatedContainer(
-                            duration: const Duration(milliseconds: 200),
-                            margin: const EdgeInsets.symmetric(horizontal: 3),
-                            width: i == _photoIndex ? 18 : 6,
-                            height: 6,
-                            decoration: BoxDecoration(
-                              color: i == _photoIndex
-                                  ? Colors.white
-                                  : Colors.white.withValues(alpha: 0.5),
-                              borderRadius: BorderRadius.circular(3),
-                            ),
-                          ),
-                        ),
-                    ],
-                  ),
-                ),
-            ],
-          ),
+    // A POI-derived gem carries Mapbox's own Maki icon — the same specific
+    // glyph (building, parking, etc.) its card already shows — instead of
+    // the generic pin emoji a catalogue gem with no photo falls back to.
+    return PhotoCarousel(
+      photos: photos,
+      captionFor: gem.captionFor,
+      emptyIcon: gem.maki != null ? NearbyPoi.iconForMaki(gem.maki) : null,
+      emptyEmoji: gem.maki == null ? gem.emoji : null,
+      semanticLabel: gem.gemName,
+      topLeft:
+          _HeaderIcon(icon: Icons.arrow_back, onTap: onBack, label: 'Back'),
+      topRight: Row(children: [
+        _HeaderIcon(
+          icon: isSaved ? Icons.bookmark : Icons.bookmark_outline,
+          onTap: onToggleSave,
+          iconColor: isSaved ? AppTheme.primary : Colors.white,
+          label: isSaved ? 'Saved' : 'Save',
         ),
-        if (currentCaption != null)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
-            child: Text(currentCaption,
-                style: GoogleFonts.fredoka(
-                    fontSize: 12.5,
-                    fontStyle: FontStyle.italic,
-                    color: AppTheme.lightMute)),
-          ),
-      ],
+        const SizedBox(width: 8),
+        _HeaderIcon(
+            icon: Icons.link_rounded, onTap: onCopyLink, label: 'Copy link'),
+      ]),
     );
   }
 }
@@ -857,6 +770,84 @@ class _QuickActionButton extends StatelessWidget {
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// The "additional section" a verified business listing surfaces as on Gem
+/// Detail — see docs/audits/attraction-business-profile-2026-09-04.md.
+/// Deliberately its own card, not styled to blend into the accordion above
+/// it: this is business-provided information (entry fee, hours), not
+/// editorial content, and the "Verified Business" badge only means
+/// anything if it visually reads as a distinct source.
+class _AttractionInfoCard extends StatelessWidget {
+  const _AttractionInfoCard({required this.attraction});
+
+  final Attraction attraction;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppTheme.lightCard,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppTheme.primary.withValues(alpha: 0.3)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(children: [
+            const Icon(Icons.verified, size: 16, color: AppTheme.primary),
+            const SizedBox(width: 6),
+            Text('VERIFIED BUSINESS LISTING',
+                style: GoogleFonts.jetBrainsMono(
+                    fontSize: 10,
+                    color: AppTheme.primary,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0.5)),
+          ]),
+          const SizedBox(height: 12),
+          _InfoTile(
+            icon: Icons.confirmation_number_outlined,
+            label: 'Entry Fee',
+            value: attraction.isFree
+                ? 'Free'
+                : '${attraction.currency} ${attraction.entryFeeAmount}',
+          ),
+          const SizedBox(height: 8),
+          _InfoTile(
+            icon: Icons.schedule,
+            label: 'Opening Hours',
+            value: attraction.openingHours,
+          ),
+          if (attraction.recommendedDuration != null &&
+              attraction.recommendedDuration!.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            _InfoTile(
+              icon: Icons.hourglass_empty,
+              label: 'Recommended Duration',
+              value: attraction.recommendedDuration!,
+            ),
+          ],
+          const SizedBox(height: 12),
+          GestureDetector(
+            onTap: () => context.push('/attractions/${attraction.id}'),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text('View full listing',
+                    style: GoogleFonts.fredoka(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: AppTheme.primary)),
+                const SizedBox(width: 4),
+                const Icon(Icons.arrow_forward, size: 14, color: AppTheme.primary),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }

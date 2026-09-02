@@ -13,6 +13,12 @@ import '../../screens/listings/destination_detail_screen.dart';
 import '../../screens/profile/profile_screen.dart';
 import '../../screens/gems/gem_detail_screen.dart';
 import '../../screens/gems/placement_screen.dart';
+import '../../screens/attractions/attraction_detail_screen.dart';
+import '../../screens/attractions/attraction_form_screen.dart';
+import '../../screens/attractions/attraction_moderation_screen.dart';
+import '../../models/attraction.dart';
+import '../../screens/tours/tours_list_screen.dart';
+import '../../screens/tours/tour_detail_screen.dart';
 import '../../screens/stories/stories_screen.dart';
 import '../../screens/stories/story_detail_screen.dart';
 import '../../screens/stories/submit_story_screen.dart';
@@ -35,7 +41,9 @@ const _protectedRoutes = {
   '/submit-story',
   '/log-hike',
   '/splits',
-  '/trips'
+  '/trips',
+  '/attractions/new',
+  '/attractions/moderation',
 };
 
 class AppRouter {
@@ -141,6 +149,44 @@ class AppRouter {
                 path: '/gems/:id',
                 builder: (context, state) =>
                     GemDetailScreen(id: state.pathParameters['id']!),
+              ),
+              // Trail/Tour — bookable, priced experiences, deliberately a
+              // separate namespace from both '/gems' (free, crowdsourced
+              // spots) and '/trips' (a user's own itinerary planning) to
+              // avoid any confusion between the three.
+              GoRoute(
+                path: '/tours',
+                builder: (_, __) => const ToursListScreen(),
+              ),
+              GoRoute(
+                path: '/tours/:id',
+                builder: (context, state) =>
+                    TourDetailScreen(id: state.pathParameters['id']!),
+              ),
+              // Attraction — the first of 8 business profile types. Order
+              // matters: '/attractions/new' and '/attractions/moderation'
+              // MUST come before '/attractions/:id', or GoRouter's
+              // declaration-order matching would greedily swallow both as
+              // an ":id" of "new"/"moderation" (same gotcha as '/gems/poi'
+              // above).
+              GoRoute(
+                path: '/attractions/new',
+                builder: (_, __) => const AttractionFormScreen(),
+              ),
+              GoRoute(
+                path: '/attractions/moderation',
+                builder: (_, __) => const AttractionModerationScreen(),
+              ),
+              GoRoute(
+                path: '/attractions/:id/edit',
+                builder: (context, state) => AttractionFormScreen(
+                  existing: state.extra as Attraction?,
+                ),
+              ),
+              GoRoute(
+                path: '/attractions/:id',
+                builder: (context, state) =>
+                    AttractionDetailScreen(id: state.pathParameters['id']!),
               ),
               GoRoute(
                 path: '/stories/:id',

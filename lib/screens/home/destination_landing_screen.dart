@@ -3,6 +3,7 @@ import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 import '../../core/services/mapbox_tilequery_service.dart';
 import '../../core/services/poi_category_filter.dart';
+import '../../core/services/poi_dedup.dart';
 import '../../core/theme/app_theme.dart';
 import '../../providers/gem_provider.dart';
 import '../../widgets/gems/category_chip_row.dart';
@@ -42,6 +43,22 @@ import '../listings/listings_screen.dart' show GemResultCard, PoiResultCard;
 /// filtered POI fill-in (see the grid's index math in build()), never
 /// interleaved, so a curated place never gets buried next to an
 /// auto-pulled one.
+///
+/// [_cityQuery] (not the raw [cityName]) is what actually gets matched
+/// against `gemLocation` — [cityName] is the full geocoded label callers
+/// pass in (e.g. "Hanoi, Vietnam", confirmed via GeocodingService.fullName),
+/// while a real `gemLocation` value is typically "<district>, <city>" with
+/// no country word at all (e.g. "Tay Ho District, Hanoi"). Matching the
+/// FULL label as one substring silently matched nothing for every real
+/// Hanoi gem before this fix — confirmed directly:
+/// `"tay ho district, hanoi".contains("hanoi, vietnam")` is false. Taking
+/// just the leading segment before the first comma recovers "Hanoi", which
+/// does match.
+///
+/// Once a curated Gem exists for a real place, the matching Tilequery POI
+/// for that same spot is suppressed via [excludeDuplicatesOf] (proximity +
+/// fuzzy name match — see poi_dedup.dart) so it never shows up twice under
+/// two different presentations.
 class DestinationLandingScreen extends StatefulWidget {
   const DestinationLandingScreen({
     super.key,
@@ -123,16 +140,26 @@ class _DestinationLandingScreenState extends State<DestinationLandingScreen> {
     );
   }
 
+  /// See the class doc comment for why this — not the raw [cityName] — is
+  /// what actually gets matched against `gemLocation`.
+  String get _cityQuery => widget.cityName.split(',').first.trim();
+
   @override
   Widget build(BuildContext context) {
     final gem = context.watch<GemProvider>();
-    final gemMatches = gem.search(query: widget.cityName, category: _selectedCat);
+    final gemMatches = gem.search(query: _cityQuery, category: _selectedCat);
     // Same rule ListingsScreen uses: a specific category narrows to gems
     // only, since Mapbox's POI categories don't map onto this app's fixed
     // 8-category taxonomy — merging them into a category-filtered view
     // would be a false match, not a real one.
     final includeNearby = _selectedCat == 'all';
-    final nearby = includeNearby ? _pois : const <NearbyPoi>[];
+    // Drop any Tilequery POI that plausibly duplicates a curated Gem
+    // already in gemMatches (see excludeDuplicatesOf/poi_dedup.dart) —
+    // otherwise the same real place could show up twice: once as its own
+    // curated card, once again as the raw auto-pulled version.
+    final nearby = includeNearby
+        ? excludeDuplicatesOf(_pois, gemMatches)
+        : const <NearbyPoi>[];
     final nearbyStillLoading = includeNearby && _loading;
     final hasAny = gemMatches.isNotEmpty || nearby.isNotEmpty;
 
