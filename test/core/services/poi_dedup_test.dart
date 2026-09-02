@@ -29,6 +29,32 @@ void main() {
       expect(placeNamesLikelyMatch('Park', 'Parking Garage'), isFalse);
     });
 
+    // Regression test for the bug this fix addresses: a single-word Gem
+    // name sharing exactly one word with an unrelated longer POI name must
+    // NOT match via the overlap fallback branch — "Coffee" is not
+    // "Highlands Coffee" just because both mention coffee. ("Highlands
+    // Coffee" is a real Tilequery result from this file's own Hoan Kiem
+    // pull.)
+    test('does not match a single shared word against an unrelated longer name '
+        '(overlap fallback branch)', () {
+      expect(placeNamesLikelyMatch('Coffee', 'Highlands Coffee'), isFalse);
+      expect(placeNamesLikelyMatch('Highlands', 'Highlands Coffee'), isFalse);
+    });
+
+    test('a single-word name still matches an EXACT single-word match', () {
+      expect(placeNamesLikelyMatch('Sapa', 'Sapa'), isTrue);
+      // Case/diacritic-insensitive exact match still counts.
+      expect(placeNamesLikelyMatch('sapa', 'SAPA'), isTrue);
+    });
+
+    test('a genuine 2+-word overlap still matches (fallback not over-tightened)', () {
+      // Shares "hoan"+"kiem" (2 of 3 words) with a differently-ordered,
+      // partially-different longer name — the >=0.5 overlap fallback,
+      // not the whole-word-containment branch (deliberately NOT a subset).
+      expect(placeNamesLikelyMatch('Hoan Kiem Bridge', 'Ho Guom Hoan Kiem Lake'),
+          isTrue);
+    });
+
     test('does not match genuinely different places', () {
       expect(placeNamesLikelyMatch('Cafe Napoli', 'City Hall'), isFalse);
     });

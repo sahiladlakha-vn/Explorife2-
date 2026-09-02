@@ -122,9 +122,18 @@ String _normalizePlaceName(String s) {
 /// True when [a] and [b] are close enough (after folding accents/case/
 /// punctuation) to plausibly name the same place: an exact match once
 /// normalized, every word of the shorter name appearing as a WHOLE word in
-/// the longer one (only when the shorter name has 2+ words, so a single
-/// generic word like "Park" doesn't match "Parking Garage"), or at least
-/// half the smaller name's words appearing in the other.
+/// the longer one, or at least half the smaller name's words appearing in
+/// the other — the LATTER TWO branches both require the smaller name to
+/// have at least 2 words, not just the containment one. A single generic
+/// word ("Park", or a Gem literally named "Coffee") must match some OTHER
+/// name exactly (the first branch) to count; it can never partially match
+/// a longer, different name just by sharing that one word. Confirmed
+/// against real data (this file's Hanoi Tilequery pulls): naive
+/// containment let "Park" match "Parking Garage", and without this same
+/// guard on the overlap branch, a single-word Gem name would match ANY
+/// POI containing that word (e.g. a Gem named "Coffee" against the real
+/// "Highlands Coffee" cafe pulled for Hoan Kiem — a completely different,
+/// unrelated place that merely happens to sell coffee too).
 bool placeNamesLikelyMatch(String a, String b) {
   final na = _normalizePlaceName(a);
   final nb = _normalizePlaceName(b);
@@ -137,10 +146,9 @@ bool placeNamesLikelyMatch(String a, String b) {
 
   final smallerWords = wordsA.length <= wordsB.length ? wordsA : wordsB;
   final biggerWords = wordsA.length <= wordsB.length ? wordsB : wordsA;
+  if (smallerWords.length < 2) return false;
 
-  if (smallerWords.length >= 2 && smallerWords.every(biggerWords.contains)) {
-    return true;
-  }
+  if (smallerWords.every(biggerWords.contains)) return true;
 
   final overlap = wordsA.intersection(wordsB).length;
   return overlap / smallerWords.length >= 0.5;
