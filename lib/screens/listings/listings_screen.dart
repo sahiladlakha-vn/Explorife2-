@@ -8,7 +8,9 @@ import '../../core/services/geocoding_service.dart';
 import '../../core/services/mapbox_tilequery_service.dart';
 import '../../core/services/poi_category_filter.dart';
 import '../../providers/gem_provider.dart';
+import '../../providers/tour_provider.dart';
 import '../../models/gem.dart';
+import '../../models/tour.dart';
 import '../../widgets/app_network_image.dart';
 import '../../widgets/gems/category_chip_row.dart';
 import '../../widgets/state_views.dart';
@@ -55,10 +57,11 @@ class _DestinationMatch {
 ///                 grid (former Screen A's list and this screen's grid are
 ///                 now the same GemResultCard grid presentation). When the query
 ///                 is non-empty, results also split into a Destinations /
-///                 Gems tab pair (see [_ResultTabBar]) — a query can match a
-///                 place name, a gem/venue name, or both at once, and each
-///                 tab surfaces its own matches independently rather than
-///                 one search silently picking a winner.
+///                 Gems / Tours tab trio (see [_ResultTabBar]) — a query can
+///                 match a place name, a gem/venue name, a tour name, or any
+///                 combination at once, and each tab surfaces its own
+///                 matches independently rather than one search silently
+///                 picking a winner.
 ///  - Suggestions: search field focused, query empty, category = all —
 ///                 Popular Searches chips (categories are already visible in
 ///                 the persistent bar above, so no second categories grid).
@@ -115,12 +118,12 @@ class _ListingsScreenState extends State<ListingsScreen> {
   String _query = '';
   late String _selectedCat = widget.initialCategory ?? 'all';
 
-  // 0 = Destinations, 1 = Gems. Only consulted when the query is non-empty
-  // (destinations don't apply to a bare category filter). Recomputed on every
-  // query change in [_setQuery] so a fresh search always gets a sensible
-  // default; a user's manual tap sticks until the next keystroke, unless the
-  // tab they're on empties out (handled by the effectiveTab computation in
-  // build()).
+  // 0 = Destinations, 1 = Gems, 2 = Tours. Only consulted when the query is
+  // non-empty (destinations/tours don't apply to a bare category filter).
+  // Recomputed on every query change in [_setQuery] so a fresh search always
+  // gets a sensible default; a user's manual tap sticks until the next
+  // keystroke, unless the tab they're on empties out (handled by the
+  // effectiveTab computation in build()).
   int _resultTab = 1;
 
   // Guards double-tap while a tapped destination's real coordinates are
@@ -224,17 +227,38 @@ class _ListingsScreenState extends State<ListingsScreen> {
   }
 
   /// Destinations wins the default tab only on a confident (exact place
-  /// name) match — e.g. typing "Hanoi" in full. Anything less certain
-  /// defaults to Gems, matching this screen's existing default before
-  /// Destinations existed. Either default can still be overridden at build
-  /// time if the chosen tab turns out to have zero results — see
-  /// [_effectiveTab].
+  /// name) match — e.g. typing "Hanoi" in full; a tour wins on the same
+  /// exact-name-match confidence (e.g. typing a tour's full title),
+  /// checked second so a destination match still takes priority if a query
+  /// happens to match both exactly. Anything less certain defaults to
+  /// Gems, matching this screen's existing default before Destinations (and
+  /// now Tours) existed — Gems stays the universal fallback, not a third
+  /// competing exact-match check. Either default can still be overridden at
+  /// build time if the chosen tab turns out to have zero results — see the
+  /// effectiveTab computation in build().
   int _defaultTabFor(String query) {
     final q = query.trim().toLowerCase();
     if (q.isEmpty) return 1;
-    final exactMatch =
+    final exactDest =
         _matchingDestinations(query).any((d) => d.cityName.toLowerCase() == q);
-    return exactMatch ? 0 : 1;
+    if (exactDest) return 0;
+    final exactTour = context
+        .read<TourProvider>()
+        .tours
+        .any((t) => t.name.trim().toLowerCase() == q);
+    if (exactTour) return 2;
+    return 1;
+  }
+
+  /// [tours] narrowed to [query] — substring, case-insensitive, matching
+  /// [_matchingDestinations]/[_matchingNearby]'s own convention. Tour has no
+  /// city/location field to also match against (see lib/models/tour.dart —
+  /// deliberately no structured location, same reasoning as its other
+  /// free-text-only fields), so this only ever matches on name.
+  List<Tour> _matchingTours(List<Tour> tours, String query) {
+    final q = query.trim().toLowerCase();
+    if (q.isEmpty) return tours;
+    return tours.where((t) => t.name.toLowerCase().contains(q)).toList();
   }
 
   /// [_query], matched against the same curated country/city list
@@ -327,6 +351,7 @@ class _ListingsScreenState extends State<ListingsScreen> {
   @override
   Widget build(BuildContext context) {
     final gem = context.watch<GemProvider>();
+    final tourProv = context.watch<TourProvider>();
     final hasFilter = _query.isNotEmpty || _selectedCat != 'all';
     final showSuggestions = !hasFilter && _focusNode.hasFocus;
     final featured =
@@ -345,29 +370,53 @@ class _ListingsScreenState extends State<ListingsScreen> {
     ];
     final nearbyStillLoading = includeNearby && _nearbyLoading;
 
-    // Destinations/Gems tab split — only meaningful once there's a query to
-    // match a place name against; a bare category filter (e.g. tapping
-    // "Hiking" with an empty search field) has no destination side to show,
-    // so it stays exactly what this screen already did before this tab
-    // existed: one Gems grid, no tabs.
+    // Destinations/Gems/Tours tab split — only meaningful once there's a
+    // query to match a place/tour name against; a bare category filter
+    // (e.g. tapping "Hiking" with an empty search field) has no
+    // destination or tour side to show, so it stays exactly what this
+    // screen already did before these tabs existed: one Gems grid, no tabs.
     final showDestTabs = _query.trim().isNotEmpty;
     final destMatches = showDestTabs
         ? _matchingDestinations(_query)
         : const <_DestinationMatch>[];
+    final tourMatches = showDestTabs
+        ? _matchingTours(tourProv.tours, _query)
+        : const <Tour>[];
     var effectiveTab = _resultTab;
     if (showDestTabs) {
       final gemsEmpty = items.isEmpty && !nearbyStillLoading;
       final destEmpty = destMatches.isEmpty;
-      // The active tab having nothing to show, while the other one does,
-      // shows the populated tab instead of a dead-empty screen — but never
+      final toursEmpty = tourMatches.isEmpty;
+      // The active tab having nothing to show, while another one does,
+      // shows a populated tab instead of a dead-empty screen — but never
       // flips away from Gems while nearby POIs are still loading, or it'd
-      // flash to Destinations and flip straight back once they land.
-      if (effectiveTab == 1 && gemsEmpty && !destEmpty) effectiveTab = 0;
-      if (effectiveTab == 0 && destEmpty && !gemsEmpty) effectiveTab = 1;
+      // flash to another tab and flip straight back once they land. Falls
+      // through Destinations -> Tours (or Tours -> Destinations) in that
+      // order only as a second choice, matching _defaultTabFor's own
+      // Destinations-before-Tours priority.
+      if (effectiveTab == 1 && gemsEmpty) {
+        if (!destEmpty) {
+          effectiveTab = 0;
+        } else if (!toursEmpty) {
+          effectiveTab = 2;
+        }
+      } else if (effectiveTab == 0 && destEmpty) {
+        if (!gemsEmpty) {
+          effectiveTab = 1;
+        } else if (!toursEmpty) {
+          effectiveTab = 2;
+        }
+      } else if (effectiveTab == 2 && toursEmpty) {
+        if (!destEmpty) {
+          effectiveTab = 0;
+        } else if (!gemsEmpty) {
+          effectiveTab = 1;
+        }
+      }
     }
-    // Category chips only apply to Gems — hide them while Destinations is
-    // the tab actually on screen so there's no filter control sitting there
-    // that visibly does nothing.
+    // Category chips only apply to Gems — hide them while Destinations or
+    // Tours is the tab actually on screen so there's no filter control
+    // sitting there that visibly does nothing.
     final showGemChips = !showDestTabs || effectiveTab == 1;
 
     return Scaffold(
@@ -445,6 +494,7 @@ class _ListingsScreenState extends State<ListingsScreen> {
                           active: effectiveTab,
                           destCount: destMatches.length,
                           gemCount: items.length,
+                          tourCount: tourMatches.length,
                           onSelect: (t) => setState(() => _resultTab = t),
                         ),
                       if (showGemChips)
@@ -465,6 +515,8 @@ class _ListingsScreenState extends State<ListingsScreen> {
                   query: _query,
                   onTap: (cityName) => _openDestination(context, cityName),
                 )
+              else if (showDestTabs && effectiveTab == 2)
+                _TourResultsSlivers(matches: tourMatches, query: _query)
               else if (hasFilter)
                 _ResultsSlivers(
                   gem: gem,
@@ -712,24 +764,27 @@ class _ItemGridSliver extends StatelessWidget {
   }
 }
 
-/// Destinations / Gems tab strip — only shown once there's a query to match
-/// a place name against (see [_ListingsScreenState.build]). Counts are shown
-/// on both tabs always, including 0, so a de-emphasized "Gems 0" reads as "I
-/// checked, there's nothing here" rather than a second empty-state screen —
-/// the active tab auto-switches to whichever side actually has results (see
-/// the effectiveTab computation in build()), so a 0 badge should only ever
-/// appear on the *inactive* tab in practice.
+/// Destinations / Gems / Tours tab strip — only shown once there's a query
+/// to match a place/tour name against (see [_ListingsScreenState.build]).
+/// Counts are shown on every tab always, including 0, so a de-emphasized
+/// "Tours 0" reads as "I checked, there's nothing here" rather than a
+/// second empty-state screen — the active tab auto-switches to whichever
+/// side actually has results (see the effectiveTab computation in
+/// build()), so a 0 badge should only ever appear on an *inactive* tab in
+/// practice.
 class _ResultTabBar extends StatelessWidget {
   const _ResultTabBar({
     required this.active,
     required this.destCount,
     required this.gemCount,
+    required this.tourCount,
     required this.onSelect,
   });
 
-  final int active; // 0 = Destinations, 1 = Gems
+  final int active; // 0 = Destinations, 1 = Gems, 2 = Tours
   final int destCount;
   final int gemCount;
+  final int tourCount;
   final ValueChanged<int> onSelect;
 
   @override
@@ -742,6 +797,8 @@ class _ResultTabBar extends StatelessWidget {
           Expanded(child: _tab(context, 0, 'Destinations', destCount)),
           const SizedBox(width: 8),
           Expanded(child: _tab(context, 1, 'Gems', gemCount)),
+          const SizedBox(width: 8),
+          Expanded(child: _tab(context, 2, 'Tours', tourCount)),
         ],
       ),
     );
@@ -863,6 +920,130 @@ class _DestinationRow extends StatelessWidget {
                   ],
                 ),
               ),
+              const Icon(Icons.chevron_right, color: AppTheme.lightMute),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Tours tab — same real [Tour] data (TourProvider.tours) the standalone
+/// Tours screen (tours_list_screen.dart) uses, no separate query. Row shape
+/// mirrors [_DestinationRow] (thumbnail + name + meta + chevron) rather than
+/// [tours_list_screen.dart]'s own grid [TourCard] — this tab renders a
+/// vertical results list like Destinations, not a grid, so the row shape is
+/// the better structural match; the underlying data source is still shared.
+class _TourResultsSlivers extends StatelessWidget {
+  const _TourResultsSlivers({required this.matches, required this.query});
+
+  final List<Tour> matches;
+  final String query;
+
+  @override
+  Widget build(BuildContext context) {
+    if (matches.isEmpty) {
+      return SliverToBoxAdapter(
+        child: EmptyStateView(
+          text: 'No tours match "$query".',
+          icon: Icons.explore_outlined,
+        ),
+      );
+    }
+    return SliverPadding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      sliver: SliverList.separated(
+        itemCount: matches.length,
+        separatorBuilder: (_, __) => const SizedBox(height: 10),
+        itemBuilder: (context, i) => _TourRow(tour: matches[i]),
+      ),
+    );
+  }
+}
+
+class _TourRow extends StatelessWidget {
+  const _TourRow({required this.tour});
+
+  final Tour tour;
+
+  @override
+  Widget build(BuildContext context) {
+    final meta = <String>[
+      'From ${tour.currency} ${tour.priceFrom}',
+      if (tour.durationLabel != null && tour.durationLabel!.isNotEmpty)
+        tour.durationLabel!,
+    ].join(' · ');
+    return Semantics(
+      button: true,
+      label: tour.name,
+      child: GestureDetector(
+        onTap: () => context.push('/tours/${tour.id}'),
+        child: Container(
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(
+            color: AppTheme.lightCard,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: AppTheme.lightBorder),
+          ),
+          child: Row(
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(10),
+                child: SizedBox(
+                  width: 52,
+                  height: 52,
+                  child: tour.coverPhoto != null
+                      ? AppNetworkImage(
+                          url: tour.coverPhoto!, fit: BoxFit.cover)
+                      : Container(
+                          color: AppTheme.primary.withValues(alpha: 0.1),
+                          alignment: Alignment.center,
+                          child: Text(tour.emoji,
+                              style: const TextStyle(fontSize: 22)),
+                        ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(tour.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                            fontWeight: FontWeight.w700,
+                            fontSize: 15,
+                            color: AppTheme.lightInk)),
+                    const SizedBox(height: 2),
+                    Text(meta,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                            color: AppTheme.lightMute, fontSize: 12)),
+                  ],
+                ),
+              ),
+              // Same "never automatic" rule as everywhere else isCurated is
+              // read (see Tour.isCurated's own doc comment) — this badge is
+              // purely a display of that flag, not a second place it could
+              // be derived from.
+              if (tour.isCurated)
+                Container(
+                  margin: const EdgeInsets.only(right: 8),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: AppTheme.primary.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: const Text('TOP PICK',
+                      style: TextStyle(
+                          fontSize: 8.5,
+                          fontWeight: FontWeight.w700,
+                          color: AppTheme.primary)),
+                ),
               const Icon(Icons.chevron_right, color: AppTheme.lightMute),
             ],
           ),

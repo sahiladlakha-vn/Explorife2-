@@ -10,6 +10,7 @@ import 'providers/auth_provider.dart';
 import 'providers/booking_provider.dart';
 import 'providers/destination_provider.dart';
 import 'providers/gem_provider.dart';
+import 'providers/tour_provider.dart';
 import 'providers/story_provider.dart';
 import 'providers/hike_provider.dart';
 import 'providers/splits_provider.dart';
@@ -53,6 +54,7 @@ class _ExplorIfeAppState extends State<ExplorIfeApp> {
         ChangeNotifierProvider<AuthProvider>.value(value: _auth),
         ChangeNotifierProvider(create: (_) => DestinationProvider()),
         ChangeNotifierProvider(create: (_) => GemProvider()),
+        ChangeNotifierProvider(create: (_) => TourProvider()),
         ChangeNotifierProvider(create: (_) => StoryProvider()),
         ChangeNotifierProvider(create: (_) => HikeProvider()),
         ChangeNotifierProvider(create: (_) => SplitsProvider()),

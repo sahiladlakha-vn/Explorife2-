@@ -10,7 +10,9 @@ import '../../core/layout/max_width_center.dart';
 import '../../core/services/geocoding_service.dart';
 import '../../core/theme/app_theme.dart';
 import '../../providers/gem_provider.dart';
+import '../../providers/tour_provider.dart';
 import '../../models/gem.dart';
+import '../../models/tour.dart';
 import '../../widgets/app_network_image.dart';
 import '../../widgets/common/photo_info_card.dart';
 import '../../widgets/state_views.dart';
@@ -157,6 +159,55 @@ class _HomeScreenState extends State<HomeScreen> {
                                 isTrending: gem.isTrending(featuredGems[i]),
                                 onSave: () => _comingSoonSave(ctx),
                               ),
+                            ),
+                          ),
+                      ],
+                    );
+                  },
+                ),
+              ),
+
+              // ── TOURS & EXPERIENCES (real tours via TourProvider) ──
+              // Sits after Featured (free, no-commitment content) and before
+              // the Community CTA below — trust-building/free content comes
+              // first, Tours (paid/bookable) comes right before a
+              // low-friction, non-monetary ask rather than ending the
+              // scroll on a sales pitch. Same TourProvider.tours the
+              // standalone Tours screen (tours_list_screen.dart) reads —
+              // no separate query here.
+              SliverToBoxAdapter(
+                child: Consumer<TourProvider>(
+                  builder: (context, tourProv, _) {
+                    final tours = tourProv.tours;
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 20),
+                          child: _SectionHead(
+                            title: 'TOURS & EXPERIENCES',
+                            onSeeAll: () => context.go('/tours'),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        if (tourProv.loading)
+                          const FeaturedRowSkeleton()
+                        else if (tourProv.hasError)
+                          ErrorStateView(
+                              onRetry: tourProv.refresh,
+                              message: tourProv.error)
+                        else if (tours.isEmpty)
+                          const EmptyStateView(text: 'No tours available yet.')
+                        else
+                          SizedBox(
+                            height: 290,
+                            child: ListView.builder(
+                              scrollDirection: Axis.horizontal,
+                              padding:
+                                  const EdgeInsets.symmetric(horizontal: 20),
+                              itemCount: tours.length,
+                              itemBuilder: (ctx, i) =>
+                                  _TourRailCard(tour: tours[i]),
                             ),
                           ),
                       ],
@@ -466,11 +517,17 @@ class _GhostIconBtn extends StatelessWidget {
 // STATS BAR
 // ─────────────────────────────────────────
 class _StatsBar extends StatelessWidget {
+  // Third element is the route a tap lands on, or null for a purely
+  // decorative pill — was null for all four before the Tours feature
+  // existed (this whole Row had no GestureDetector/onTap anywhere). TRAILS
+  // is the only one wired up so far: it's the one stat with a real,
+  // dedicated destination now that the Tours list screen exists; the other
+  // three (EXPLORERS/COUNTRIES/RATED) have no equivalent screen to land on.
   final _stats = const [
-    ('12K+', 'TRAILS'),
-    ('84K', 'EXPLORERS'),
-    ('190+', 'COUNTRIES'),
-    ('4.9★', 'RATED'),
+    ('12K+', 'TRAILS', '/tours'),
+    ('84K', 'EXPLORERS', null),
+    ('190+', 'COUNTRIES', null),
+    ('4.9★', 'RATED', null),
   ];
 
   @override
@@ -484,29 +541,37 @@ class _StatsBar extends StatelessWidget {
         children: _stats.asMap().entries.map((e) {
           final i = e.key;
           final s = e.value;
-          return Expanded(
-            child: Container(
-              padding: const EdgeInsets.symmetric(vertical: 12),
-              decoration: BoxDecoration(
-                color: AppTheme.lightCard,
-                border: i < _stats.length - 1
-                    ? const Border(
-                        right: BorderSide(color: AppTheme.lightBorder))
-                    : null,
-              ),
-              child: Column(
-                children: [
-                  Text(s.$1,
-                      style: GoogleFonts.bebasNeue(
-                          fontSize: 20, color: AppTheme.primary)),
-                  Text(s.$2,
-                      style: GoogleFonts.jetBrainsMono(
-                          fontSize: 9,
-                          color: AppTheme.lightMute,
-                          letterSpacing: 0.5)),
-                ],
-              ),
+          final route = s.$3;
+          final cell = Container(
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            decoration: BoxDecoration(
+              color: AppTheme.lightCard,
+              border: i < _stats.length - 1
+                  ? const Border(right: BorderSide(color: AppTheme.lightBorder))
+                  : null,
             ),
+            child: Column(
+              children: [
+                Text(s.$1,
+                    style: GoogleFonts.bebasNeue(
+                        fontSize: 20, color: AppTheme.primary)),
+                Text(s.$2,
+                    style: GoogleFonts.jetBrainsMono(
+                        fontSize: 9,
+                        color: AppTheme.lightMute,
+                        letterSpacing: 0.5)),
+              ],
+            ),
+          );
+          return Expanded(
+            child: route == null
+                ? cell
+                : Semantics(
+                    button: true,
+                    label: '${s.$1} ${s.$2}',
+                    child: GestureDetector(
+                        onTap: () => context.go(route), child: cell),
+                  ),
           );
         }).toList(),
       ),
@@ -876,6 +941,98 @@ class _CollectionCard extends StatelessWidget {
               overflow: TextOverflow.ellipsis,
               style: GoogleFonts.fredoka(
                   fontSize: 11, color: Colors.white.withValues(alpha: 0.65))),
+        ],
+      ),
+    );
+  }
+}
+
+/// One card in Home's "TOURS & EXPERIENCES" rail — built on the same
+/// [PhotoInfoCard] shell every other Home rail uses (_FeaturedGemCard,
+/// _CollectionCard above), rather than reusing tours_list_screen.dart's own
+/// [TourCard] verbatim: that card is sized for a GridView cell (relies on a
+/// bounded-height parent via an internal Expanded) and isn't built on
+/// PhotoInfoCard, so dropping it into a horizontal rail here would break
+/// Home's one-shell-per-rail convention as well as need an extra sizing
+/// wrapper. Same [Tour] data (TourProvider.tours) as the standalone
+/// screen — no separate query, just a different display shell for the
+/// same underlying tours.
+class _TourRailCard extends StatelessWidget {
+  const _TourRailCard({required this.tour});
+
+  final Tour tour;
+
+  @override
+  Widget build(BuildContext context) {
+    return PhotoInfoCard(
+      imageUrl: tour.coverPhoto ?? '',
+      onTap: () => context.push('/tours/${tour.id}'),
+      semanticLabel: tour.name,
+      // Never automatic — see Tour.isCurated's own doc comment for why
+      // this is the ONLY thing that ever shows this badge.
+      topLeft: tour.isCurated
+          ? Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: AppTheme.primary,
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: Text('TOP PICK',
+                  style: GoogleFonts.jetBrainsMono(
+                      fontSize: 9,
+                      color: Colors.white,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 0.5)),
+            )
+          : null,
+      bottom: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(tour.name.toUpperCase(),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: GoogleFonts.bebasNeue(
+                  fontSize: 20, color: Colors.white, height: 1)),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              if (tour.durationLabel != null &&
+                  tour.durationLabel!.isNotEmpty) ...[
+                Icon(Icons.schedule,
+                    size: 12, color: Colors.white.withValues(alpha: 0.7)),
+                const SizedBox(width: 4),
+                Expanded(
+                  child: Text(tour.durationLabel!,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: GoogleFonts.fredoka(
+                          fontSize: 11,
+                          color: Colors.white.withValues(alpha: 0.7))),
+                ),
+              ],
+              if (tour.pickupIncluded) ...[
+                const SizedBox(width: 4),
+                Icon(Icons.directions_car_filled_outlined,
+                    size: 12, color: Colors.white.withValues(alpha: 0.7)),
+              ],
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text.rich(
+            TextSpan(children: [
+              TextSpan(
+                  text: 'From ',
+                  style: GoogleFonts.fredoka(
+                      fontSize: 10.5,
+                      color: Colors.white.withValues(alpha: 0.65))),
+              TextSpan(
+                  text: '${tour.currency} ${tour.priceFrom}',
+                  style: GoogleFonts.fredoka(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                      color: Colors.white)),
+            ]),
+          ),
         ],
       ),
     );
