@@ -260,3 +260,89 @@ link) do add real padding that shifts adjacent spacing by a few
 pixels — worth a visual spot-check of the My Trip tab's Itinerary/
 Bookings/Packing sections before this ships, since that wasn't
 independently verified here.
+
+## `_BackIcon` tracked, and a full re-check for the same exclusion bug — 2026-09-05 (round 3)
+
+Round 2 flagged `_BackIcon` in prose but never gave it individually
+tracked entries the way every other Bucket-3 finding has — exactly the
+kind of vague "and similar cases" mention that let `_HeaderIcon` almost
+slip through uncounted in the first place. Fixing that here.
+
+### `_BackIcon` — 3 tracked instances, reclassified Bucket 2 → Bucket 3
+
+| File | Line | Gap |
+|---|---|---|
+| `lib/screens/attractions/attraction_detail_screen.dart` | 292 | `Semantics(button:true, label:'Back')` present; no `Material`/`InkWell`; 36×36 box, under the ~44px guideline |
+| `lib/screens/restaurants/restaurant_detail_screen.dart` | 343 | Same gap, same widget |
+| `lib/screens/tours/tour_detail_screen.dart` | 291 | Same gap, same widget — confirmed the file's own `Material`/`InkWell` usages (lines 240, 466, 533/535) belong to *other*, already-correct widgets in that file, not `_BackIcon` itself |
+
+All 3 are the same private `_BackIcon` widget, copy-pasted across the
+three detail screens rather than shared — fixing it once as a shared
+widget (mirroring how `LinkedBusinessCard`/`_TapIcon`/`_AddPill`/
+`_PickerField` were already extracted this round) covers all 3 and
+would be the natural fix when this is picked up, rather than patching
+each file independently. **Not fixed in this pass** — tracked here so
+it can't be missed again, but implementing it wasn't in this round's
+scope.
+
+### Root cause, for the audit's own methodology
+
+The actual failure mode: **a component gets wrongly excluded from a
+sweep because an earlier partial fix (Semantics added, press feedback
+never added) makes a shallow check see "has `Semantics`" and stop
+there, treating that as "already handled."** This is exactly what
+happened to `_HeaderIcon` (excluded from round 1's sweep entirely,
+on my own instruction to the auditing pass, because I'd already
+confirmed it had *some* fix applied) and to `_BackIcon` (scored
+"Bucket 2 — already fine" using the same shallow "has `Semantics`,
+must be done" logic).
+
+**Recommendation for any future pass over this codebase (or a similar
+one): before marking anything "already fixed" or excluding it from a
+sweep, check for BOTH `Semantics` AND a press-feedback wrapper
+(`Material`+`InkWell`, or an equivalent explicit visual-feedback
+mechanism) — never treat the presence of `Semantics` alone as
+sufficient evidence a control is done.** A single `grep -c` for
+`Semantics(` in a file is not a substitute for confirming a
+`Material`/`InkWell` sits between it and the `GestureDetector`.
+
+### One-more-pass check: did this exclude anything beyond `_HeaderIcon`/`_BackIcon`?
+
+Re-ran the search specifically for "has `Semantics` but the file has
+zero `Material`/`InkWell`" — i.e. every file with both `Semantics(`
+and `GestureDetector` was re-counted for `Semantics(`/`GestureDetector`/
+`InkWell`/`Material(` occurrences and manually re-verified against
+round 1's per-line findings:
+
+| File | `Semantics(` | `GestureDetector` | `InkWell`/`Material(` |
+|---|---|---|---|
+| `attraction_detail_screen.dart` | 1 | 1 | 0 — `_BackIcon`, now tracked above |
+| `home_screen.dart` | 10 | 10 (11th grep hit is a comment, not code) | 0 |
+| `listings_screen.dart` | 5 | 8 | 0 |
+| `restaurant_detail_screen.dart` | 1 | 1 | 0 — `_BackIcon`, now tracked above |
+| `tour_detail_screen.dart` | 1 | 1 | 2/2 — but confirmed those belong to *other* widgets in the file, not `_BackIcon` (still bare) |
+| `tours_list_screen.dart` | 1 | 1 | 0 |
+| `photo_info_card.dart` | 1 | 1 | 0 |
+
+**Result: confirmed — no instance beyond `_HeaderIcon` and the 3
+`_BackIcon` copies was affected.** `home_screen.dart`'s 10,
+`listings_screen.dart`'s 5-with-`Semantics` (of its 8 total),
+`tours_list_screen.dart`'s 1, and `photo_info_card.dart`'s 1 — 17
+instances total — all already had explicit, individually-tracked
+Bucket-3 entries in round 1 (see the earlier per-file findings); they
+were never silently excluded, just correctly identified as "not yet
+fixed" rather than "already fine." The exclusion bug was scoped to
+exactly the 4 widgets I explicitly told the round-1 audit agent to
+skip as "already handled" (`_HeaderIcon`, `_QuickActionButton`,
+`_AccordionSection`, `_BackIcon`) — of those 4, only `_HeaderIcon`
+(now fixed) and `_BackIcon` (now tracked, 3 instances) actually had
+the gap; `_QuickActionButton` is genuinely complete and
+`_AccordionSection` genuinely has press feedback (its own, separately-
+noted gap is the *inverse* one — press feedback without an explicit
+`Semantics` label — not this failure mode).
+
+**Corrected total remaining backlog: ~137 instances across ~39 files**
+(the original ~141 minus `_HeaderIcon`, `trips_tab.dart`'s 23, and
+`photo_carousel.dart`'s dots, all fixed in round 2) **plus the 3
+`_BackIcon` instances now tracked above** — i.e. ~137 + 3 = ~140,
+none of them silently missing from the count anymore.
