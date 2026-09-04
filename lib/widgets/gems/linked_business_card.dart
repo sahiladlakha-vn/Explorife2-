@@ -62,19 +62,30 @@ class LinkedBusinessCard extends StatelessWidget {
             rows[i],
           ],
           const SizedBox(height: 12),
-          GestureDetector(
-            onTap: () => context.push(detailRoute),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text('View full listing',
-                    style: GoogleFonts.fredoka(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                        color: AppTheme.primary)),
-                const SizedBox(width: 4),
-                const Icon(Icons.arrow_forward, size: 14, color: AppTheme.primary),
-              ],
+          Semantics(
+            button: true,
+            label: 'View full listing',
+            child: Material(
+              color: Colors.transparent,
+              child: InkWell(
+                onTap: () => context.push(detailRoute),
+                borderRadius: BorderRadius.circular(10),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 4),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text('View full listing',
+                          style: GoogleFonts.fredoka(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                              color: AppTheme.primary)),
+                      const SizedBox(width: 4),
+                      const Icon(Icons.arrow_forward, size: 14, color: AppTheme.primary),
+                    ],
+                  ),
+                ),
+              ),
             ),
           ),
         ],
