@@ -139,3 +139,124 @@ A few call sites need a variant, not the plain button semantics above:
 
 Add "codebase-wide GestureDetector → Semantics+InkWell accessibility
 pass (~140 instances, see this doc)" to the backlog.
+
+## Triage & closeout — 2026-09-05 (round 2)
+
+Before rolling out the broader ~140-instance backlog, three specific
+items from round 1 were re-checked, since they affected whether this
+doc's own numbers could be trusted.
+
+### 1. `_HeaderIcon` was undercounted — now fixed
+
+Confirmed: `_HeaderIcon` was excluded from the round-1 audit sweep on
+the (correct, but incomplete) assumption that it was "already handled" —
+it had been read and documented in prose (see "Was the earlier
+`_HeaderIcon` fix applied narrowly or broadly?" above) but was never
+formally tallied into Bucket 2 or Bucket 3, so the "~140 across 40
+files" count silently excluded it. **The true round-1 count was ~141.**
+
+**Fixed now**: `_HeaderIcon` wrapped in `Material`+`InkWell`
+(`customBorder: CircleBorder()` to match its circular shape), on top of
+its existing `Semantics`. Its 36×36 size was left as-is (not resized) —
+same scope-discipline reasoning as everywhere else in this pass: this
+was flagged as a two-line press-feedback fix, not a tap-target resize.
+
+**The same exclusion-by-assumption risk applies to one more widget,
+NOT fixed in this pass — flagging rather than silently fixing or
+silently ignoring:** `_BackIcon` (duplicated in
+`attraction_detail_screen.dart`, `restaurant_detail_screen.dart`,
+`tour_detail_screen.dart`) was scored "Bucket 2 — already fine" in
+round 1 specifically because it already had `Semantics`, using the same
+reasoning that undercounted `_HeaderIcon` — it has the IDENTICAL gap
+(`Semantics` yes, `Material`/`InkWell` no, 36×36 under the 44px
+guideline). For consistency, this should probably be reclassified to
+Bucket 3 (3 more instances, one shared component) rather than staying
+"fine" — left for the backlog rather than fixed here since it wasn't
+in this round's explicit scope, but the count should be treated as
+**~141 + 3 `_BackIcon` instances currently mis-scored as fine**, not a
+clean ~140. No other Bucket-2 entries share this exclusion reasoning
+(`explore_screen.dart:590`'s scrim is genuinely decorative, not an
+assumption-based exclusion).
+
+### 2. `trips_tab.dart`'s 23 instances — triaged, not a flat 23-fix count
+
+Manual pass (not just the raw grep count) confirmed: **all 23 have a
+real, non-null `onTap` performing a genuine action — none are
+decorative.** Breakdown:
+- **13 standalone fixes** — each got its own `Semantics` (using
+  `checked:`/`selected:`/`expanded:`/`enabled:` where the control isn't
+  a plain button — the packing checkbox, `_SegmentedControl`,
+  `_TypeChip`, `_DayRailChip`, the expense-row expand toggle, and the
+  disabled-while-loading "Log expense" link all needed a variant, not
+  bare `button: true`) + `Material`/`InkWell` press feedback. A new
+  small shared `_TapIcon` widget was extracted for the 3 inline
+  icon-only header controls (switch/edit/open-map) rather than fixing
+  each independently, since they're the same shape with different
+  icons/labels.
+- **10 consolidated into 2 new shared widgets** rather than fixed 23
+  independently:
+  - **`_AddPill`** (5 call sites: Add Traveler/Document/Item/
+    Booking/Expense) — confirmed verbatim-identical Dart, one widget
+    now backs all 5, including the one loading-spinner variant
+    ("+ Add Expense").
+  - **`_PickerField`** (5 call sites: expiry date, activity time,
+    booking start/end, itinerary-stop) — 4 were verbatim-identical; the
+    itinerary-stop picker needed 2 extra optional parameters
+    (`trailingChevron`, `iconColor`) for its richer layout, added to
+    the same shared widget rather than left as a one-off.
+- **0 correctly-excluded/decorative.**
+
+So the real work behind "23 instances" was **13 standalone fixes + 2
+shared-widget extractions covering the other 10** — confirmed exactly
+as predicted by the triage pass, and **all of it is now fixed**, not
+deferred. `flutter analyze`/`flutter test` clean after (see Verification
+below) — the file now has zero `GestureDetector` usages left (`grep -c
+GestureDetector trips_tab.dart` → 2, both matches are this doc's own
+comment text, not code).
+
+### 3. `photo_carousel.dart`'s page dots — genuinely interactive, fixed
+
+Read the widget directly: `onTap: () => _jumpTo(i)` really does
+`_controller.animateToPage(i, ...)` — **the dots are a real,
+already-wired jump-to-photo interaction, not a purely visual pagination
+indicator.** The "worst tap-target offender" framing from round 1 was
+correct; nothing to walk back there.
+
+Also confirmed there's no separate/stale implementation to worry about:
+`GemDetailScreen` had its own private `_jumpToPhoto`/`_photoController`
+at one point, but that was removed earlier this session when the screen
+was refactored onto this shared `PhotoCarousel` widget — `photo_carousel.dart`
+is now the *only* implementation, reused by Gem/Tour/Attraction/Restaurant
+detail screens alike.
+
+**Fixed**: each dot now gets `Semantics(button: true, label: 'Photo N
+of count', selected: ...)`, `GestureDetector` behavior set to
+`HitTestBehavior.opaque`, and extra `Padding` (not a larger visible
+dot) around the existing 6px dot to enlarge the real hit area — full
+~44×44 wasn't achievable without dots overlapping when a carousel has
+several photos, so this is a meaningful, deliberate improvement (dot
+height's tap area goes from 6px to ~36px) rather than hitting the exact
+guideline number. No `Material`/`InkWell` ripple was added here
+deliberately — a Material ripple on a 6px dot reads visually oddly for
+such a small decorative element; the existing filled/unfilled color
+swap already provides selected-state feedback. Flagging this as a
+judgment call rather than deciding it silently.
+
+## Verification (round 2)
+
+`flutter analyze`: 44 issues, all info-level, identical set to the
+pre-round-2 baseline (41 original + 3 pre-existing
+`use_build_context_synchronously` infos in `RestaurantFormScreen`) — no
+new issues from any round-2 change. `flutter test`: 361/361 pass, no
+regressions.
+
+**Not done this round**: a live browser/manual smoke test of the `My
+Trip` tab and any photo carousel. The changes are structurally
+conservative (wrapping existing widgets in `Semantics`/`Material`/
+`InkWell`/`Padding` without changing `onTap` targets or decorations),
+and were reviewed line-by-line against the original code before/after
+each edit, but a few (the packing-item checkbox, the "+ ADD" slot
+link) do add real padding that shifts adjacent spacing by a few
+pixels — worth a visual spot-check of the My Trip tab's Itinerary/
+Bookings/Packing sections before this ships, since that wasn't
+independently verified here.

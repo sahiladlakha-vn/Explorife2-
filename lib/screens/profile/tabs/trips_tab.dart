@@ -77,56 +77,236 @@ class _TripCompactHeader extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 4),
-              GestureDetector(
+              _TapIcon(
                 onTap: onSwitch,
-                child: const Icon(Icons.expand_more, size: 22, color: _kMute),
+                icon: Icons.expand_more,
+                size: 22,
+                label: 'Switch trip',
               ),
               const SizedBox(width: 2),
-              GestureDetector(
+              _TapIcon(
                 onTap: onEdit,
-                child: const Icon(Icons.edit_outlined, size: 16, color: _kMute),
+                icon: Icons.edit_outlined,
+                size: 16,
+                label: 'Edit trip',
               ),
               const SizedBox(width: 6),
               // The hero card's tap-to-open-map shortcut moved here — no
               // photo to tap anymore, so it's a small explicit icon instead.
-              GestureDetector(
+              _TapIcon(
                 onTap: onOpenMap,
-                child: const Icon(Icons.map_outlined, size: 18, color: _kMute),
+                icon: Icons.map_outlined,
+                size: 18,
+                label: 'Open trip map',
               ),
             ],
           ),
         ),
         const SizedBox(width: 8),
-        GestureDetector(
-          onTap: onList,
-          child: Container(
-            width: 40,
-            height: 40,
-            decoration: BoxDecoration(
-              color: Colors.white,
+        Semantics(
+          button: true,
+          label: 'View all trips',
+          child: Material(
+            color: Colors.transparent,
+            child: InkWell(
+              onTap: onList,
               borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: _kBorder),
+              child: Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: _kBorder),
+                ),
+                child: const Icon(Icons.list_alt_outlined, size: 19, color: _kInk),
+              ),
             ),
-            child: const Icon(Icons.list_alt_outlined, size: 19, color: _kInk),
           ),
         ),
         const SizedBox(width: 8),
-        GestureDetector(
-          onTap: onNewTrip,
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-            decoration: BoxDecoration(
-              color: AppTheme.primary,
+        Semantics(
+          button: true,
+          label: 'New trip',
+          child: Material(
+            color: Colors.transparent,
+            child: InkWell(
+              onTap: onNewTrip,
               borderRadius: BorderRadius.circular(10),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                decoration: BoxDecoration(
+                  color: AppTheme.primary,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Text('+ New Trip',
+                    style: GoogleFonts.fredoka(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                        color: Colors.white)),
+              ),
             ),
-            child: Text('+ New Trip',
-                style: GoogleFonts.fredoka(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w700,
-                    color: Colors.white)),
           ),
         ),
       ],
+    );
+  }
+}
+
+/// A small inline icon control (switch/edit/map-open, etc.) sitting flush
+/// alongside text in a tight header row — same Semantics+press-feedback
+/// contract as every other tappable control in this app
+/// (`_QuickActionButton` in gem_detail_screen.dart is the reference), but
+/// deliberately minimal padding since these sit inline with title text and
+/// can't claim the full ~44x44 guideline without breaking that layout.
+class _TapIcon extends StatelessWidget {
+  const _TapIcon({
+    required this.onTap,
+    required this.icon,
+    required this.size,
+    required this.label,
+  });
+
+  final VoidCallback onTap;
+  final IconData icon;
+  final double size;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      button: true,
+      label: label,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          customBorder: const CircleBorder(),
+          child: Padding(
+            padding: const EdgeInsets.all(6),
+            child: Icon(icon, size: size, color: _kMute),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// The full-width bordered "+ Add X" pill — consolidated from 5 identical
+/// copies (add traveler/document/packing item/booking/expense) found during
+/// the GestureDetector accessibility audit
+/// (docs/audits/gesture-detector-accessibility-audit-2026-09-05.md); one
+/// Semantics+press-feedback fix now covers every call site instead of 5
+/// independent ones. [loading] swaps the label for a spinner (matches the
+/// one call site — "+ Add Expense" — that had this state; harmless no-op
+/// for the other 4, which never pass it).
+class _AddPill extends StatelessWidget {
+  const _AddPill({required this.label, required this.onTap, this.loading = false});
+
+  final String label;
+  final VoidCallback? onTap;
+  final bool loading;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      button: true,
+      enabled: !loading,
+      label: label,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: loading ? null : onTap,
+          borderRadius: BorderRadius.circular(10),
+          child: Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(vertical: 11),
+            decoration: BoxDecoration(
+                border: Border.all(color: _kBorder),
+                borderRadius: BorderRadius.circular(10)),
+            alignment: Alignment.center,
+            child: loading
+                ? const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2, color: _kMute),
+                  )
+                : Text(label,
+                    style: GoogleFonts.fredoka(
+                        fontSize: 12.5, fontWeight: FontWeight.w600, color: _kMute)),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// The bordered "tap to pick a value" field shape — consolidated from 5
+/// near-identical copies (expiry date, activity time, booking start,
+/// booking end, itinerary-stop picker) found during the GestureDetector
+/// accessibility audit
+/// (docs/audits/gesture-detector-accessibility-audit-2026-09-05.md).
+/// [trailingChevron]/[iconColor] cover the one richer variant (the
+/// itinerary-stop picker, which wraps its text in Expanded, shows a
+/// trailing chevron, and colors its leading icon by whether a value is
+/// picked) — every other call site just omits them and gets the plain
+/// shape.
+class _PickerField extends StatelessWidget {
+  const _PickerField({
+    required this.icon,
+    required this.text,
+    required this.hasValue,
+    required this.semanticLabel,
+    required this.onTap,
+    this.iconColor,
+    this.trailingChevron = false,
+  });
+
+  final IconData icon;
+  final String text;
+  final bool hasValue;
+  final String semanticLabel;
+  final VoidCallback onTap;
+  final Color? iconColor;
+  final bool trailingChevron;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      button: true,
+      label: semanticLabel,
+      value: hasValue ? text : null,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(12),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+            decoration: BoxDecoration(
+                color: _kCard,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: _kBorder)),
+            child: Row(children: [
+              Icon(icon, size: 18, color: iconColor ?? _kMute),
+              const SizedBox(width: 10),
+              trailingChevron
+                  ? Expanded(
+                      child: Text(text,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: GoogleFonts.fredoka(
+                              fontSize: 14, color: hasValue ? _kInk : _kMute)),
+                    )
+                  : Text(text,
+                      style: GoogleFonts.fredoka(
+                          fontSize: 14, color: hasValue ? _kInk : _kMute)),
+              if (trailingChevron)
+                const Icon(Icons.keyboard_arrow_down, size: 20, color: _kMute),
+            ]),
+          ),
+        ),
+      ),
     );
   }
 }
@@ -263,32 +443,40 @@ class _SegmentedControl extends StatelessWidget {
         children: [
           for (final (i, label) in labels.indexed)
             Expanded(
-              child: GestureDetector(
-                onTap: () => onSelect(i),
-                behavior: HitTestBehavior.opaque,
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 150),
-                  padding: const EdgeInsets.symmetric(vertical: 9),
-                  decoration: BoxDecoration(
-                    color: i == active ? Colors.white : Colors.transparent,
+              child: Semantics(
+                button: true,
+                selected: i == active,
+                label: label,
+                child: Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    onTap: () => onSelect(i),
                     borderRadius: BorderRadius.circular(9),
-                    boxShadow: i == active
-                        ? [
-                            BoxShadow(
-                                color: _kInk.withValues(alpha: 0.10),
-                                blurRadius: 4,
-                                offset: const Offset(0, 1))
-                          ]
-                        : null,
-                  ),
-                  child: Text(
-                    label,
-                    textAlign: TextAlign.center,
-                    style: GoogleFonts.fredoka(
-                      fontSize: 12,
-                      fontWeight:
-                          i == active ? FontWeight.w700 : FontWeight.w500,
-                      color: i == active ? _kInk : _kMute,
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 150),
+                      padding: const EdgeInsets.symmetric(vertical: 9),
+                      decoration: BoxDecoration(
+                        color: i == active ? Colors.white : Colors.transparent,
+                        borderRadius: BorderRadius.circular(9),
+                        boxShadow: i == active
+                            ? [
+                                BoxShadow(
+                                    color: _kInk.withValues(alpha: 0.10),
+                                    blurRadius: 4,
+                                    offset: const Offset(0, 1))
+                              ]
+                            : null,
+                      ),
+                      child: Text(
+                        label,
+                        textAlign: TextAlign.center,
+                        style: GoogleFonts.fredoka(
+                          fontSize: 12,
+                          fontWeight:
+                              i == active ? FontWeight.w700 : FontWeight.w500,
+                          color: i == active ? _kInk : _kMute,
+                        ),
+                      ),
                     ),
                   ),
                 ),
@@ -418,22 +606,7 @@ class _TravelersCard extends StatelessWidget {
             ),
           ),
         const SizedBox(height: 10),
-        GestureDetector(
-          onTap: () => _openLookup(context),
-          child: Container(
-            width: double.infinity,
-            padding: const EdgeInsets.symmetric(vertical: 11),
-            decoration: BoxDecoration(
-                border: Border.all(color: _kBorder),
-                borderRadius: BorderRadius.circular(10)),
-            alignment: Alignment.center,
-            child: Text('+ Add Traveler',
-                style: GoogleFonts.fredoka(
-                    fontSize: 12.5,
-                    fontWeight: FontWeight.w600,
-                    color: _kMute)),
-          ),
-        ),
+        _AddPill(label: '+ Add Traveler', onTap: () => _openLookup(context)),
       ],
     );
   }
@@ -618,25 +791,13 @@ class _DocumentsCard extends StatelessWidget {
             ),
           ),
         const SizedBox(height: 10),
-        GestureDetector(
+        _AddPill(
+          label: '+ Add Document',
           onTap: () => showModalBottomSheet<void>(
             context: context,
             isScrollControlled: true,
             backgroundColor: Colors.transparent,
             builder: (_) => _AddDocumentSheet(tripId: trip.id),
-          ),
-          child: Container(
-            width: double.infinity,
-            padding: const EdgeInsets.symmetric(vertical: 11),
-            decoration: BoxDecoration(
-                border: Border.all(color: _kBorder),
-                borderRadius: BorderRadius.circular(10)),
-            alignment: Alignment.center,
-            child: Text('+ Add Document',
-                style: GoogleFonts.fredoka(
-                    fontSize: 12.5,
-                    fontWeight: FontWeight.w600,
-                    color: _kMute)),
           ),
         ),
       ],
@@ -833,28 +994,14 @@ class _AddDocumentSheetState extends State<_AddDocumentSheet> {
                       decoration: _lightFieldDecoration('Title'),
                     ),
                     const SizedBox(height: 12),
-                    GestureDetector(
+                    _PickerField(
+                      icon: Icons.event_outlined,
+                      semanticLabel: 'Expiry date',
+                      hasValue: _expiresOn != null,
+                      text: _expiresOn == null
+                          ? 'Expiry date (optional)'
+                          : _fmtDocDate(_expiresOn!),
                       onTap: _pickExpiry,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 14, vertical: 14),
-                        decoration: BoxDecoration(
-                            color: _kCard,
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: _kBorder)),
-                        child: Row(children: [
-                          const Icon(Icons.event_outlined,
-                              size: 18, color: _kMute),
-                          const SizedBox(width: 10),
-                          Text(
-                              _expiresOn == null
-                                  ? 'Expiry date (optional)'
-                                  : _fmtDocDate(_expiresOn!),
-                              style: GoogleFonts.fredoka(
-                                  fontSize: 14,
-                                  color: _expiresOn == null ? _kMute : _kInk)),
-                        ]),
-                      ),
                     ),
                     const SizedBox(height: 12),
                     TextField(
@@ -894,20 +1041,29 @@ class _TypeChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
-        decoration: BoxDecoration(
-          color: selected ? AppTheme.primary : _kCard,
+    return Semantics(
+      button: true,
+      selected: selected,
+      label: label,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
           borderRadius: BorderRadius.circular(18),
-          border: Border.all(color: selected ? AppTheme.primary : _kBorder),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+            decoration: BoxDecoration(
+              color: selected ? AppTheme.primary : _kCard,
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(color: selected ? AppTheme.primary : _kBorder),
+            ),
+            child: Text(label,
+                style: GoogleFonts.fredoka(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w600,
+                    color: selected ? Colors.white : _kMute)),
+          ),
         ),
-        child: Text(label,
-            style: GoogleFonts.fredoka(
-                fontSize: 12.5,
-                fontWeight: FontWeight.w600,
-                color: selected ? Colors.white : _kMute)),
       ),
     );
   }
@@ -967,26 +1123,14 @@ class _PackingCard extends StatelessWidget {
             ),
           ),
         const SizedBox(height: 10),
-        GestureDetector(
+        _AddPill(
+          label: '+ Add Item',
           onTap: () => showModalBottomSheet<void>(
             context: context,
             isScrollControlled: true,
             backgroundColor: Colors.transparent,
             builder: (_) =>
                 _AddPackingItemSheet(tripId: tripId, travelers: travelers),
-          ),
-          child: Container(
-            width: double.infinity,
-            padding: const EdgeInsets.symmetric(vertical: 11),
-            decoration: BoxDecoration(
-                border: Border.all(color: _kBorder),
-                borderRadius: BorderRadius.circular(10)),
-            alignment: Alignment.center,
-            child: Text('+ Add Item',
-                style: GoogleFonts.fredoka(
-                    fontSize: 12.5,
-                    fontWeight: FontWeight.w600,
-                    color: _kMute)),
           ),
         ),
       ],
@@ -1019,18 +1163,29 @@ class _PackingRow extends StatelessWidget {
       ),
       child: Row(
         children: [
-          GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onTap: () {
-              HapticFeedback.selectionClick();
-              context.read<TripSetupProvider>().togglePacked(item.id);
-            },
-            child: Icon(
-              item.isPacked
-                  ? Icons.check_circle_rounded
-                  : Icons.radio_button_unchecked_rounded,
-              size: 20,
-              color: item.isPacked ? _kGreen : _kMute,
+          Semantics(
+            button: true,
+            checked: item.isPacked,
+            label: item.label,
+            child: Material(
+              color: Colors.transparent,
+              child: InkWell(
+                customBorder: const CircleBorder(),
+                onTap: () {
+                  HapticFeedback.selectionClick();
+                  context.read<TripSetupProvider>().togglePacked(item.id);
+                },
+                child: Padding(
+                  padding: const EdgeInsets.all(8),
+                  child: Icon(
+                    item.isPacked
+                        ? Icons.check_circle_rounded
+                        : Icons.radio_button_unchecked_rounded,
+                    size: 20,
+                    color: item.isPacked ? _kGreen : _kMute,
+                  ),
+                ),
+              ),
             ),
           ),
           const SizedBox(width: 10),
@@ -1381,33 +1536,43 @@ class _DayRailChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 150),
-        width: 52,
-        padding: const EdgeInsets.symmetric(vertical: 8),
-        decoration: BoxDecoration(
-          color: active ? AppTheme.primary : _kCard,
+    return Semantics(
+      button: true,
+      selected: active,
+      label:
+          '${_weekdayAbbr[date.weekday - 1]} ${date.day}',
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: active ? AppTheme.primary : _kBorder),
-        ),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Text(_weekdayAbbr[date.weekday - 1],
-                style: GoogleFonts.jetBrainsMono(
-                    fontSize: 9,
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: 0.6,
-                    color: active
-                        ? Colors.white.withValues(alpha: 0.85)
-                        : _kMute)),
-            const SizedBox(height: 2),
-            Text('${date.day}',
-                style: GoogleFonts.bebasNeue(
-                    fontSize: 20, color: active ? Colors.white : _kInk)),
-          ],
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 150),
+            width: 52,
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            decoration: BoxDecoration(
+              color: active ? AppTheme.primary : _kCard,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: active ? AppTheme.primary : _kBorder),
+            ),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Text(_weekdayAbbr[date.weekday - 1],
+                    style: GoogleFonts.jetBrainsMono(
+                        fontSize: 9,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 0.6,
+                        color: active
+                            ? Colors.white.withValues(alpha: 0.85)
+                            : _kMute)),
+                const SizedBox(height: 2),
+                Text('${date.day}',
+                    style: GoogleFonts.bebasNeue(
+                        fontSize: 20, color: active ? Colors.white : _kInk)),
+              ],
+            ),
+          ),
         ),
       ),
     );
@@ -1420,28 +1585,36 @@ class _AddDayChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        width: 46,
-        padding: const EdgeInsets.symmetric(vertical: 8),
-        decoration: BoxDecoration(
+    return Semantics(
+      button: true,
+      label: 'Add day',
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: _kBorder),
-        ),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Text('ADD',
-                style: GoogleFonts.jetBrainsMono(
-                    fontSize: 9,
-                    fontWeight: FontWeight.w700,
-                    color: _kMute,
-                    letterSpacing: 0.6)),
-            const SizedBox(height: 2),
-            Text('+',
-                style: GoogleFonts.bebasNeue(fontSize: 20, color: _kMute)),
-          ],
+          child: Container(
+            width: 46,
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: _kBorder),
+            ),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Text('ADD',
+                    style: GoogleFonts.jetBrainsMono(
+                        fontSize: 9,
+                        fontWeight: FontWeight.w700,
+                        color: _kMute,
+                        letterSpacing: 0.6)),
+                const SizedBox(height: 2),
+                Text('+',
+                    style: GoogleFonts.bebasNeue(fontSize: 20, color: _kMute)),
+              ],
+            ),
+          ),
         ),
       ),
     );
@@ -1768,20 +1941,31 @@ class _SlotSection extends StatelessWidget {
                       fontWeight: FontWeight.w700,
                       letterSpacing: 0.6)),
               const Spacer(),
-              GestureDetector(
-                onTap: () => showModalBottomSheet<void>(
-                  context: context,
-                  isScrollControlled: true,
-                  backgroundColor: Colors.transparent,
-                  builder: (_) => AddStopSheet(
-                      tripId: tripId, day: day, initialSlot: slot, light: true),
+              Semantics(
+                button: true,
+                label: 'Add to ${_slotLabel(slot)}',
+                child: Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    onTap: () => showModalBottomSheet<void>(
+                      context: context,
+                      isScrollControlled: true,
+                      backgroundColor: Colors.transparent,
+                      builder: (_) => AddStopSheet(
+                          tripId: tripId, day: day, initialSlot: slot, light: true),
+                    ),
+                    borderRadius: BorderRadius.circular(6),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+                      child: Text('+ ADD',
+                          style: GoogleFonts.jetBrainsMono(
+                              fontSize: 10.5,
+                              color: AppTheme.primary,
+                              fontWeight: FontWeight.w700,
+                              letterSpacing: 0.6)),
+                    ),
+                  ),
                 ),
-                child: Text('+ ADD',
-                    style: GoogleFonts.jetBrainsMono(
-                        fontSize: 10.5,
-                        color: AppTheme.primary,
-                        fontWeight: FontWeight.w700,
-                        letterSpacing: 0.6)),
               ),
             ],
           ),
@@ -2242,25 +2426,12 @@ class _ActivityEditSheetState extends State<_ActivityEditSheet> {
                       ],
                     ),
                     const SizedBox(height: 12),
-                    GestureDetector(
+                    _PickerField(
+                      icon: Icons.access_time,
+                      semanticLabel: 'Time',
+                      hasValue: _time != null,
+                      text: _time ?? 'Set a time',
                       onTap: _pickTime,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 14, vertical: 14),
-                        decoration: BoxDecoration(
-                            color: _kCard,
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: _kBorder)),
-                        child: Row(children: [
-                          const Icon(Icons.access_time,
-                              size: 18, color: _kMute),
-                          const SizedBox(width: 10),
-                          Text(_time ?? 'Set a time',
-                              style: GoogleFonts.fredoka(
-                                  fontSize: 14,
-                                  color: _time == null ? _kMute : _kInk)),
-                        ]),
-                      ),
                     ),
                     const SizedBox(height: 12),
                     TextField(
@@ -2545,22 +2716,10 @@ class _BookingsSegmentState extends State<_BookingsSegment> {
             ],
             const SizedBox(height: 6),
           ],
-        GestureDetector(
+        _AddPill(
+          label: '+ Add Booking',
           onTap: () => _openBookingSheet(context,
               trip: trip, stops: stops, gemsById: gemsById),
-          child: Container(
-            width: double.infinity,
-            padding: const EdgeInsets.symmetric(vertical: 11),
-            decoration: BoxDecoration(
-                border: Border.all(color: _kBorder),
-                borderRadius: BorderRadius.circular(10)),
-            alignment: Alignment.center,
-            child: Text('+ Add Booking',
-                style: GoogleFonts.fredoka(
-                    fontSize: 12.5,
-                    fontWeight: FontWeight.w600,
-                    color: _kMute)),
-          ),
         ),
       ],
     );
@@ -2786,20 +2945,33 @@ class _BookingCardState extends State<_BookingCard> {
                 ],
                 const Spacer(),
                 if (canLogExpense)
-                  GestureDetector(
-                    onTap: _loggingExpense ? null : _logAsExpense,
-                    child: _loggingExpense
-                        ? const SizedBox(
-                            width: 14,
-                            height: 14,
-                            child: CircularProgressIndicator(
-                                strokeWidth: 2, color: AppTheme.primary),
-                          )
-                        : Text('Log expense',
-                            style: GoogleFonts.fredoka(
-                                fontSize: 11,
-                                fontWeight: FontWeight.w700,
-                                color: AppTheme.primary)),
+                  Semantics(
+                    button: true,
+                    enabled: !_loggingExpense,
+                    label: 'Log expense',
+                    child: Material(
+                      color: Colors.transparent,
+                      child: InkWell(
+                        onTap: _loggingExpense ? null : _logAsExpense,
+                        borderRadius: BorderRadius.circular(6),
+                        child: Padding(
+                          padding:
+                              const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+                          child: _loggingExpense
+                              ? const SizedBox(
+                                  width: 14,
+                                  height: 14,
+                                  child: CircularProgressIndicator(
+                                      strokeWidth: 2, color: AppTheme.primary),
+                                )
+                              : Text('Log expense',
+                                  style: GoogleFonts.fredoka(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w700,
+                                      color: AppTheme.primary)),
+                        ),
+                      ),
+                    ),
                   ),
               ],
             ),
@@ -3059,50 +3231,20 @@ class _BookingFormSheetState extends State<_BookingFormSheet> {
                           _lightFieldDecoration(_bookingProviderHint(_type)),
                     ),
                     const SizedBox(height: 12),
-                    GestureDetector(
+                    _PickerField(
+                      icon: Icons.event_outlined,
+                      semanticLabel: labels.start,
+                      hasValue: _startAt != null,
+                      text: _startAt == null ? labels.start : _fmtPicked(_startAt!),
                       onTap: _pickStart,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 14, vertical: 14),
-                        decoration: BoxDecoration(
-                            color: _kCard,
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: _kBorder)),
-                        child: Row(children: [
-                          const Icon(Icons.event_outlined,
-                              size: 18, color: _kMute),
-                          const SizedBox(width: 10),
-                          Text(
-                              _startAt == null
-                                  ? labels.start
-                                  : _fmtPicked(_startAt!),
-                              style: GoogleFonts.fredoka(
-                                  fontSize: 14,
-                                  color: _startAt == null ? _kMute : _kInk)),
-                        ]),
-                      ),
                     ),
                     const SizedBox(height: 12),
-                    GestureDetector(
+                    _PickerField(
+                      icon: Icons.event_outlined,
+                      semanticLabel: labels.end,
+                      hasValue: _endAt != null,
+                      text: _endAt == null ? labels.end : _fmtPicked(_endAt!),
                       onTap: _pickEnd,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 14, vertical: 14),
-                        decoration: BoxDecoration(
-                            color: _kCard,
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: _kBorder)),
-                        child: Row(children: [
-                          const Icon(Icons.event_outlined,
-                              size: 18, color: _kMute),
-                          const SizedBox(width: 10),
-                          Text(
-                              _endAt == null ? labels.end : _fmtPicked(_endAt!),
-                              style: GoogleFonts.fredoka(
-                                  fontSize: 14,
-                                  color: _endAt == null ? _kMute : _kInk)),
-                        ]),
-                      ),
                     ),
                     const SizedBox(height: 12),
                     TextField(
@@ -3145,32 +3287,14 @@ class _BookingFormSheetState extends State<_BookingFormSheet> {
                             fontWeight: FontWeight.w700,
                             color: _kMute)),
                     const SizedBox(height: 8),
-                    GestureDetector(
+                    _PickerField(
+                      icon: Icons.location_on_outlined,
+                      iconColor: _stopId == null ? _kMute : _kTeal,
+                      semanticLabel: 'Itinerary stop',
+                      hasValue: _stopId != null,
+                      text: stopLabel,
+                      trailingChevron: true,
                       onTap: _pickStop,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 14, vertical: 14),
-                        decoration: BoxDecoration(
-                            color: _kCard,
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: _kBorder)),
-                        child: Row(children: [
-                          Icon(Icons.location_on_outlined,
-                              size: 18,
-                              color: _stopId == null ? _kMute : _kTeal),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: Text(stopLabel,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: GoogleFonts.fredoka(
-                                    fontSize: 14,
-                                    color: _stopId == null ? _kMute : _kInk)),
-                          ),
-                          const Icon(Icons.keyboard_arrow_down,
-                              size: 20, color: _kMute),
-                        ]),
-                      ),
                     ),
                     const SizedBox(height: 20),
                     ElevatedButton(
@@ -3460,28 +3584,10 @@ class _DashboardSegmentState extends State<_DashboardSegment> {
         // Same "+ Add X" convention as _TravelersCard's "+ Add Traveler" —
         // full-width bordered button, not a header-trailing icon, so it
         // reads consistently across every card on this segment/tab.
-        GestureDetector(
-          onTap: _openingExpenseSheet ? null : _openAddExpense,
-          child: Container(
-            width: double.infinity,
-            padding: const EdgeInsets.symmetric(vertical: 11),
-            decoration: BoxDecoration(
-                border: Border.all(color: _kBorder),
-                borderRadius: BorderRadius.circular(10)),
-            alignment: Alignment.center,
-            child: _openingExpenseSheet
-                ? const SizedBox(
-                    width: 16,
-                    height: 16,
-                    child: CircularProgressIndicator(
-                        strokeWidth: 2, color: _kMute),
-                  )
-                : Text('+ Add Expense',
-                    style: GoogleFonts.fredoka(
-                        fontSize: 12.5,
-                        fontWeight: FontWeight.w600,
-                        color: _kMute)),
-          ),
+        _AddPill(
+          label: '+ Add Expense',
+          loading: _openingExpenseSheet,
+          onTap: _openAddExpense,
         ),
         const SizedBox(height: 16),
         const _CardHeader(
@@ -3743,43 +3849,50 @@ class _ExpenseRow extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          GestureDetector(
-            onTap: onToggle,
-            behavior: HitTestBehavior.opaque,
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(expense.title,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: GoogleFonts.fredoka(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w700,
-                              color: _kInk)),
-                      const SizedBox(height: 3),
-                      Text(_metaLine,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: GoogleFonts.jetBrainsMono(
-                              fontSize: 10.5, color: _kMute)),
-                    ],
-                  ),
+          Semantics(
+            button: true,
+            expanded: expanded,
+            label: expense.title,
+            child: Material(
+              color: Colors.transparent,
+              child: InkWell(
+                onTap: onToggle,
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(expense.title,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: GoogleFonts.fredoka(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w700,
+                                  color: _kInk)),
+                          const SizedBox(height: 3),
+                          Text(_metaLine,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: GoogleFonts.jetBrainsMono(
+                                  fontSize: 10.5, color: _kMute)),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                        '$symbol${Trip.formatVnd(expense.amount.round(), short: true)}',
+                        style: GoogleFonts.fredoka(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w700,
+                            color: _kInk)),
+                    const SizedBox(width: 4),
+                    Icon(expanded ? Icons.expand_less : Icons.expand_more,
+                        size: 18, color: _kMute),
+                  ],
                 ),
-                const SizedBox(width: 8),
-                Text(
-                    '$symbol${Trip.formatVnd(expense.amount.round(), short: true)}',
-                    style: GoogleFonts.fredoka(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w700,
-                        color: _kInk)),
-                const SizedBox(width: 4),
-                Icon(expanded ? Icons.expand_less : Icons.expand_more,
-                    size: 18, color: _kMute),
-              ],
+              ),
             ),
           ),
           if (expanded) ...[

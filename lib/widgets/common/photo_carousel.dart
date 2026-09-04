@@ -148,18 +148,35 @@ class _PhotoCarouselState extends State<PhotoCarousel> {
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       for (var i = 0; i < count; i++)
-                        GestureDetector(
-                          onTap: () => _jumpTo(i),
-                          child: AnimatedContainer(
-                            duration: const Duration(milliseconds: 200),
-                            margin: const EdgeInsets.symmetric(horizontal: 3),
-                            width: i == _index ? 18 : 6,
-                            height: 6,
-                            decoration: BoxDecoration(
-                              color: i == _index
-                                  ? Colors.white
-                                  : Colors.white.withValues(alpha: 0.5),
-                              borderRadius: BorderRadius.circular(3),
+                        Semantics(
+                          button: true,
+                          label: 'Photo ${i + 1} of $count',
+                          selected: i == _index,
+                          child: GestureDetector(
+                            onTap: () => _jumpTo(i),
+                            behavior: HitTestBehavior.opaque,
+                            // Padding (not just the visible dot) is the real
+                            // tap target — the dot itself stays visually
+                            // small by design (a dense multi-photo carousel
+                            // can have many of these in a row), but the
+                            // hit area is meaningfully larger than the 6px
+                            // dot alone. Physical space rules out the full
+                            // ~44px guideline here without dots overlapping
+                            // when there are several photos.
+                            child: Padding(
+                              padding:
+                                  const EdgeInsets.symmetric(horizontal: 4, vertical: 15),
+                              child: AnimatedContainer(
+                                duration: const Duration(milliseconds: 200),
+                                width: i == _index ? 18 : 6,
+                                height: 6,
+                                decoration: BoxDecoration(
+                                  color: i == _index
+                                      ? Colors.white
+                                      : Colors.white.withValues(alpha: 0.5),
+                                  borderRadius: BorderRadius.circular(3),
+                                ),
+                              ),
                             ),
                           ),
                         ),
