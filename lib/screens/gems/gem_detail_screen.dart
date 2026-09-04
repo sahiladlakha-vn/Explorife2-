@@ -11,13 +11,16 @@ import '../../core/services/poi_category_filter.dart';
 import '../../core/theme/app_theme.dart';
 import '../../models/attraction.dart';
 import '../../models/gem.dart';
+import '../../models/restaurant.dart';
 import '../../models/trip.dart';
 import '../../models/trip_stop.dart';
 import '../../providers/gem_provider.dart';
 import '../../providers/trip_provider.dart';
 import '../../repositories/attraction_repository.dart';
+import '../../repositories/restaurant_repository.dart';
 import '../../widgets/app_network_image.dart';
 import '../../widgets/common/photo_carousel.dart';
+import '../../widgets/gems/linked_business_card.dart';
 import '../explore/feed_metrics.dart';
 
 /// Which collapsible section is open — single-open accordion, so this is a
@@ -85,8 +88,13 @@ class _GemDetailScreenState extends State<GemDetailScreen> {
   /// decision. Null (the common case, at least until businesses start
   /// claiming places) just means no business has verified this place —
   /// never an error, and the existing curated content above is never
-  /// affected by its presence or absence.
+  /// affected by its presence or absence. A Gem can have at most one
+  /// linked listing PER business type (an Attraction AND a Restaurant
+  /// could both legitimately link to the same real place — e.g. a
+  /// heritage site with an on-site restaurant), so this and
+  /// [_linkedRestaurant] are independent, both nullable.
   Attraction? _linkedAttraction;
+  Restaurant? _linkedRestaurant;
 
   // Straight-line distance to the gem — best-effort location, same
   // permission-check/request/fallback shape used elsewhere in this app
@@ -161,15 +169,25 @@ class _GemDetailScreenState extends State<GemDetailScreen> {
       nearby = filterTravelRelevantPois(nearby);
     }
     // A POI-derived gem has no saved_gems row, so it can't have a linked
-    // Attraction either (gem_id references saved_gems specifically).
-    final linkedAttraction = resolvedGem.isFromPoi
-        ? null
-        : await AttractionRepository().fetchVerifiedForGem(resolvedGem.id);
+    // Attraction/Restaurant either (gem_id references saved_gems
+    // specifically). Fetched in parallel — independent lookups, neither
+    // depends on the other's result.
+    Attraction? linkedAttraction;
+    Restaurant? linkedRestaurant;
+    if (!resolvedGem.isFromPoi) {
+      final results = await Future.wait([
+        AttractionRepository().fetchVerifiedForGem(resolvedGem.id),
+        RestaurantRepository().fetchVerifiedForGem(resolvedGem.id),
+      ]);
+      linkedAttraction = results[0] as Attraction?;
+      linkedRestaurant = results[1] as Restaurant?;
+    }
     if (mounted) {
       setState(() {
         _gem = resolvedGem;
         _nearby = nearby;
         _linkedAttraction = linkedAttraction;
+        _linkedRestaurant = linkedRestaurant;
         _loading = false;
         _openSection = _defaultSection(resolvedGem);
       });
@@ -442,10 +460,17 @@ class _GemDetailScreenState extends State<GemDetailScreen> {
                   // above: the curated content there is untouched by
                   // whether a business has claimed this place, and this
                   // reads as its own distinct, business-attributed section
-                  // rather than editorial content.
+                  // rather than editorial content. An Attraction and a
+                  // Restaurant can both legitimately link to the same Gem
+                  // (see _linkedRestaurant's doc comment), so both cards
+                  // can show at once.
                   if (_linkedAttraction != null) ...[
                     const SizedBox(height: 16),
-                    _AttractionInfoCard(attraction: _linkedAttraction!),
+                    _attractionCard(_linkedAttraction!),
+                  ],
+                  if (_linkedRestaurant != null) ...[
+                    const SizedBox(height: 16),
+                    _restaurantCard(_linkedRestaurant!),
                   ],
                   const SizedBox(height: 4),
                 ],
@@ -474,6 +499,54 @@ class _GemDetailScreenState extends State<GemDetailScreen> {
       ),
     );
   }
+
+  Widget _attractionCard(Attraction attraction) => LinkedBusinessCard(
+        detailRoute: '/attractions/${attraction.id}',
+        rows: [
+          LinkedBusinessInfoRow(
+            icon: Icons.confirmation_number_outlined,
+            label: 'Entry Fee',
+            value: attraction.isFree
+                ? 'Free'
+                : '${attraction.currency} ${attraction.entryFeeAmount}',
+          ),
+          LinkedBusinessInfoRow(
+            icon: Icons.schedule,
+            label: 'Opening Hours',
+            value: attraction.openingHours,
+          ),
+          if (attraction.recommendedDuration != null &&
+              attraction.recommendedDuration!.isNotEmpty)
+            LinkedBusinessInfoRow(
+              icon: Icons.hourglass_empty,
+              label: 'Recommended Duration',
+              value: attraction.recommendedDuration!,
+            ),
+        ],
+      );
+
+  Widget _restaurantCard(Restaurant restaurant) => LinkedBusinessCard(
+        detailRoute: '/restaurants/${restaurant.id}',
+        rows: [
+          LinkedBusinessInfoRow(
+            icon: Icons.payments_outlined,
+            label: 'Price Range',
+            value: restaurant.priceRange.wire,
+          ),
+          LinkedBusinessInfoRow(
+            icon: Icons.schedule,
+            label: 'Opening Hours',
+            value: restaurant.openingHours,
+          ),
+          LinkedBusinessInfoRow(
+            icon: Icons.event_seat_outlined,
+            label: 'Reservations',
+            value: restaurant.reservationOption
+                ? 'Reservations accepted'
+                : 'Walk-ins only',
+          ),
+        ],
+      );
 
   Widget _aboutContent(Gem gem) {
     return Column(
@@ -653,16 +726,20 @@ class _HeaderIcon extends StatelessWidget {
     return Semantics(
       button: true,
       label: label,
-      child: GestureDetector(
-        onTap: onTap,
-        child: Container(
-          width: 36,
-          height: 36,
-          decoration: BoxDecoration(
-            color: Colors.black.withValues(alpha: 0.5),
-            shape: BoxShape.circle,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          customBorder: const CircleBorder(),
+          child: Container(
+            width: 36,
+            height: 36,
+            decoration: BoxDecoration(
+              color: Colors.black.withValues(alpha: 0.5),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(icon, size: 18, color: iconColor),
           ),
-          child: Icon(icon, size: 18, color: iconColor),
         ),
       ),
     );
@@ -777,82 +854,6 @@ class _QuickActionButton extends StatelessWidget {
 
 /// The "additional section" a verified business listing surfaces as on Gem
 /// Detail — see docs/audits/attraction-business-profile-2026-09-04.md.
-/// Deliberately its own card, not styled to blend into the accordion above
-/// it: this is business-provided information (entry fee, hours), not
-/// editorial content, and the "Verified Business" badge only means
-/// anything if it visually reads as a distinct source.
-class _AttractionInfoCard extends StatelessWidget {
-  const _AttractionInfoCard({required this.attraction});
-
-  final Attraction attraction;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: AppTheme.lightCard,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: AppTheme.primary.withValues(alpha: 0.3)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(children: [
-            const Icon(Icons.verified, size: 16, color: AppTheme.primary),
-            const SizedBox(width: 6),
-            Text('VERIFIED BUSINESS LISTING',
-                style: GoogleFonts.jetBrainsMono(
-                    fontSize: 10,
-                    color: AppTheme.primary,
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: 0.5)),
-          ]),
-          const SizedBox(height: 12),
-          _InfoTile(
-            icon: Icons.confirmation_number_outlined,
-            label: 'Entry Fee',
-            value: attraction.isFree
-                ? 'Free'
-                : '${attraction.currency} ${attraction.entryFeeAmount}',
-          ),
-          const SizedBox(height: 8),
-          _InfoTile(
-            icon: Icons.schedule,
-            label: 'Opening Hours',
-            value: attraction.openingHours,
-          ),
-          if (attraction.recommendedDuration != null &&
-              attraction.recommendedDuration!.isNotEmpty) ...[
-            const SizedBox(height: 8),
-            _InfoTile(
-              icon: Icons.hourglass_empty,
-              label: 'Recommended Duration',
-              value: attraction.recommendedDuration!,
-            ),
-          ],
-          const SizedBox(height: 12),
-          GestureDetector(
-            onTap: () => context.push('/attractions/${attraction.id}'),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text('View full listing',
-                    style: GoogleFonts.fredoka(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                        color: AppTheme.primary)),
-                const SizedBox(width: 4),
-                const Icon(Icons.arrow_forward, size: 14, color: AppTheme.primary),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
 /// One collapsible section — single-open accordion, driven entirely by the
 /// parent screen's [_Section] state (this widget holds no state of its
 /// own). Sections that have no data for this gem are never even given one

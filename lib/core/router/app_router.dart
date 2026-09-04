@@ -17,6 +17,10 @@ import '../../screens/attractions/attraction_detail_screen.dart';
 import '../../screens/attractions/attraction_form_screen.dart';
 import '../../screens/attractions/attraction_moderation_screen.dart';
 import '../../models/attraction.dart';
+import '../../screens/restaurants/restaurant_detail_screen.dart';
+import '../../screens/restaurants/restaurant_form_screen.dart';
+import '../../screens/restaurants/restaurant_moderation_screen.dart';
+import '../../models/restaurant.dart';
 import '../../screens/tours/tours_list_screen.dart';
 import '../../screens/tours/tour_detail_screen.dart';
 import '../../screens/stories/stories_screen.dart';
@@ -44,6 +48,8 @@ const _protectedRoutes = {
   '/trips',
   '/attractions/new',
   '/attractions/moderation',
+  '/restaurants/new',
+  '/restaurants/moderation',
 };
 
 class AppRouter {
@@ -187,6 +193,28 @@ class AppRouter {
                 path: '/attractions/:id',
                 builder: (context, state) =>
                     AttractionDetailScreen(id: state.pathParameters['id']!),
+              ),
+              // Restaurant — the second of 8 business profile types, same
+              // declaration-order gotcha as Attraction above: 'new' and
+              // 'moderation' must come before ':id'.
+              GoRoute(
+                path: '/restaurants/new',
+                builder: (_, __) => const RestaurantFormScreen(),
+              ),
+              GoRoute(
+                path: '/restaurants/moderation',
+                builder: (_, __) => const RestaurantModerationScreen(),
+              ),
+              GoRoute(
+                path: '/restaurants/:id/edit',
+                builder: (context, state) => RestaurantFormScreen(
+                  existing: state.extra as Restaurant?,
+                ),
+              ),
+              GoRoute(
+                path: '/restaurants/:id',
+                builder: (context, state) =>
+                    RestaurantDetailScreen(id: state.pathParameters['id']!),
               ),
               GoRoute(
                 path: '/stories/:id',
