@@ -15,6 +15,7 @@ class PhotoInfoCard extends StatelessWidget {
     required this.bottom,
     this.width = 225,
     this.height = 290,
+    this.margin = const EdgeInsets.only(right: 14),
     this.topLeft,
     this.topRight,
     this.onTap,
@@ -25,6 +26,13 @@ class PhotoInfoCard extends StatelessWidget {
   final Widget bottom;
   final double width;
   final double height;
+
+  /// Defaults to the horizontal-rail gutter every existing caller relies
+  /// on. Grid callers (tablet/desktop) pass [EdgeInsets.zero] instead —
+  /// GridView's own crossAxisSpacing/mainAxisSpacing already provides
+  /// gutters, so this card's own right-margin would double up on the
+  /// right edge of every column otherwise.
+  final EdgeInsets margin;
   final Widget? topLeft;
   final Widget? topRight;
   final VoidCallback? onTap;
@@ -35,7 +43,7 @@ class PhotoInfoCard extends StatelessWidget {
     final card = Container(
       width: width,
       height: height,
-      margin: const EdgeInsets.only(right: 14),
+      margin: margin,
       child: ClipRRect(
         borderRadius: BorderRadius.circular(20),
         child: Stack(
