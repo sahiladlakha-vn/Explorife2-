@@ -331,8 +331,15 @@ class _BottomSheetState extends State<_BottomSheet> {
                       _collapse();
                       widget.onGemSelected(gem.id);
                     },
-                    onToggleSave: () =>
-                        context.read<GemProvider>().toggleSave(gem),
+                    onToggleSave: () async {
+                      if (!await requireAccount(context,
+                          action: 'save_gem', payload: {'gemId': gem.id})) {
+                        return;
+                      }
+                      if (context.mounted) {
+                        context.read<GemProvider>().toggleSave(gem);
+                      }
+                    },
                   ),
                 );
               },
@@ -734,7 +741,15 @@ class _GemDeck extends StatelessWidget {
               isSaved: gemProv.isSaved(gem.id),
               distanceLabel: _distanceFor(gem),
               onTap: () => onCardTap(gem),
-              onToggleSave: () => context.read<GemProvider>().toggleSave(gem),
+              onToggleSave: () async {
+                if (!await requireAccount(context,
+                    action: 'save_gem', payload: {'gemId': gem.id})) {
+                  return;
+                }
+                if (context.mounted) {
+                  context.read<GemProvider>().toggleSave(gem);
+                }
+              },
             ),
           );
         },

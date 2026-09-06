@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import '../../core/theme/app_theme.dart';
 import '../../models/story.dart';
 import '../../providers/story_provider.dart';
+import '../../widgets/auth/sign_in_sheet.dart';
 
 class SubmitStoryScreen extends StatefulWidget {
   const SubmitStoryScreen({super.key});
@@ -49,6 +50,16 @@ class _SubmitStoryScreenState extends State<SubmitStoryScreen> {
 
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
+    // Real account required — content authored under a disposable
+    // anonymous session has no durable owner to attribute it to. Doesn't
+    // pre-pop this screen; "Not now" just dismisses the prompt, leaving the
+    // draft intact.
+    if (!await requireAccount(context,
+        action: 'submit_story',
+        reason: 'Sign in to share your story under your name.')) {
+      return;
+    }
+    if (!mounted) return;
 
     setState(() => _submitting = true);
     final ok = await context.read<StoryProvider>().submitStory(

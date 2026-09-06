@@ -29,6 +29,7 @@ import '../../models/trip_booking.dart';
 import '../../models/trip_traveler.dart';
 import '../../models/trip_document.dart';
 import '../../models/packing_item.dart';
+import '../../widgets/auth/sign_in_sheet.dart';
 import '../../widgets/common/app_shell.dart';
 import '../../widgets/budget_status.dart';
 import '../../widgets/state_views.dart';
@@ -275,7 +276,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 children: [
                   _Header(
                     user: user,
-                    onMenu: () => AppShellScope.of(context).openDrawer(),
+                    onMenu: () => AppShellScope.of(context).openMenu(),
                     onSettings: () => setState(() => _tab = 5),
                     onSignOut: () => _confirmSignOut(context),
                     memberSince: _memberSince(gems, myStories),

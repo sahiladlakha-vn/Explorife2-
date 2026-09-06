@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../models/role.dart';
 import '../repositories/admin_profile_repository.dart';
 
@@ -19,6 +20,12 @@ class AuthUser {
   /// roleless account.
   final Role role;
 
+  /// True for a Supabase anonymous session (see [AuthProvider.signInAsGuest]).
+  /// Drives the "Guest" label/badge in the Profile header — a guest is a
+  /// real authenticated user (RLS-visible, `auth.uid()` non-null), just one
+  /// with no real-world identity behind it yet.
+  final bool isGuest;
+
   const AuthUser({
     required this.id,
     required this.name,
@@ -27,6 +34,7 @@ class AuthUser {
     this.provider,
     this.username,
     this.role = Role.traveler,
+    this.isGuest = false,
   });
 }
 
@@ -73,7 +81,18 @@ class AuthProvider extends ChangeNotifier {
     });
 
     try {
-      final session = _supabase.auth.currentSession;
+      var session = _supabase.auth.currentSession;
+      if (session?.user == null) {
+        // No session at all (fresh install, cleared storage, first-ever
+        // launch) — the app never shows a forced sign-in gate anymore, so
+        // create a real anonymous session automatically rather than
+        // leaving every screen to fend for a null auth.uid(). This is the
+        // SAME mechanism signInAsGuest() below already used for the old
+        // "Skip for now" button; the only change is that it now fires on
+        // its own instead of waiting for a tap.
+        await _supabase.auth.signInAnonymously();
+        session = _supabase.auth.currentSession;
+      }
       if (session?.user != null) {
         _user = await _loadProfile(session!.user);
       }
@@ -116,10 +135,15 @@ class AuthProvider extends ChangeNotifier {
         .maybeSingle();
 
     final meta = authUser.userMetadata ?? {};
-    final fallbackName = (meta['full_name'] as String?) ??
-        (meta['name'] as String?) ??
-        authUser.email?.split('@').first ??
-        'Explorer';
+    // Anonymous sessions carry no metadata/email to derive a name from —
+    // "Guest" beats the generic "Explorer" fallback at signalling that this
+    // is a skipped-auth session, not a real (if unnamed) account.
+    final fallbackName = authUser.isAnonymous
+        ? 'Guest'
+        : (meta['full_name'] as String?) ??
+            (meta['name'] as String?) ??
+            authUser.email?.split('@').first ??
+            'Explorer';
 
     return AuthUser(
       id: authUser.id,
@@ -131,6 +155,7 @@ class AuthProvider extends ChangeNotifier {
       provider: authUser.appMetadata['provider'] as String?,
       username: data?['username'] as String?,
       role: Role.fromWire(data?['role'] as String?),
+      isGuest: authUser.isAnonymous,
     );
   }
 
@@ -139,12 +164,15 @@ class AuthProvider extends ChangeNotifier {
     return AuthUser(
       id: authUser.id,
       email: authUser.email,
-      name: (meta['full_name'] as String?) ??
-          (meta['name'] as String?) ??
-          authUser.email?.split('@').first ??
-          'Explorer',
+      name: authUser.isAnonymous
+          ? 'Guest'
+          : (meta['full_name'] as String?) ??
+              (meta['name'] as String?) ??
+              authUser.email?.split('@').first ??
+              'Explorer',
       avatarUrl: (meta['avatar_url'] as String?) ?? (meta['picture'] as String?),
       provider: authUser.appMetadata['provider'] as String?,
+      isGuest: authUser.isAnonymous,
       // role deliberately left at its Role.traveler default here — this is
       // the "profiles row failed to load" fallback path, and defaulting an
       // admin account to the LEAST-privileged role on a load failure is the
@@ -171,7 +199,30 @@ class AuthProvider extends ChangeNotifier {
     await AdminProfileRepository().recordLogin(userId, ip: ip);
   }
 
+  /// Signs in with Google — LINKING to the current anonymous session
+  /// in-place (same `auth.uid()`, `is_anonymous` flips to false) when the
+  /// signed-in user is still a guest, so nothing they saved/created before
+  /// this point (a saved gem, a trip draft, ...) gets orphaned under an id
+  /// nobody can reach anymore. Falls back to a plain sign-in only when
+  /// there's no session to link from at all — shouldn't happen in normal
+  /// use now that [signInAsGuest]'s mechanism runs automatically on cold
+  /// start (see _init), but this stays correct if it somehow does.
+  ///
+  /// The link flow is a full-page redirect on web (same mechanism
+  /// supabase_flutter's own signInWithOAuth uses internally — see
+  /// GoTrueClientSignInProvider.signInWithOAuth), NOT a same-tab popup, so
+  /// any in-memory "resume this after sign-in" state would be lost; callers
+  /// that need to resume a specific action use requireAccount/PendingAction
+  /// (sign_in_sheet.dart) to persist that across the redirect instead.
   Future<void> signInWithGoogle() async {
+    if (_user?.isGuest ?? false) {
+      final res = await _supabase.auth.getLinkIdentityUrl(
+        OAuthProvider.google,
+        redirectTo: kIsWeb ? null : 'io.explorife.app://login-callback',
+      );
+      await launchUrl(Uri.parse(res.url), webOnlyWindowName: '_self');
+      return;
+    }
     await _supabase.auth.signInWithOAuth(
       OAuthProvider.google,
       redirectTo: kIsWeb ? null : 'io.explorife.app://login-callback',
@@ -183,6 +234,19 @@ class AuthProvider extends ChangeNotifier {
       OAuthProvider.github,
       redirectTo: kIsWeb ? null : 'io.explorife.app://login-callback',
     );
+  }
+
+  /// A real (anonymous) Supabase session — `auth.uid()` non-null, owner-
+  /// scoped RLS policies (`user_id = auth.uid()`) satisfied like any other
+  /// signed-in user. Called automatically from [_init] on cold start now
+  /// (there's no forced sign-in gate left to opt into this from), so
+  /// callers don't normally need to invoke this directly anymore; kept
+  /// public in case a screen ever needs to force a fresh guest session
+  /// explicitly (e.g. after sign-out). Requires "Allow anonymous sign-ins"
+  /// to be enabled in the Supabase project's Auth settings — this call
+  /// throws (surfaced by the caller's existing error handling) if it isn't.
+  Future<void> signInAsGuest() async {
+    await _supabase.auth.signInAnonymously();
   }
 
   Future<void> signOut() async {

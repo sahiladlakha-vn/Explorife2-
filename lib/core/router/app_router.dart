@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
-import 'package:provider/provider.dart';
+import '../../core/services/pending_action.dart';
+import '../../core/services/resolve_pending_action.dart';
 import '../../core/theme/app_theme.dart';
-import '../../providers/auth_provider.dart';
 import '../../screens/auth/auth_screen.dart';
 import '../../screens/home/home_screen.dart';
 import '../../screens/home/destination_landing_screen.dart';
@@ -29,7 +29,6 @@ import '../../screens/hikes/hikes_screen.dart';
 import '../../screens/hikes/log_hike_screen.dart';
 import '../../screens/splits/splits_screen.dart';
 import '../../screens/splits/split_detail_screen.dart';
-import '../../screens/onboarding/onboarding_screen.dart';
 import '../../widgets/common/app_shell.dart';
 import '../../routes/trip_routes.dart';
 
@@ -37,46 +36,21 @@ import '../../routes/trip_routes.dart';
 // of ShellRoute) rather than an explicit rootNavigatorKey. Revisit if deep
 // linking or navigator-key-based tests are needed — see also trip_routes.dart.
 
-// Matched by startsWith, so '/trips' covers '/trips/new' and '/trips/:id/builder'.
-const _protectedRoutes = {
-  '/profile',
-  '/drop-gem',
-  '/submit-story',
-  '/log-hike',
-  '/splits',
-  '/trips',
-  '/attractions/new',
-  '/attractions/moderation',
-  '/restaurants/new',
-  '/restaurants/moderation',
-};
-
 class AppRouter {
-  /// Build the router with [authRefresh] wired to `refreshListenable` so that
-  /// `redirect` re-runs when auth resolves (loading → resolved). Without this,
-  /// a cold-boot deep link is evaluated once while `auth.loading` is still true
-  /// (every guard returns null), and the router never re-evaluates — leaving the
-  /// user stranded on the initial route (e.g. stuck on /onboarding) and firing
-  /// stale imperative navigation as auth churns.
+  /// No forced sign-in gate anymore — every session starts as a real
+  /// (anonymous) guest automatically (see AuthProvider._init), so there's
+  /// no "unauthenticated" state left to redirect away from. The app
+  /// launches straight into Home; '/auth' is reachable only voluntarily
+  /// (e.g. a "Sign in" link in Profile) and specific write actions gate
+  /// themselves contextually via requireAccount (sign_in_sheet.dart)
+  /// instead of one global route guard.
+  ///
+  /// [authRefresh] is still wired to `refreshListenable` so GoRouter
+  /// rebuilds once auth actually resolves post-launch (matters for e.g.
+  /// Profile reading `auth.user` before the cold-boot session lands).
   static GoRouter create(Listenable authRefresh) => GoRouter(
         refreshListenable: authRefresh,
-        initialLocation: '/onboarding',
-        redirect: (context, state) {
-          final auth = context.read<AuthProvider>();
-          final path = state.uri.path;
-          final isProtected = _protectedRoutes.any((r) => path.startsWith(r));
-
-          if (auth.loading) return null;
-          // Skip onboarding if already authenticated
-          if (path == '/onboarding' && auth.isAuthenticated) return '/home';
-          if (isProtected && !auth.isAuthenticated) {
-            return '/auth?redirect=${Uri.encodeComponent(path)}';
-          }
-          if (path == '/auth' && auth.isAuthenticated) {
-            return state.uri.queryParameters['redirect'] ?? '/home';
-          }
-          return null;
-        },
+        initialLocation: '/home',
         routes: [
           GoRoute(
             path: '/auth',
@@ -236,9 +210,6 @@ class AppRouter {
             builder: (context, state) =>
                 SplitDetailScreen(groupId: state.pathParameters['id']!),
           ),
-          GoRoute(
-              path: '/onboarding',
-              builder: (_, __) => const OnboardingScreen()),
         ],
       );
 }
@@ -253,9 +224,21 @@ class _AuthCallbackScreenState extends State<_AuthCallbackScreen> {
   @override
   void initState() {
     super.initState();
-    Future.delayed(const Duration(milliseconds: 500), () {
-      if (mounted) context.go('/home');
-    });
+    _resume();
+  }
+
+  /// If a write action was deferred by requireAccount() before this OAuth
+  /// redirect fired (see PendingAction/sign_in_sheet.dart), re-run it now
+  /// that sign-in actually completed, then land on wherever that action's
+  /// own result lives — never just a blind '/home', or the whole point of
+  /// resuming would be lost.
+  Future<void> _resume() async {
+    await Future.delayed(const Duration(milliseconds: 500));
+    if (!mounted) return;
+    final pending = await PendingAction.takeAndClear();
+    final destination =
+        pending == null ? '/home' : await resolvePendingAction(context, pending);
+    if (mounted) context.go(destination);
   }
 
   @override

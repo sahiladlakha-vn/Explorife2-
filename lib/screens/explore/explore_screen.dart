@@ -15,6 +15,7 @@ import '../../core/services/geocoding_service.dart';
 import '../../core/theme/app_theme.dart';
 import '../../providers/gem_provider.dart';
 import '../../models/gem.dart';
+import '../../widgets/auth/sign_in_sheet.dart';
 import 'feed_metrics.dart';
 import 'gem_card.dart';
 import 'map_engine.dart';

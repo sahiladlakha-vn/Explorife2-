@@ -3,6 +3,7 @@ import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 import '../../core/theme/app_theme.dart';
 import '../../providers/trip_provider.dart';
+import '../../widgets/auth/sign_in_sheet.dart';
 import 'step_one_init.dart';
 import 'step_who_is_coming.dart';
 import 'step_two_template.dart';
@@ -47,6 +48,19 @@ class _TripSetupSheetState extends State<TripSetupSheet> {
   void _onBack() => setState(() => _step--);
 
   Future<void> _onComplete() async {
+    // Real account required — a guest CAN technically create a trip (RLS
+    // only checks auth.uid()), but an itinerary tied to a disposable
+    // anonymous session is unrecoverable the moment that session is lost,
+    // and every traveler invite downstream (TravelerLookupSheet) needs a
+    // real email/username to resolve anyway. Doesn't pre-pop this sheet —
+    // "Not now" just dismisses the sign-in prompt, leaving the wizard's
+    // draft intact to finish later.
+    if (!await requireAccount(context,
+        action: 'create_trip',
+        reason: 'Sign in to create your trip — so you never lose it.')) {
+      return;
+    }
+    if (!mounted) return;
     final router = GoRouter.of(context);
     final navigator = Navigator.of(context);
     final messenger = ScaffoldMessenger.of(context); // TODO(snackbar): sheet context may not reach app-level ScaffoldMessenger; thread scaffoldMessengerKey from MaterialApp if this still swallows errors

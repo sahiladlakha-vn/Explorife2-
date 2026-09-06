@@ -19,6 +19,7 @@ import '../../providers/trip_provider.dart';
 import '../../repositories/attraction_repository.dart';
 import '../../repositories/restaurant_repository.dart';
 import '../../widgets/app_network_image.dart';
+import '../../widgets/auth/sign_in_sheet.dart';
 import '../../widgets/common/photo_carousel.dart';
 import '../../widgets/gems/linked_business_card.dart';
 import '../explore/feed_metrics.dart';
@@ -281,6 +282,25 @@ class _GemDetailScreenState extends State<GemDetailScreen> {
     );
   }
 
+  /// Gated on a real account (see requireAccount's own doc) — a guest CAN
+  /// technically save a gem at the RLS layer, but a save tied to a
+  /// disposable anonymous session is unrecoverable the moment that session
+  /// is lost, so this is one of the actions the guest-browsing model
+  /// deliberately still asks for sign-in on. The gemId is persisted before
+  /// the sign-in redirect fires, so completing sign-in re-runs the save
+  /// automatically instead of the tap silently going nowhere — see
+  /// resolvePendingAction's 'save_gem' case.
+  Future<void> _toggleSave(Gem gem) async {
+    if (!await requireAccount(context,
+        action: 'save_gem',
+        payload: {'gemId': gem.id},
+        reason: 'Sign in to save this gem and find it again anytime.')) {
+      return;
+    }
+    if (!mounted) return;
+    await context.read<GemProvider>().toggleSave(gem);
+  }
+
   /// Adds this gem to the active trip's Day 1 / Morning slot, then confirms
   /// with a "View Trip" snackbar so the user can immediately re-file it into
   /// the right day/slot if this default doesn't match where they actually
@@ -361,7 +381,7 @@ class _GemDetailScreenState extends State<GemDetailScreen> {
               isSaved: isSaved,
               onToggleSave: gem.isFromPoi
                   ? _comingSoonSave
-                  : () => context.read<GemProvider>().toggleSave(gem),
+                  : () => _toggleSave(gem),
             ),
           ),
           SliverToBoxAdapter(
@@ -429,7 +449,7 @@ class _GemDetailScreenState extends State<GemDetailScreen> {
                     isSaved: isSaved,
                     onToggleSave: gem.isFromPoi
                         ? _comingSoonSave
-                        : () => context.read<GemProvider>().toggleSave(gem),
+                        : () => _toggleSave(gem),
                     onCopyLink: () => _copyLink(gem),
                   ),
                   const SizedBox(height: 20),
@@ -494,7 +514,7 @@ class _GemDetailScreenState extends State<GemDetailScreen> {
         onDirections: gem.hasCoords ? () => _openDirections(gem) : null,
         onSave: gem.isFromPoi
             ? _comingSoonSave
-            : () => context.read<GemProvider>().toggleSave(gem),
+            : () => _toggleSave(gem),
         onAddToTrip: _addToTrip,
       ),
     );
