@@ -11,6 +11,7 @@ import '../../models/gem.dart';
 import '../../models/gem_draft.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/gem_provider.dart';
+import '../../widgets/auth/sign_in_sheet.dart';
 
 /// Slides the "fill in the gem" form up as a modal bottom sheet over whatever
 /// is behind it (the placement map / explore screen). Returns true if a gem
@@ -159,12 +160,21 @@ class _DropGemSheetState extends State<DropGemSheet> {
     final draft = _buildDraft();
     if (!draft.canPublish || _publishing) return;
 
-    final auth = context.read<AuthProvider>();
-    if (!auth.isAuthenticated) {
-      Navigator.of(context).pop();
-      context.go('/auth?redirect=/drop-gem');
+    // Real account required, not just any session — a guest CAN technically
+    // insert a saved_gems row (RLS only checks auth.uid()), but content
+    // authored under a disposable anonymous session is unattributable and
+    // unrecoverable the moment that session is lost. Deliberately doesn't
+    // pop this sheet first (unlike the old forced-gate redirect this
+    // replaced) — "Not now" on the sign-in sheet just dismisses it, leaving
+    // the draft (photos, captions, text already entered) intact to finish
+    // later, since a full OAuth redirect would lose it anyway regardless.
+    if (!await requireAccount(context,
+        action: 'drop_gem',
+        reason: 'Sign in to drop this gem — so it stays yours.')) {
       return;
     }
+    if (!mounted) return;
+    final auth = context.read<AuthProvider>();
 
     setState(() => _publishing = true);
     final result = await context.read<GemProvider>().publish(

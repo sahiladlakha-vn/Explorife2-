@@ -18,13 +18,26 @@ class _SettingsTab extends StatelessWidget {
           padding: EdgeInsets.zero,
           child: Column(
             children: [
-              _settingRow(Icons.person_outline, 'Edit profile',
-                  () => showModalBottomSheet<void>(
-                        context: context,
-                        isScrollControlled: true,
-                        backgroundColor: Colors.transparent,
-                        builder: (_) => const _EditProfileSheet(),
-                      )),
+              _settingRow(Icons.person_outline, 'Edit profile', () async {
+                // Real account required — a guest's display name/username
+                // update would persist fine at the DB layer, but ProfileChrome
+                // always renders '@guest' regardless (profile_chrome.dart)
+                // and a guest can't be found by findUserByIdentifier anyway
+                // (no email/username to match on), so there'd be nowhere
+                // for the change to actually show up.
+                if (!await requireAccount(context,
+                    action: 'edit_profile',
+                    reason: 'Sign in to set your name and username.')) {
+                  return;
+                }
+                if (!context.mounted) return;
+                showModalBottomSheet<void>(
+                  context: context,
+                  isScrollControlled: true,
+                  backgroundColor: Colors.transparent,
+                  builder: (_) => const _EditProfileSheet(),
+                );
+              }),
               _settingRow(Icons.notifications_outlined, 'Notifications', () {}),
               _settingRow(Icons.lock_outline, 'Privacy', () {}),
               _settingRow(Icons.receipt_long_outlined, 'Expense Splits',

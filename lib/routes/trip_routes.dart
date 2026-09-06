@@ -10,8 +10,13 @@ import '../screens/trips/trips_list_screen.dart';
 /// the house pattern used by `/drop-gem`, `/splits/:id`, etc. (no root
 /// navigator key in this app). The builder route is deliberately NOT here —
 /// see [tripBuilderRoute].
-/// Protected: '/trips' is in _protectedRoutes (app_router.dart), matched by
-/// startsWith, so unauthenticated hits redirect before createTrip can run.
+///
+/// No router-level auth gate anymore — every session (including a guest's)
+/// reaches these routes freely, and `trips_write_own`'s RLS policy is
+/// satisfied by a guest's `auth.uid()` just as well as a real account's.
+/// Creating a trip specifically still requires a REAL account though (see
+/// TripSetupSheet's own requireAccount() call) — that's a product decision
+/// about durable ownership, not something this routing layer enforces.
 List<RouteBase> tripRoutes() => [
       // Bare index — the full trip list, reached from the drawer's "My Trips"
       // tile. Registered before `/trips/new` in source but GoRouter matches

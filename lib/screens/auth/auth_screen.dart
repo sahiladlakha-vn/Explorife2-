@@ -3,7 +3,13 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import '../../core/theme/app_theme.dart';
 import '../../providers/auth_provider.dart';
+import '../../widgets/auth/oauth_button.dart';
 
+/// Full-page sign-in — reached only voluntarily now (e.g. a "Sign in" link
+/// in Profile), never as a forced gate: every session starts as a real
+/// (anonymous) guest automatically (see AuthProvider._init), so there's
+/// nothing to "skip" anymore. [redirectTo] still lets a caller land back
+/// on a specific route after sign-in completes, same as before.
 class AuthScreen extends StatefulWidget {
   final String? redirectTo;
   const AuthScreen({super.key, this.redirectTo});
@@ -77,7 +83,7 @@ class _AuthScreenState extends State<AuthScreen> {
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    'Join 84,000+ adventurers discovering\nhidden trails around the world',
+                    'Sign in to save your gems, plan trips, and pick up\nright where you left off on any device',
                     textAlign: TextAlign.center,
                     style: GoogleFonts.fredoka(fontSize: 14, color: AppTheme.textSecondary, height: 1.5),
                   ),
@@ -96,22 +102,15 @@ class _AuthScreenState extends State<AuthScreen> {
                     const SizedBox(height: 16),
                   ],
 
-                  // Google button
-                  _OAuthButton(
+                  // Google button — AuthProvider.signInWithGoogle links this
+                  // to the existing guest session (same auth.uid()) rather
+                  // than starting a brand new one, so nothing the guest
+                  // already saved/created is orphaned.
+                  OAuthButton(
                     label: 'Continue with Google',
-                    icon: _googleIcon,
+                    icon: googleIcon,
                     loading: _loading,
                     onTap: () => _signIn(context.read<AuthProvider>().signInWithGoogle),
-                  ),
-                  const SizedBox(height: 12),
-
-                  // GitHub button
-                  _OAuthButton(
-                    label: 'Continue with GitHub',
-                    icon: _githubIcon,
-                    loading: _loading,
-                    dark: true,
-                    onTap: () => _signIn(context.read<AuthProvider>().signInWithGitHub),
                   ),
 
                   const SizedBox(height: 24),
@@ -137,76 +136,3 @@ class _AuthScreenState extends State<AuthScreen> {
     );
   }
 }
-
-class _OAuthButton extends StatelessWidget {
-  final String label;
-  final Widget icon;
-  final VoidCallback onTap;
-  final bool loading;
-  final bool dark;
-
-  const _OAuthButton({
-    required this.label,
-    required this.icon,
-    required this.onTap,
-    this.loading = false,
-    this.dark = false,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: loading ? null : onTap,
-      child: Container(
-        width: double.infinity,
-        padding: const EdgeInsets.symmetric(vertical: 14),
-        decoration: BoxDecoration(
-          color: dark ? const Color(0xFF24292E) : Colors.white,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: dark ? const Color(0xFF444D56) : Colors.white),
-        ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            icon,
-            const SizedBox(width: 10),
-            Text(
-              label,
-              style: GoogleFonts.fredoka(
-                fontSize: 15,
-                fontWeight: FontWeight.w600,
-                color: dark ? Colors.white : const Color(0xFF1A1A1A),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-// Google SVG icon
-Widget get _googleIcon => SizedBox(
-      width: 20, height: 20,
-      child: CustomPaint(painter: _GoogleIconPainter()),
-    );
-
-class _GoogleIconPainter extends CustomPainter {
-  @override
-  void paint(Canvas canvas, Size size) {
-    final c = size.width / 2;
-    // Simplified Google G
-    final paint = Paint()..style = PaintingStyle.fill;
-    paint.color = const Color(0xFF4285F4);
-    canvas.drawArc(Rect.fromCircle(center: Offset(c, c), radius: c), -1.57, 3.14, false, paint..style = PaintingStyle.stroke..strokeWidth = size.width * 0.2);
-    paint.color = const Color(0xFF34A853);
-    canvas.drawArc(Rect.fromCircle(center: Offset(c, c), radius: c), 1.57, 1.57, false, paint);
-    paint.color = const Color(0xFFEA4335);
-    canvas.drawArc(Rect.fromCircle(center: Offset(c, c), radius: c), -1.57, -1.57, false, paint);
-  }
-  @override
-  bool shouldRepaint(_) => false;
-}
-
-// GitHub icon
-Widget get _githubIcon => const Icon(Icons.code, color: Colors.white, size: 20);
