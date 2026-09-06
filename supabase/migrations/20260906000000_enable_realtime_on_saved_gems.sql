@@ -1,0 +1,13 @@
+-- The app's GemRepository already subscribes to Postgres Changes on this
+-- table (connectRealtime(), used by GemProvider to keep the All Gems /
+-- Explore / Home feeds live), but `saved_gems` was never added to the
+-- `supabase_realtime` publication — confirmed via `select * from
+-- pg_publication_tables where pubname = 'supabase_realtime'` returning zero
+-- rows. With no table in the publication, Postgres never emits change
+-- events, so the client-side subscription silently receives nothing: a gem
+-- added or edited via the Google Sheet sync (or dropped in-app) only ever
+-- appears after a full app restart re-runs the initial fetch. This is the
+-- actual root cause — not a client-side caching bug, and no Dart change is
+-- needed since the subscription code already exists and correctly upserts/
+-- removes by id.
+ALTER PUBLICATION supabase_realtime ADD TABLE public.saved_gems;
