@@ -45,11 +45,18 @@ class GemRepository {
   static const String _selectWithProfile =
       '*, profiles!saved_gems_profiles_fkey(display_name)';
 
+  /// Only `source = 'sheet_sync'` rows — i.e. gems that actually came through
+  /// the Google Sheet integration (see upsert_gem_from_sheet in
+  /// supabase/migrations/) — are meant to appear in the community feed
+  /// (Explore/Listings/Home all read from this one list). Everything else
+  /// (manual "Drop a Gem" drops, one-off test rows, etc.) defaults to
+  /// `source = 'app'` and is excluded here.
   Future<List<Gem>> fetchGems({int limit = 100}) async {
     try {
       final data = await _db
           .from(table)
           .select(_selectWithProfile)
+          .eq('source', 'sheet_sync')
           .order('saved_at', ascending: false)
           .limit(limit);
       return (data as List).map((e) => Gem.fromJson(e)).toList();
@@ -59,6 +66,7 @@ class GemRepository {
       final data = await _db
           .from(table)
           .select()
+          .eq('source', 'sheet_sync')
           .order('saved_at', ascending: false)
           .limit(limit);
       return (data as List).map((e) => Gem.fromJson(e)).toList();
@@ -225,6 +233,15 @@ class GemRepository {
           event: PostgresChangeEvent.insert,
           schema: 'public',
           table: table,
+          // Same 'source = sheet_sync' rule as fetchGems() — a server-side
+          // filter (not just the client-side query above) so a manually
+          // dropped or test row (source = 'app') can never reach the live
+          // feed via a realtime echo, matching what the initial fetch shows.
+          filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'source',
+            value: 'sheet_sync',
+          ),
           callback: (payload) {
             if (!_inserts.isClosed) {
               _inserts.add(Gem.fromJson(payload.newRecord));
