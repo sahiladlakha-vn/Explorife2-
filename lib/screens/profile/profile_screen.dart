@@ -4,7 +4,6 @@ import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
-import 'package:supabase_flutter/supabase_flutter.dart' show PostgrestException;
 import '../../core/layout/max_width_center.dart';
 import '../../core/services/geocoding_service.dart';
 import '../../core/theme/app_theme.dart';
@@ -30,6 +29,8 @@ import '../../models/trip_traveler.dart';
 import '../../models/trip_document.dart';
 import '../../models/packing_item.dart';
 import '../../widgets/auth/sign_in_sheet.dart';
+import '../../widgets/profile/confirm_sign_out.dart';
+import '../../widgets/profile/edit_profile_sheet.dart';
 import '../../widgets/common/app_shell.dart';
 import '../../widgets/budget_status.dart';
 import '../../widgets/state_views.dart';
@@ -173,7 +174,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
   @override
   Widget build(BuildContext context) {
     final auth = context.watch<AuthProvider>();
-    if (!auth.isAuthenticated) return _SignInPrompt();
+    // isGuest, not just !isAuthenticated — every session is at minimum a
+    // real (anonymous) guest now (see AuthProvider._init), so a bare
+    // isAuthenticated check never trips anymore. A guest still needs the
+    // sign-in prompt here; a real account does not.
+    if (!auth.isAuthenticated || (auth.user?.isGuest ?? true)) {
+      return _SignInPrompt();
+    }
 
     final user = auth.user!;
     // One clock read per frame — every time-relative insight below (alerts, and
@@ -278,7 +285,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     user: user,
                     onMenu: () => AppShellScope.of(context).openMenu(),
                     onSettings: () => setState(() => _tab = 5),
-                    onSignOut: () => _confirmSignOut(context),
+                    onSignOut: () => confirmSignOut(context),
                     memberSince: _memberSince(gems, myStories),
                   ),
                   _StatsBar(
@@ -328,7 +335,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       case 4:
         return _BadgesTab(badges: badges);
       case 5:
-        return _SettingsTab(onSignOut: () => _confirmSignOut(context));
+        return _SettingsTab(onSignOut: () => confirmSignOut(context));
       default:
         return _OverviewTab(
           spent: _spent,
@@ -357,32 +364,4 @@ class _ProfileScreenState extends State<ProfileScreen> {
     return 'Member since ${_months[d.month - 1]} ${d.year}';
   }
 
-  void _confirmSignOut(BuildContext context) {
-    showDialog(
-      context: context,
-      builder: (_) => AlertDialog(
-        backgroundColor: Colors.white,
-        title: Text('Sign Out',
-            style: GoogleFonts.bebasNeue(fontSize: 22, color: _kInk)),
-        content: Text('Are you sure you want to sign out?',
-            style: GoogleFonts.fredoka(color: _kMute)),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          TextButton(
-            onPressed: () {
-              Navigator.pop(context);
-              context.read<BookingProvider>().clear();
-              context.read<TripSetupProvider>().clear();
-              context.read<SplitsProvider>().clear();
-              context.read<AuthProvider>().signOut();
-            },
-            child: const Text('Sign Out', style: TextStyle(color: Colors.red)),
-          ),
-        ],
-      ),
-    );
-  }
 }

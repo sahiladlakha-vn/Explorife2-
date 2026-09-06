@@ -7,6 +7,7 @@ import '../../core/layout/breakpoints.dart';
 import '../../core/theme/app_theme.dart';
 import '../../providers/auth_provider.dart';
 import '../app_network_image.dart';
+import '../profile/profile_panel.dart';
 import 'bottom_nav.dart';
 import 'side_nav.dart';
 
@@ -49,19 +50,29 @@ class _CloseDrawerIntent extends Intent {
 class _AppShellState extends State<AppShell> {
   // SideNav is hidden off-screen by default (see build()) and slides in
   // over the page content — below the sticky top bar, never pushing/
-  // resizing it — when the top bar's hamburger is tapped.
+  // resizing it — when the top bar's hamburger is tapped. ProfilePanel is
+  // the same idea, mirrored to the right edge, triggered by the top bar's
+  // avatar instead. Mutually exclusive — opening one closes the other, so
+  // there's never two overlays fighting for the same scrim/Escape key.
   bool _sideNavOpen = false;
+  bool _profilePanelOpen = false;
 
-  // Keyboard focus contract: opening the panel moves focus to its close
-  // button (the first, always-present focusable control inside it);
-  // closing it — by any of the 3 methods (scrim tap, ✕, destination pick)
-  // — returns focus to the hamburger that opened it. Escape closes it too
-  // (see the Shortcuts/Actions wrap in build()).
+  // Keyboard focus contract (both panels): opening moves focus to the
+  // panel's close button (the first, always-present focusable control
+  // inside it); closing it — by any of the 3 methods (scrim tap, ✕,
+  // selecting something that navigates away) — returns focus to whichever
+  // top-bar icon opened it. Escape closes whichever is open (see the
+  // Shortcuts/Actions wrap in build()).
   final FocusNode _hamburgerFocusNode = FocusNode(debugLabel: 'hamburger');
   final FocusNode _drawerCloseFocusNode = FocusNode(debugLabel: 'drawer-close');
+  final FocusNode _profileIconFocusNode = FocusNode(debugLabel: 'profile-icon');
+  final FocusNode _profileCloseFocusNode = FocusNode(debugLabel: 'profile-close');
 
   void _openSideNav() {
-    setState(() => _sideNavOpen = true);
+    setState(() {
+      _sideNavOpen = true;
+      _profilePanelOpen = false;
+    });
     WidgetsBinding.instance
         .addPostFrameCallback((_) => _drawerCloseFocusNode.requestFocus());
   }
@@ -73,6 +84,32 @@ class _AppShellState extends State<AppShell> {
   }
 
   void _toggleSideNav() => _sideNavOpen ? _closeSideNav() : _openSideNav();
+
+  void _openProfilePanel() {
+    setState(() {
+      _profilePanelOpen = true;
+      _sideNavOpen = false;
+    });
+    WidgetsBinding.instance
+        .addPostFrameCallback((_) => _profileCloseFocusNode.requestFocus());
+  }
+
+  void _closeProfilePanel() {
+    if (!_profilePanelOpen) return;
+    setState(() => _profilePanelOpen = false);
+    _profileIconFocusNode.requestFocus();
+  }
+
+  void _toggleProfilePanel() =>
+      _profilePanelOpen ? _closeProfilePanel() : _openProfilePanel();
+
+  /// Closes whichever overlay is currently open — the shared scrim and
+  /// Escape key both funnel here rather than each needing to know which
+  /// panel (if either) is showing.
+  void _closeAnyOverlay() {
+    _closeSideNav();
+    _closeProfilePanel();
+  }
 
   // (route, icon, label) — index order is the contract with BottomNav/SideNav
   // and the route↔index mapping below. BottomNav (mobile) stays icon-only by
@@ -112,6 +149,8 @@ class _AppShellState extends State<AppShell> {
   void dispose() {
     _hamburgerFocusNode.dispose();
     _drawerCloseFocusNode.dispose();
+    _profileIconFocusNode.dispose();
+    _profileCloseFocusNode.dispose();
     super.dispose();
   }
 
@@ -157,6 +196,8 @@ class _AppShellState extends State<AppShell> {
                     tier: tier,
                     hamburgerFocusNode: _hamburgerFocusNode,
                     onMenuTap: _toggleSideNav,
+                    profileIconFocusNode: _profileIconFocusNode,
+                    onProfileTap: _toggleProfilePanel,
                   ),
                   Expanded(
                     child: Shortcuts(
@@ -168,28 +209,32 @@ class _AppShellState extends State<AppShell> {
                         actions: {
                           _CloseDrawerIntent: CallbackAction<_CloseDrawerIntent>(
                             onInvoke: (_) {
-                              _closeSideNav();
+                              _closeAnyOverlay();
                               return null;
                             },
                           ),
                         },
                         child: Stack(
                           children: [
-                            // Content spans the full width — SideNav never
-                            // reserves a permanent column, it overlays.
+                            // Content spans the full width — neither panel
+                            // reserves a permanent column, both overlay.
                             Positioned.fill(child: widget.child),
 
-                            // Dimming scrim: only present (and tappable-to-
-                            // close) while the panel is open; fades with it.
+                            // Shared dimming scrim: present (and tappable-
+                            // to-close) while either panel is open; fades
+                            // with it. Only one panel is ever open at once
+                            // (see _openSideNav/_openProfilePanel), so
+                            // there's no ambiguity about what a tap closes.
                             IgnorePointer(
-                              ignoring: !_sideNavOpen,
+                              ignoring: !_sideNavOpen && !_profilePanelOpen,
                               child: GestureDetector(
                                 behavior: HitTestBehavior.opaque,
-                                onTap: _closeSideNav,
+                                onTap: _closeAnyOverlay,
                                 child: AnimatedOpacity(
                                   duration: const Duration(milliseconds: 320),
                                   curve: Curves.easeOut,
-                                  opacity: _sideNavOpen ? 1 : 0,
+                                  opacity:
+                                      (_sideNavOpen || _profilePanelOpen) ? 1 : 0,
                                   child: Container(
                                       color:
                                           Colors.black.withValues(alpha: 0.25)),
@@ -197,9 +242,9 @@ class _AppShellState extends State<AppShell> {
                               ),
                             ),
 
-                            // The panel itself — off-screen left when
-                            // closed, slides to x=0 over the content (not
-                            // pushing it) when open.
+                            // SideNav — off-screen left when closed, slides
+                            // to x=0 over the content (not pushing it) when
+                            // open.
                             AnimatedPositioned(
                               duration: const Duration(milliseconds: 320),
                               curve: Curves.easeOut,
@@ -218,6 +263,23 @@ class _AppShellState extends State<AppShell> {
                                 },
                                 onClose: _closeSideNav,
                                 closeFocusNode: _drawerCloseFocusNode,
+                              ),
+                            ),
+
+                            // ProfilePanel — the same idea mirrored to the
+                            // right edge, triggered by the top bar's avatar.
+                            AnimatedPositioned(
+                              duration: const Duration(milliseconds: 320),
+                              curve: Curves.easeOut,
+                              top: 0,
+                              bottom: 0,
+                              right: _profilePanelOpen
+                                  ? 0
+                                  : -ProfilePanel.width,
+                              width: ProfilePanel.width,
+                              child: ProfilePanel(
+                                onClose: _closeProfilePanel,
+                                closeFocusNode: _profileCloseFocusNode,
                               ),
                             ),
                           ],
@@ -250,11 +312,15 @@ class _TopBar extends StatelessWidget {
     required this.tier,
     required this.hamburgerFocusNode,
     required this.onMenuTap,
+    required this.profileIconFocusNode,
+    required this.onProfileTap,
   });
 
   final ScreenTier tier;
   final FocusNode hamburgerFocusNode;
   final VoidCallback onMenuTap;
+  final FocusNode profileIconFocusNode;
+  final VoidCallback onProfileTap;
 
   @override
   Widget build(BuildContext context) {
@@ -332,21 +398,27 @@ class _TopBar extends StatelessWidget {
               Semantics(
                 button: true,
                 label: 'Your profile',
-                child: GestureDetector(
-                  onTap: () => context.go('/profile'),
-                  child: Container(
-                    width: 36,
-                    height: 36,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      border: Border.all(color: AppTheme.lightBorder),
-                      color: AppTheme.lightCard,
-                    ),
-                    child: ClipOval(
-                      child: avatarUrl != null && avatarUrl.isNotEmpty
-                          ? AppNetworkImage(url: avatarUrl, fit: BoxFit.cover)
-                          : const Icon(Icons.person,
-                              size: 18, color: AppTheme.lightMute),
+                child: Material(
+                  color: Colors.transparent,
+                  shape: const CircleBorder(),
+                  child: InkWell(
+                    focusNode: profileIconFocusNode,
+                    onTap: onProfileTap,
+                    customBorder: const CircleBorder(),
+                    child: Container(
+                      width: 36,
+                      height: 36,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        border: Border.all(color: AppTheme.lightBorder),
+                        color: AppTheme.lightCard,
+                      ),
+                      child: ClipOval(
+                        child: avatarUrl != null && avatarUrl.isNotEmpty
+                            ? AppNetworkImage(url: avatarUrl, fit: BoxFit.cover)
+                            : const Icon(Icons.person,
+                                size: 18, color: AppTheme.lightMute),
+                      ),
                     ),
                   ),
                 ),

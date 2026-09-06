@@ -108,8 +108,22 @@ class AppRouter {
               ),
               GoRoute(
                 path: '/profile',
-                builder: (_, state) =>
-                    ProfileScreen(deepLink: state.extra as ProfileDeepLink?),
+                // extra: ProfileDeepLink still wins when a caller has one
+                // already (Trip Builder's back button, e.g.) — the simpler
+                // '?tab=N' query param is for callers that don't depend on
+                // profile_screen.dart at all (ProfilePanel, app_shell.dart's
+                // ecosystem), which importing ProfileDeepLink directly would
+                // create a real import cycle for (app_shell -> profile_panel
+                // -> profile_screen -> app_shell, for AppShellScope).
+                builder: (_, state) {
+                  final extra = state.extra;
+                  if (extra is ProfileDeepLink) {
+                    return ProfileScreen(deepLink: extra);
+                  }
+                  final tab = int.tryParse(state.uri.queryParameters['tab'] ?? '');
+                  return ProfileScreen(
+                      deepLink: tab != null ? ProfileDeepLink(tab: tab) : null);
+                },
               ),
               GoRoute(
                   path: '/stories', builder: (_, __) => const StoriesScreen()),

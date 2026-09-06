@@ -57,4 +57,18 @@ enum Role {
           true,
         _ => false,
       };
+
+  /// Human-readable badge label — e.g. the profile panel's role pill.
+  /// "Traveller" (double-l, matching the source schema's own spelling)
+  /// rather than "Traveler" for that one specifically; every other label is
+  /// just the title-cased wire value.
+  String get label => switch (this) {
+        Role.traveler => 'Traveller',
+        Role.guide => 'Guide',
+        Role.businessOwner => 'Business Owner',
+        Role.contentModerator => 'Content Moderator',
+        Role.regionalAdmin => 'Regional Admin',
+        Role.superAdmin => 'Super Admin',
+        Role.financeAdmin => 'Finance Admin',
+      };
 }
