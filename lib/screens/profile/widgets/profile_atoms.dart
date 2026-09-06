@@ -187,40 +187,27 @@ class _EmptyState extends StatelessWidget {
   }
 }
 
+/// Guest state of the mobile Profile tab — reuses the exact same
+/// [SignInPromptContent] the contextual sign-in sheet and the desktop/
+/// tablet ProfilePanel use, instead of a bespoke "JOIN THE TRIBE" screen.
+/// This used to trigger on `!auth.isAuthenticated`, which no longer
+/// distinguishes anything now that every session is at minimum a real
+/// (authenticated) guest — see ProfileScreen.build's call site, which now
+/// checks `isGuest` instead.
 class _SignInPrompt extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppTheme.lightSurface,
-      body: Center(
-        child: Padding(
-          padding: const EdgeInsets.all(32),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              const Text('🧗', style: TextStyle(fontSize: 64)),
-              const SizedBox(height: 20),
-              Text('JOIN THE TRIBE',
-                  style: GoogleFonts.bebasNeue(
-                      fontSize: 32,
-                      color: AppTheme.lightInk,
-                      letterSpacing: 1)),
-              const SizedBox(height: 8),
-              Text(
-                'Sign in to access your profile, save gems, track hikes, and connect with fellow adventurers.',
-                textAlign: TextAlign.center,
-                style: GoogleFonts.fredoka(
-                    fontSize: 14, color: AppTheme.lightMute, height: 1.6),
-              ),
-              const SizedBox(height: 32),
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  onPressed: () => context.go('/auth?redirect=/profile'),
-                  child: const Text('Sign In'),
-                ),
-              ),
-            ],
+      body: SafeArea(
+        child: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(32),
+            child: SignInPromptContent(
+              action: 'open_profile',
+              onDismiss: () =>
+                  context.canPop() ? context.pop() : context.go('/home'),
+            ),
           ),
         ),
       ),

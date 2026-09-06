@@ -30,7 +30,7 @@ Future<bool> requireAccount(
   BuildContext context, {
   required String action,
   Map<String, dynamic> payload = const {},
-  String reason = 'Sign in to save your progress and pick up where you left off.',
+  String? reason,
 }) async {
   final auth = context.read<AuthProvider>();
   if (auth.isAuthenticated && !(auth.user?.isGuest ?? true)) return true;
@@ -46,8 +46,12 @@ Future<bool> requireAccount(
 
 /// The contextual sign-in prompt itself — a bottom sheet, never a full-
 /// screen takeover (that was the old, now-removed forced onboarding/auth
-/// gate's shape). Content mirrors AuthScreen's Google button, just smaller.
-class SignInSheet extends StatefulWidget {
+/// gate's shape). Thin chrome wrapper around [SignInPromptContent], which
+/// carries the actual heading/bullets/button — the same content widget the
+/// desktop/tablet profile panel's guest state uses (ProfilePanel), so
+/// there's exactly one sign-in UI in the app, not a bottom-sheet version and
+/// a separate panel version.
+class SignInSheet extends StatelessWidget {
   const SignInSheet({
     super.key,
     required this.reason,
@@ -55,17 +59,100 @@ class SignInSheet extends StatefulWidget {
     required this.payload,
   });
 
-  final String reason;
+  final String? reason;
   final String action;
   final Map<String, dynamic> payload;
 
   @override
-  State<SignInSheet> createState() => _SignInSheetState();
+  Widget build(BuildContext context) {
+    return SafeArea(
+      top: false,
+      child: Padding(
+        padding: EdgeInsets.only(
+          left: 20,
+          right: 20,
+          top: 20,
+          bottom: 20 + MediaQuery.of(context).viewInsets.bottom,
+        ),
+        child: Material(
+          color: AppTheme.lightSurface,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+          child: Padding(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Center(
+                  child: Container(
+                    width: 36,
+                    height: 4,
+                    margin: const EdgeInsets.only(bottom: 4),
+                    decoration: BoxDecoration(
+                      color: AppTheme.lightBorder,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ),
+                SignInPromptContent(
+                  action: action,
+                  payload: payload,
+                  reason: reason,
+                  onDismiss: () => Navigator.of(context).pop(),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
-class _SignInSheetState extends State<SignInSheet> {
+/// The actual sign-in pitch — heading, an optional action-specific reason
+/// line, 3 fixed benefit bullets (what an account in THIS app actually
+/// does, not generic marketing claims), an error slot, and the one real
+/// supported auth method (Google — see AuthProvider; there's no Apple or
+/// email/password sign-in wired up, so no buttons for those are shown).
+/// Pure content, no outer chrome — [SignInSheet] wraps it for the bottom-
+/// sheet case, ProfilePanel wraps it for the right-side panel case. Both
+/// mount this exact widget, not a copy.
+class SignInPromptContent extends StatefulWidget {
+  const SignInPromptContent({
+    super.key,
+    required this.action,
+    this.payload = const {},
+    this.reason,
+    required this.onDismiss,
+  });
+
+  /// See [PendingAction] — identifies which write to resume post-sign-in.
+  final String action;
+  final Map<String, dynamic> payload;
+
+  /// A one-line reason specific to whatever gated action triggered this
+  /// prompt (e.g. "Sign in to save this gem..."). Null when there's no
+  /// specific action — e.g. opening this straight from the profile icon —
+  /// in which case only the heading + the 3 generic bullets show.
+  final String? reason;
+
+  /// Called on "Not now" — the caller decides how to actually close
+  /// (Navigator.pop for a sheet, a panel's own close method otherwise).
+  final VoidCallback onDismiss;
+
+  @override
+  State<SignInPromptContent> createState() => _SignInPromptContentState();
+}
+
+class _SignInPromptContentState extends State<SignInPromptContent> {
   bool _loading = false;
   String? _error;
+
+  static const _benefits = [
+    'Save gems and find them again anytime',
+    'Your trips sync across every device',
+    'Pick up right where you left off',
+  ];
 
   Future<void> _continueWithGoogle() async {
     setState(() {
@@ -105,80 +192,66 @@ class _SignInSheetState extends State<SignInSheet> {
 
   @override
   Widget build(BuildContext context) {
-    return SafeArea(
-      top: false,
-      child: Padding(
-        padding: EdgeInsets.only(
-          left: 20,
-          right: 20,
-          top: 20,
-          bottom: 20 + MediaQuery.of(context).viewInsets.bottom,
-        ),
-        child: Material(
-          color: AppTheme.lightSurface,
-          borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
-          child: Padding(
-            padding: const EdgeInsets.all(20),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text('Sign in to continue',
+            textAlign: TextAlign.center,
+            style: GoogleFonts.bebasNeue(fontSize: 24, color: AppTheme.lightInk)),
+        if (widget.reason != null) ...[
+          const SizedBox(height: 8),
+          Text(
+            widget.reason!,
+            textAlign: TextAlign.center,
+            style: GoogleFonts.fredoka(
+                fontSize: 13, color: AppTheme.lightMute, height: 1.4),
+          ),
+        ],
+        const SizedBox(height: 18),
+        for (final b in _benefits)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 4),
+            child: Row(
               children: [
-                Center(
-                  child: Container(
-                    width: 36,
-                    height: 4,
-                    margin: const EdgeInsets.only(bottom: 16),
-                    decoration: BoxDecoration(
-                      color: AppTheme.lightBorder,
-                      borderRadius: BorderRadius.circular(2),
-                    ),
-                  ),
-                ),
-                Text('Sign in to continue',
-                    textAlign: TextAlign.center,
-                    style: GoogleFonts.bebasNeue(
-                        fontSize: 24, color: AppTheme.lightInk)),
-                const SizedBox(height: 8),
-                Text(
-                  widget.reason,
-                  textAlign: TextAlign.center,
-                  style: GoogleFonts.fredoka(
-                      fontSize: 13, color: AppTheme.lightMute, height: 1.4),
-                ),
-                const SizedBox(height: 20),
-                if (_error != null) ...[
-                  Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: Colors.red.withValues(alpha: 0.08),
-                      borderRadius: BorderRadius.circular(10),
-                      border:
-                          Border.all(color: Colors.red.withValues(alpha: 0.25)),
-                    ),
-                    child: Text(_error!,
-                        style:
-                            GoogleFonts.fredoka(color: Colors.red, fontSize: 12)),
-                  ),
-                  const SizedBox(height: 12),
-                ],
-                OAuthButton(
-                  label: 'Continue with Google',
-                  icon: googleIcon,
-                  loading: _loading,
-                  onTap: _continueWithGoogle,
-                ),
-                const SizedBox(height: 8),
-                TextButton(
-                  onPressed: _loading ? null : () => Navigator.of(context).pop(),
-                  child: Text('Not now',
+                const Icon(Icons.check_circle,
+                    size: 16, color: AppTheme.primary),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(b,
                       style: GoogleFonts.fredoka(
-                          fontSize: 13, color: AppTheme.lightMute)),
+                          fontSize: 13, color: AppTheme.lightInk)),
                 ),
               ],
             ),
           ),
+        const SizedBox(height: 16),
+        if (_error != null) ...[
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Colors.red.withValues(alpha: 0.08),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: Colors.red.withValues(alpha: 0.25)),
+            ),
+            child: Text(_error!,
+                style: GoogleFonts.fredoka(color: Colors.red, fontSize: 12)),
+          ),
+          const SizedBox(height: 12),
+        ],
+        OAuthButton(
+          label: 'Continue with Google',
+          icon: googleIcon,
+          loading: _loading,
+          onTap: _continueWithGoogle,
         ),
-      ),
+        const SizedBox(height: 8),
+        TextButton(
+          onPressed: _loading ? null : widget.onDismiss,
+          child: Text('Not now',
+              style: GoogleFonts.fredoka(fontSize: 13, color: AppTheme.lightMute)),
+        ),
+      ],
     );
   }
 }

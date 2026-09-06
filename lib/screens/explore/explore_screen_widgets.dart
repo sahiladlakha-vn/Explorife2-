@@ -333,7 +333,9 @@ class _BottomSheetState extends State<_BottomSheet> {
                     },
                     onToggleSave: () async {
                       if (!await requireAccount(context,
-                          action: 'save_gem', payload: {'gemId': gem.id})) {
+                          action: 'save_gem',
+                          payload: {'gemId': gem.id},
+                          reason: 'Sign in to save this gem and find it again anytime.')) {
                         return;
                       }
                       if (context.mounted) {
@@ -743,7 +745,9 @@ class _GemDeck extends StatelessWidget {
               onTap: () => onCardTap(gem),
               onToggleSave: () async {
                 if (!await requireAccount(context,
-                    action: 'save_gem', payload: {'gemId': gem.id})) {
+                    action: 'save_gem',
+                    payload: {'gemId': gem.id},
+                    reason: 'Sign in to save this gem and find it again anytime.')) {
                   return;
                 }
                 if (context.mounted) {
