@@ -6,7 +6,6 @@ import 'package:provider/provider.dart';
 import '../../core/constants/curated_collections.dart';
 import '../../core/constants/gem_categories.dart';
 import '../../core/layout/breakpoints.dart';
-import '../../core/layout/max_width_center.dart';
 import '../../core/services/geocoding_service.dart';
 import '../../core/theme/app_theme.dart';
 import '../../providers/gem_provider.dart';
@@ -50,10 +49,19 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final tier = Breakpoints.tierOf(context);
+    // MaxWidthCenter's own cap (900/640) is tuned for the narrow single-
+    // column screens that already use it (Profile tabs, etc.) — Home's
+    // grids need a much wider cap that also kicks in earlier, at the new
+    // tablet tier (768), so this computes its own constraint instead of
+    // reusing that shared helper.
+    final maxContentWidth = tier == ScreenTier.phone ? double.infinity : 1280.0;
     return Scaffold(
       backgroundColor: AppTheme.lightSurface,
-      body: MaxWidthCenter(
-        child: RefreshIndicator(
+      body: Center(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxWidth: maxContentWidth),
+          child: RefreshIndicator(
           color: AppTheme.primary,
           backgroundColor: AppTheme.lightCard,
           onRefresh: () => context.read<GemProvider>().refresh(),
@@ -61,11 +69,35 @@ class _HomeScreenState extends State<HomeScreen> {
             // alwaysScrollable so pull-to-refresh works even when content is short
             physics: const AlwaysScrollableScrollPhysics(),
             slivers: [
-              // ── HERO ──
-              SliverToBoxAdapter(child: _Hero()),
-
-              // ── STATS BAR ──
-              SliverToBoxAdapter(child: _StatsBar()),
+              // ── HERO + STATS ──
+              // Tablet/desktop overlap the stats bar slightly over the
+              // hero's bottom edge per the desktop-layout spec — a Stack
+              // with the bar Positioned a bit above Hero's own bottom edge,
+              // not just stacked flush. _Hero has a fixed 520 height; the
+              // trailing SizedBox below approximates how far the bar's own
+              // height hangs past that edge so the next section doesn't
+              // render underneath it. Phone keeps the original flush stack.
+              SliverToBoxAdapter(
+                child: tier == ScreenTier.phone
+                    ? Column(children: [_Hero(), _StatsBar()])
+                    : Column(
+                        children: [
+                          Stack(
+                            clipBehavior: Clip.none,
+                            children: [
+                              _Hero(),
+                              Positioned(
+                                top: 520 - 24,
+                                left: 20,
+                                right: 20,
+                                child: _StatsBar(),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 36),
+                        ],
+                      ),
+              ),
 
               // ── SEARCH + FILTERS (always visible chrome) ──
               SliverPadding(
@@ -110,14 +142,17 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ),
               SliverToBoxAdapter(
-                child: SizedBox(
-                  height: 290,
-                  child: ListView.builder(
-                    scrollDirection: Axis.horizontal,
-                    padding: const EdgeInsets.symmetric(horizontal: 20),
-                    itemCount: CuratedCollections.all.length,
-                    itemBuilder: (ctx, i) =>
-                        _CollectionCard(collection: CuratedCollections.all[i]),
+                child: _RailOrGrid(
+                  tier: tier,
+                  itemCount: CuratedCollections.all.length,
+                  tabletColumns: 2,
+                  desktopColumns: 3,
+                  childAspectRatio: 0.78,
+                  itemBuilder: (ctx, i) => _CollectionCard(
+                    collection: CuratedCollections.all[i],
+                    margin: tier == ScreenTier.phone
+                        ? const EdgeInsets.only(right: 14)
+                        : EdgeInsets.zero,
                   ),
                 ),
               ),
@@ -147,18 +182,19 @@ class _HomeScreenState extends State<HomeScreen> {
                         else if (featuredGems.isEmpty)
                           const EmptyStateView(text: 'No featured gems yet.')
                         else
-                          SizedBox(
-                            height: 290,
-                            child: ListView.builder(
-                              scrollDirection: Axis.horizontal,
-                              padding:
-                                  const EdgeInsets.symmetric(horizontal: 20),
-                              itemCount: featuredGems.length,
-                              itemBuilder: (ctx, i) => _FeaturedGemCard(
-                                gem: featuredGems[i],
-                                isTrending: gem.isTrending(featuredGems[i]),
-                                onSave: () => _comingSoonSave(ctx),
-                              ),
+                          _RailOrGrid(
+                            tier: tier,
+                            itemCount: featuredGems.length,
+                            tabletColumns: 3,
+                            desktopColumns: 4,
+                            childAspectRatio: 0.78,
+                            itemBuilder: (ctx, i) => _FeaturedGemCard(
+                              gem: featuredGems[i],
+                              isTrending: gem.isTrending(featuredGems[i]),
+                              onSave: () => _comingSoonSave(ctx),
+                              margin: tier == ScreenTier.phone
+                                  ? const EdgeInsets.only(right: 14)
+                                  : EdgeInsets.zero,
                             ),
                           ),
                       ],
@@ -199,15 +235,17 @@ class _HomeScreenState extends State<HomeScreen> {
                         else if (tours.isEmpty)
                           const EmptyStateView(text: 'No tours available yet.')
                         else
-                          SizedBox(
-                            height: 290,
-                            child: ListView.builder(
-                              scrollDirection: Axis.horizontal,
-                              padding:
-                                  const EdgeInsets.symmetric(horizontal: 20),
-                              itemCount: tours.length,
-                              itemBuilder: (ctx, i) =>
-                                  _TourRailCard(tour: tours[i]),
+                          _RailOrGrid(
+                            tier: tier,
+                            itemCount: tours.length,
+                            tabletColumns: 2,
+                            desktopColumns: 3,
+                            childAspectRatio: 0.78,
+                            itemBuilder: (ctx, i) => _TourRailCard(
+                              tour: tours[i],
+                              margin: tier == ScreenTier.phone
+                                  ? const EdgeInsets.only(right: 14)
+                                  : EdgeInsets.zero,
                             ),
                           ),
                       ],
@@ -234,7 +272,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     const SizedBox(height: 12),
 
                     // Real, distance-sorted gems (best-effort location, own states)
-                    const _NearbyGems(),
+                    _NearbyGems(tier: tier),
 
                     const SizedBox(height: 20),
 
@@ -248,6 +286,7 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ),
       ),
+      ),
     );
   }
 }
@@ -258,6 +297,12 @@ class _HomeScreenState extends State<HomeScreen> {
 class _Hero extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
+    // Tablet/desktop already get logo + hamburger + search + avatar from
+    // AppShell's sticky top bar (see _TopBar in app_shell.dart) — repeating
+    // that whole row here too would be the exact "two menu/nav headers on
+    // screen at once" duplication this rebuild was asked to avoid, so phone
+    // is the only tier that renders its own top nav row inside the hero.
+    final isPhone = Breakpoints.tierOf(context) == ScreenTier.phone;
     return SizedBox(
       height: 520,
       child: Stack(
@@ -304,71 +349,76 @@ class _Hero extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Top nav
-                  Row(
-                    children: [
-                      Text(
-                        'Explor',
-                        style: GoogleFonts.audiowide(
-                          fontSize: 20,
-                          color: Colors.white,
-                          letterSpacing: 1,
+                  if (isPhone)
+                    Row(
+                      children: [
+                        Text(
+                          'Explor',
+                          style: GoogleFonts.audiowide(
+                            fontSize: 20,
+                            color: Colors.white,
+                            letterSpacing: 1,
+                          ),
                         ),
-                      ),
-                      Text(
-                        'ife',
-                        style: GoogleFonts.audiowide(
-                          fontSize: 20,
-                          color: AppTheme.primary,
-                          letterSpacing: 1,
+                        Text(
+                          'ife',
+                          style: GoogleFonts.audiowide(
+                            fontSize: 20,
+                            color: AppTheme.primary,
+                            letterSpacing: 1,
+                          ),
                         ),
-                      ),
-                      const Spacer(),
-                      // Desktop-only: RefreshIndicator's pull gesture isn't
-                      // discoverable with a mouse + scrollwheel the way it is
-                      // on touch, so this gives desktop an explicit way to
-                      // trigger the exact same GemProvider.refresh() call.
-                      if (Breakpoints.isDesktop(context)) ...[
+                        const Spacer(),
                         _CircleIconBtn(
-                          icon: Icons.refresh,
-                          semanticLabel: 'Refresh',
-                          onTap: () => context.read<GemProvider>().refresh(),
+                          icon: Icons.notifications_outlined,
+                          semanticLabel: 'Notifications',
+                          onTap: () =>
+                              ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                                content: Text('No new notifications')),
+                          ),
                         ),
                         const SizedBox(width: 10),
-                      ],
-                      _CircleIconBtn(
-                        icon: Icons.notifications_outlined,
-                        semanticLabel: 'Notifications',
-                        onTap: () => ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('No new notifications')),
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      Semantics(
-                        button: true,
-                        label: 'Your profile',
-                        child: GestureDetector(
-                          onTap: () => context.go('/profile'),
-                          child: Container(
-                            width: 44,
-                            height: 44,
-                            decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              border: Border.all(
-                                  color: Colors.white.withValues(alpha: 0.25),
-                                  width: 1.5),
-                            ),
-                            child: const ClipOval(
-                              child: AppNetworkImage(
-                                url: 'https://picsum.photos/seed/user1/80/80',
-                                fit: BoxFit.cover,
+                        Semantics(
+                          button: true,
+                          label: 'Your profile',
+                          child: GestureDetector(
+                            onTap: () => context.go('/profile'),
+                            child: Container(
+                              width: 44,
+                              height: 44,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                border: Border.all(
+                                    color: Colors.white.withValues(alpha: 0.25),
+                                    width: 1.5),
+                              ),
+                              child: const ClipOval(
+                                child: AppNetworkImage(
+                                  url: 'https://picsum.photos/seed/user1/80/80',
+                                  fit: BoxFit.cover,
+                                ),
                               ),
                             ),
                           ),
                         ),
+                      ],
+                    )
+                  else
+                    // Tablet/desktop: RefreshIndicator's pull gesture isn't
+                    // discoverable with a mouse + scrollwheel the way it is
+                    // on touch, so this gives them an explicit way to
+                    // trigger the exact same GemProvider.refresh() call —
+                    // the one piece of the old top row worth keeping once
+                    // the rest moved to AppShell's top bar.
+                    Align(
+                      alignment: Alignment.topRight,
+                      child: _CircleIconBtn(
+                        icon: Icons.refresh,
+                        semanticLabel: 'Refresh',
+                        onTap: () => context.read<GemProvider>().refresh(),
                       ),
-                    ],
-                  ),
+                    ),
 
                   const Spacer(),
 
@@ -398,20 +448,26 @@ class _Hero extends StatelessWidget {
                         height: 1.5),
                   ),
                   const SizedBox(height: 20),
-                  // Start Exploring (DestinationBrowserSheet) retired in
-                  // favor of the "EXPLORE IDEAS" rail below — see build()'s
-                  // curated-collections section. That rail feeds the same
-                  // Search Results / Destination Detail surface the search
-                  // bar above already opens, instead of a separate modal.
-                  Row(
-                    children: [
-                      _GhostIconBtn(
-                        icon: Icons.explore_outlined,
-                        semanticLabel: 'Open map',
-                        onTap: () => context.go('/explore'),
-                      ),
-                    ],
-                  ),
+                  // The old standalone "Start Exploring" modal
+                  // (DestinationBrowserSheet) was retired in favor of the
+                  // "EXPLORE IDEAS" rail below — see build()'s curated-
+                  // collections section; that rail (and this CTA) both feed
+                  // the same Search Results / Destination Detail surface,
+                  // not a separate flow. Phone keeps the compact icon-only
+                  // ghost button; tablet/desktop show it as a labeled pill
+                  // per the desktop-layout spec.
+                  if (isPhone)
+                    Row(
+                      children: [
+                        _GhostIconBtn(
+                          icon: Icons.explore_outlined,
+                          semanticLabel: 'Open map',
+                          onTap: () => context.go('/explore'),
+                        ),
+                      ],
+                    )
+                  else
+                    _StartExploringPill(onTap: () => context.go('/explore')),
                 ],
               ),
             ),
@@ -507,6 +563,47 @@ class _GhostIconBtn extends StatelessWidget {
             border: Border.all(color: Colors.white.withValues(alpha: 0.2)),
           ),
           child: Icon(icon, color: Colors.white, size: 20),
+        ),
+      ),
+    );
+  }
+}
+
+/// Tablet/desktop's labeled version of the hero CTA — same destination
+/// (`/explore`) as phone's icon-only [_GhostIconBtn], just a real "Start
+/// Exploring" pill per the desktop-layout spec instead of a bare icon,
+/// since there's room for the label at these widths.
+class _StartExploringPill extends StatelessWidget {
+  const _StartExploringPill({required this.onTap});
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      button: true,
+      label: 'Start exploring',
+      child: Material(
+        color: AppTheme.primary,
+        borderRadius: BorderRadius.circular(27),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(27),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 14),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.explore_outlined,
+                    color: Colors.white, size: 18),
+                const SizedBox(width: 8),
+                Text('Start Exploring',
+                    style: GoogleFonts.fredoka(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                        color: Colors.white)),
+              ],
+            ),
+          ),
         ),
       ),
     );
@@ -693,6 +790,75 @@ class _CategoryPills extends StatelessWidget {
 // ─────────────────────────────────────────
 // SECTION HEADING
 // ─────────────────────────────────────────
+/// Phone-width horizontal rail vs. tablet/desktop grid — the one switch
+/// every "row of cards" section on Home shares, so each section states its
+/// column counts once rather than re-deriving the tier branch itself. Card
+/// builders are responsible for zeroing their own rail-gutter margin when
+/// [tier] isn't phone (see PhotoInfoCard.margin) — GridView's own
+/// crossAxisSpacing/mainAxisSpacing already provides gutters.
+class _RailOrGrid extends StatelessWidget {
+  const _RailOrGrid({
+    required this.tier,
+    required this.itemCount,
+    required this.itemBuilder,
+    required this.tabletColumns,
+    required this.desktopColumns,
+    this.childAspectRatio,
+    this.mainAxisExtent,
+  }) : assert((childAspectRatio == null) != (mainAxisExtent == null),
+            'pass exactly one of childAspectRatio or mainAxisExtent');
+
+  final ScreenTier tier;
+  final int itemCount;
+  final IndexedWidgetBuilder itemBuilder;
+  final int tabletColumns;
+  final int desktopColumns;
+
+  /// Matches every current rail's own fixed height (Explore Ideas/Featured/
+  /// Tours all used 290 before this helper existed).
+  static const double _railHeight = 290;
+
+  /// For photo-card sections (Explore Ideas/Featured/Tours) — a fixed
+  /// width:height shape regardless of the column's actual pixel width.
+  final double? childAspectRatio;
+
+  /// For row-shaped cards (Gems Near You) whose height doesn't scale with
+  /// column width the way a portrait photo card's does.
+  final double? mainAxisExtent;
+
+  @override
+  Widget build(BuildContext context) {
+    if (tier == ScreenTier.phone) {
+      return SizedBox(
+        height: _railHeight,
+        child: ListView.builder(
+          scrollDirection: Axis.horizontal,
+          padding: const EdgeInsets.symmetric(horizontal: 20),
+          itemCount: itemCount,
+          itemBuilder: itemBuilder,
+        ),
+      );
+    }
+    final cols = tier == ScreenTier.desktop ? desktopColumns : tabletColumns;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 20),
+      child: GridView.builder(
+        shrinkWrap: true,
+        physics: const NeverScrollableScrollPhysics(),
+        itemCount: itemCount,
+        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+          crossAxisCount: cols,
+          crossAxisSpacing: 16,
+          mainAxisSpacing: 16,
+          childAspectRatio: childAspectRatio ?? 1,
+          mainAxisExtent: mainAxisExtent,
+        ),
+        itemBuilder: itemBuilder,
+      ),
+    );
+  }
+}
+
 class _SectionHead extends StatelessWidget {
   final String title;
   final VoidCallback? onSeeAll;
@@ -734,8 +900,12 @@ class _FeaturedGemCard extends StatelessWidget {
   final Gem gem;
   final bool isTrending;
   final VoidCallback? onSave;
+  final EdgeInsets margin;
   const _FeaturedGemCard(
-      {required this.gem, required this.isTrending, this.onSave});
+      {required this.gem,
+      required this.isTrending,
+      this.onSave,
+      this.margin = const EdgeInsets.only(right: 14)});
 
   // Difficulty → colour + label, matched case-insensitively because stored
   // casing isn't guaranteed (e.g. 'Hard' vs 'hard'). Null when unset.
@@ -765,6 +935,7 @@ class _FeaturedGemCard extends StatelessWidget {
       imageUrl: gem.photoUrl ?? '',
       onTap: () => context.push('/gems/${gem.id}'),
       semanticLabel: hasLoc ? '${gem.gemName}, $loc' : gem.gemName,
+      margin: margin,
       topLeft: isTrending
           ? Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -892,9 +1063,12 @@ class _FeaturedGemCard extends StatelessWidget {
 /// straight into the same Search Results / Destination Detail screens Phase
 /// 1 built; this card runs no query/retrieval logic of its own.
 class _CollectionCard extends StatelessWidget {
-  const _CollectionCard({required this.collection});
+  const _CollectionCard(
+      {required this.collection,
+      this.margin = const EdgeInsets.only(right: 14)});
 
   final CuratedCollection collection;
+  final EdgeInsets margin;
 
   /// Destination scope: resolves the city's real coordinates (same
   /// GeocodingService call every other city-tap flow in this app makes) and
@@ -927,6 +1101,7 @@ class _CollectionCard extends StatelessWidget {
       imageUrl: collection.coverImageUrl,
       onTap: () => _open(context),
       semanticLabel: collection.title,
+      margin: margin,
       bottom: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -958,9 +1133,11 @@ class _CollectionCard extends StatelessWidget {
 /// screen — no separate query, just a different display shell for the
 /// same underlying tours.
 class _TourRailCard extends StatelessWidget {
-  const _TourRailCard({required this.tour});
+  const _TourRailCard(
+      {required this.tour, this.margin = const EdgeInsets.only(right: 14)});
 
   final Tour tour;
+  final EdgeInsets margin;
 
   @override
   Widget build(BuildContext context) {
@@ -968,6 +1145,7 @@ class _TourRailCard extends StatelessWidget {
       imageUrl: tour.coverPhoto ?? '',
       onTap: () => context.push('/tours/${tour.id}'),
       semanticLabel: tour.name,
+      margin: margin,
       // Never automatic — see Tour.isCurated's own doc comment for why
       // this is the ONLY thing that ever shows this badge.
       topLeft: tour.isCurated
@@ -1119,7 +1297,9 @@ class _CommunityRow extends StatelessWidget {
 // GEMS NEAR YOU  (real, distance-sorted gems via GemProvider)
 // ─────────────────────────────────────────
 class _NearbyGems extends StatefulWidget {
-  const _NearbyGems();
+  const _NearbyGems({required this.tier});
+
+  final ScreenTier tier;
 
   @override
   State<_NearbyGems> createState() => _NearbyGemsState();
@@ -1169,17 +1349,39 @@ class _NearbyGemsState extends State<_NearbyGems> {
     if (gem.error != null) {
       return ErrorStateView(onRetry: gem.refresh, message: gem.error);
     }
-    final list = gem.nearbyGems(_lat, _lng).take(3).toList();
+    // Phone shows exactly 3 stacked rows (unchanged). Tablet/desktop's grid
+    // has 2 columns, so 4 fills it evenly (2 rows of 2) instead of leaving
+    // an awkward single trailing card on its own row.
+    final count = widget.tier == ScreenTier.phone ? 3 : 4;
+    final list = gem.nearbyGems(_lat, _lng).take(count).toList();
     if (list.isEmpty) {
       return const EmptyStateView(text: 'No gems nearby yet.');
     }
-    return Column(
-      children: list
-          .map((g) => _GemTrailRow(
-                gem: g,
-                distanceKm: gem.distanceKmFrom(_lat, _lng, g),
-              ))
-          .toList(),
+    if (widget.tier == ScreenTier.phone) {
+      return Column(
+        children: list
+            .map((g) => _GemTrailRow(
+                  gem: g,
+                  distanceKm: gem.distanceKmFrom(_lat, _lng, g),
+                ))
+            .toList(),
+      );
+    }
+    return GridView.builder(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      itemCount: list.length,
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 2,
+        crossAxisSpacing: 16,
+        mainAxisSpacing: 16,
+        mainAxisExtent: 100,
+      ),
+      itemBuilder: (ctx, i) => _GemTrailRow(
+        gem: list[i],
+        distanceKm: gem.distanceKmFrom(_lat, _lng, list[i]),
+        margin: EdgeInsets.zero,
+      ),
     );
   }
 }
@@ -1187,7 +1389,11 @@ class _NearbyGemsState extends State<_NearbyGems> {
 class _GemTrailRow extends StatelessWidget {
   final Gem gem;
   final double? distanceKm;
-  const _GemTrailRow({required this.gem, this.distanceKm});
+  final EdgeInsets margin;
+  const _GemTrailRow(
+      {required this.gem,
+      this.distanceKm,
+      this.margin = const EdgeInsets.only(bottom: 10)});
 
   /// Difficulty pill colour + label by level; null hides the pill entirely.
   ({Color color, String label})? get _difficulty {
@@ -1216,7 +1422,7 @@ class _GemTrailRow extends StatelessWidget {
       child: GestureDetector(
         onTap: () => context.push('/gems/${gem.id}'),
         child: Container(
-          margin: const EdgeInsets.only(bottom: 10),
+          margin: margin,
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
             color: AppTheme.lightCard,
