@@ -1,12 +1,9 @@
 import 'package:flutter/material.dart';
-import 'package:geolocator/geolocator.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/constants/curated_destinations.dart';
 import '../../core/services/geocoding_service.dart';
-import '../../core/services/mapbox_tilequery_service.dart';
-import '../../core/services/poi_category_filter.dart';
 import '../../providers/gem_provider.dart';
 import '../../providers/tour_provider.dart';
 import '../../models/gem.dart';
@@ -14,23 +11,6 @@ import '../../models/tour.dart';
 import '../../widgets/app_network_image.dart';
 import '../../widgets/gems/category_chip_row.dart';
 import '../../widgets/state_views.dart';
-
-/// One card in the merged browse/results grid — either a real, app-curated
-/// [Gem] or a generic real place from [MapboxTilequeryService]. Kept as a
-/// thin either/or wrapper rather than forcing both into one shape, so each
-/// renders with its own card ([GemResultCard] vs [PoiResultCard]) and the
-/// "GEM" badge stays an honest, visible distinction rather than a guess from
-/// shared fields.
-class _BrowseItem {
-  final Gem? gem;
-  final NearbyPoi? poi;
-  const _BrowseItem.gem(Gem g)
-      : gem = g,
-        poi = null;
-  const _BrowseItem.poi(NearbyPoi p)
-      : gem = null,
-        poi = p;
-}
 
 /// One match in the Destinations tab — a curated city (see
 /// curated_destinations.dart) whose name contains the current search query.
@@ -77,17 +57,17 @@ class _DestinationMatch {
 /// flow in this app shares) and lands on the same `/destinations/explore`
 /// destination detail screen either entry point uses.
 ///
-/// The "All Gems" grid (Browse, and Results when category = 'all') merges in
-/// real nearby places from [MapboxTilequeryService] alongside this app's own
-/// curated [Gem]s — added because the gems table can be sparse or briefly
-/// empty (e.g. right after a data cleanup) and this screen shouldn't go
-/// blank just because there's nothing curated yet. Gems render with a "GEM"
-/// badge ([GemResultCard]); Mapbox places don't ([PoiResultCard], no bookmark button
-/// either — saving one would mean creating a real gem from it, which isn't
-/// wired up). Picking a specific category narrows to gems only: Mapbox's POI
-/// categories don't map onto this app's fixed 8-category taxonomy, so
-/// merging them into a category-filtered view would be a false match, not a
-/// real one.
+/// The "All Gems" grid (Browse, and Results) is `source = 'sheet_sync'`
+/// [Gem]s only — no Mapbox Tilequery fill-in. This screen used to merge in
+/// nearby real-world places once the gems table ran thin, rendered with a
+/// plain (non-"GEM") badge to stay honest about the distinction. That's
+/// been removed, not just filtered further, for the same reason
+/// destination_landing_screen.dart's scoped feed dropped it: Tilequery kept
+/// surfacing raw, unedited map data (a place literally named "Cafe", a
+/// mausoleum labeled "Memorial") outside this app's enforced taxonomy. A
+/// sparse category now shows [EmptyStateView] ("No places match that
+/// yet."), not a fallback list of real places, even when Mapbox has
+/// results nearby.
 class ListingsScreen extends StatefulWidget {
   const ListingsScreen(
       {super.key, this.autofocusSearch = false, this.initialCategory});
@@ -109,7 +89,6 @@ class ListingsScreen extends StatefulWidget {
 class _ListingsScreenState extends State<ListingsScreen> {
   final TextEditingController _controller = TextEditingController();
   final FocusNode _focusNode = FocusNode();
-  final MapboxTilequeryService _tilequery = MapboxTilequeryService();
 
   // Screen-local search/category state. Deliberately NOT in GemProvider:
   // routing either through the provider would also filter the Map and Home,
@@ -131,20 +110,6 @@ class _ListingsScreenState extends State<ListingsScreen> {
   // (home_screen.dart) uses for the same reason.
   bool _resolvingDestination = false;
 
-  // Fetched once per screen visit (not re-fetched per keystroke/category
-  // tap — see _matchingNearby, which filters this cached list locally
-  // instead of re-querying Mapbox). Starts loading so the grid can tell
-  // "nothing nearby" apart from "still finding out" — see _ItemGridSliver.
-  List<NearbyPoi> _nearby = [];
-  bool _nearbyLoading = true;
-
-  // Ho Chi Minh City centre — used only if location permission is denied or
-  // resolving it fails, so the nearby-places section still has *something*
-  // to query around rather than silently staying empty. Matches this app's
-  // Vietnam focus (same fallback city other screens implicitly center on).
-  static const double _fallbackLat = 10.7769;
-  static const double _fallbackLng = 106.7009;
-
   @override
   void initState() {
     super.initState();
@@ -152,7 +117,6 @@ class _ListingsScreenState extends State<ListingsScreen> {
     // _focusNode.hasFocus at build time) actually reacts to the field being
     // tapped into or away from.
     _focusNode.addListener(() => setState(() {}));
-    _loadNearby();
   }
 
   @override
@@ -160,57 +124,6 @@ class _ListingsScreenState extends State<ListingsScreen> {
     _controller.dispose();
     _focusNode.dispose();
     super.dispose();
-  }
-
-  // Same permission-check/request/fallback shape used elsewhere in the app
-  // (e.g. ExploreScreen._locateMe, HomeScreen's _NearbyGems) — there's no
-  // shared helper for it yet (a known, separately-tracked gap), so this
-  // repeats the pattern rather than half-wiring a new one here.
-  Future<void> _loadNearby() async {
-    double lat = _fallbackLat, lng = _fallbackLng;
-    try {
-      var perm = await Geolocator.checkPermission();
-      if (perm == LocationPermission.denied) {
-        perm = await Geolocator.requestPermission();
-      }
-      if (perm != LocationPermission.denied &&
-          perm != LocationPermission.deniedForever) {
-        final pos = await Geolocator.getCurrentPosition();
-        lat = pos.latitude;
-        lng = pos.longitude;
-      }
-    } catch (_) {
-      // Keep the Ho Chi Minh City fallback — a denied/unavailable location
-      // shouldn't leave this section empty, just less personalized.
-    }
-    final pois =
-        await _tilequery.nearby(lat, lng, radiusMeters: 2000, limit: 50);
-    // Same allowlist Destination Detail's scoped feed uses — this grid
-    // presents POIs alongside real Gems, so government offices, parking,
-    // and other non-travel-relevant Tilequery noise don't belong here
-    // either. See poi_category_filter.dart.
-    //
-    // limit: 50 (Tilequery's actual max) rather than the smaller limit
-    // this screen used pre-filtering — same reasoning as
-    // destination_landing_screen.dart: a small nearest-first raw sample can
-    // filter down to almost nothing in an office-dense area.
-    final relevant = filterTravelRelevantPois(pois);
-    if (mounted)
-      setState(() {
-        _nearby = relevant;
-        _nearbyLoading = false;
-      });
-  }
-
-  /// [_nearby], filtered to whatever's currently active — substring match
-  /// against [_query] (case-insensitive, matching gemMatchesSearch's own
-  /// convention elsewhere), or the full cached list when there's no query.
-  /// Never re-hits Mapbox: this is exactly why [_nearby] is fetched once and
-  /// cached rather than re-queried per keystroke/category tap.
-  List<NearbyPoi> get _matchingNearby {
-    if (_query.trim().isEmpty) return _nearby;
-    final q = _query.trim().toLowerCase();
-    return _nearby.where((p) => p.name.toLowerCase().contains(q)).toList();
   }
 
   void _setQuery(String value) => setState(() {
@@ -251,7 +164,7 @@ class _ListingsScreenState extends State<ListingsScreen> {
   }
 
   /// [tours] narrowed to [query] — substring, case-insensitive, matching
-  /// [_matchingDestinations]/[_matchingNearby]'s own convention. Tour has no
+  /// [_matchingDestinations]'s own convention. Tour has no
   /// city/location field to also match against (see lib/models/tour.dart —
   /// deliberately no structured location, same reasoning as its other
   /// free-text-only fields), so this only ever matches on name.
@@ -357,18 +270,7 @@ class _ListingsScreenState extends State<ListingsScreen> {
     final featured =
         gem.featured; // GLOBAL trending — independent of any filter
 
-    // Merged grid contents: this app's own gems (real filter) plus cached
-    // nearby Mapbox places (local substring match only — see _matchingNearby)
-    // — but only in the unfiltered 'All' category view; see the class doc
-    // comment for why a specific category drops the Mapbox side entirely.
-    final gemResults = gem.search(query: _query, category: _selectedCat);
-    final includeNearby = _selectedCat == 'all';
-    final nearbyMatches = includeNearby ? _matchingNearby : const <NearbyPoi>[];
-    final items = <_BrowseItem>[
-      for (final g in gemResults) _BrowseItem.gem(g),
-      for (final p in nearbyMatches) _BrowseItem.poi(p),
-    ];
-    final nearbyStillLoading = includeNearby && _nearbyLoading;
+    final items = gem.search(query: _query, category: _selectedCat);
 
     // Destinations/Gems/Tours tab split — only meaningful once there's a
     // query to match a place/tour name against; a bare category filter
@@ -384,15 +286,13 @@ class _ListingsScreenState extends State<ListingsScreen> {
         : const <Tour>[];
     var effectiveTab = _resultTab;
     if (showDestTabs) {
-      final gemsEmpty = items.isEmpty && !nearbyStillLoading;
+      final gemsEmpty = items.isEmpty;
       final destEmpty = destMatches.isEmpty;
       final toursEmpty = tourMatches.isEmpty;
       // The active tab having nothing to show, while another one does,
-      // shows a populated tab instead of a dead-empty screen — but never
-      // flips away from Gems while nearby POIs are still loading, or it'd
-      // flash to another tab and flip straight back once they land. Falls
-      // through Destinations -> Tours (or Tours -> Destinations) in that
-      // order only as a second choice, matching _defaultTabFor's own
+      // shows a populated tab instead of a dead-empty screen. Falls through
+      // Destinations -> Tours (or Tours -> Destinations) in that order only
+      // as a second choice, matching _defaultTabFor's own
       // Destinations-before-Tours priority.
       if (effectiveTab == 1 && gemsEmpty) {
         if (!destEmpty) {
@@ -521,7 +421,6 @@ class _ListingsScreenState extends State<ListingsScreen> {
                 _ResultsSlivers(
                   gem: gem,
                   items: items,
-                  nearbyLoading: nearbyStillLoading,
                   onSave: _comingSoonSave,
                 )
               else
@@ -529,7 +428,6 @@ class _ListingsScreenState extends State<ListingsScreen> {
                   gem: gem,
                   featured: featured,
                   items: items,
-                  nearbyLoading: nearbyStillLoading,
                   onSave: _comingSoonSave,
                 ),
               const SliverPadding(padding: EdgeInsets.only(bottom: 24)),
@@ -608,21 +506,18 @@ class _SuggestionsSlivers extends StatelessWidget {
   }
 }
 
-/// Browse state (default landing view): Featured Gems rail + All Gems grid —
-/// unchanged from what this screen always showed before the merge.
+/// Browse state (default landing view): Featured Gems rail + All Gems grid.
 class _BrowseSlivers extends StatelessWidget {
   const _BrowseSlivers({
     required this.gem,
     required this.featured,
     required this.items,
-    required this.nearbyLoading,
     required this.onSave,
   });
 
   final GemProvider gem;
   final List<Gem> featured;
-  final List<_BrowseItem> items;
-  final bool nearbyLoading;
+  final List<Gem> items;
   final void Function(BuildContext context) onSave;
 
   @override
@@ -665,11 +560,7 @@ class _BrowseSlivers extends StatelessWidget {
                     color: AppTheme.lightInk)),
           ),
         ),
-        _ItemGridSliver(
-            gem: gem,
-            items: items,
-            nearbyLoading: nearbyLoading,
-            onSave: onSave),
+        _ItemGridSliver(gem: gem, items: items, onSave: onSave),
       ],
     );
   }
@@ -682,43 +573,35 @@ class _ResultsSlivers extends StatelessWidget {
   const _ResultsSlivers({
     required this.gem,
     required this.items,
-    required this.nearbyLoading,
     required this.onSave,
   });
 
   final GemProvider gem;
-  final List<_BrowseItem> items;
-  final bool nearbyLoading;
+  final List<Gem> items;
   final void Function(BuildContext context) onSave;
 
   @override
   Widget build(BuildContext context) {
-    return _ItemGridSliver(
-        gem: gem, items: items, nearbyLoading: nearbyLoading, onSave: onSave);
+    return _ItemGridSliver(gem: gem, items: items, onSave: onSave);
   }
 }
 
-/// Loading/error/empty/data states for the 2-column merged grid — shared by
-/// both Browse's "All Gems" section and the Results state. [nearbyLoading]
-/// distinguishes "still fetching nearby Mapbox places" from "confirmed
-/// nothing matches" — without it, a sparse/empty gems table would flash the
-/// empty state for the instant before the Mapbox fetch resolves.
+/// Loading/error/empty/data states for the 2-column Gems grid — shared by
+/// both Browse's "All Gems" section and the Results state.
 class _ItemGridSliver extends StatelessWidget {
   const _ItemGridSliver({
     required this.gem,
     required this.items,
-    required this.nearbyLoading,
     required this.onSave,
   });
 
   final GemProvider gem;
-  final List<_BrowseItem> items;
-  final bool nearbyLoading;
+  final List<Gem> items;
   final void Function(BuildContext context) onSave;
 
   @override
   Widget build(BuildContext context) {
-    if (gem.loading || (items.isEmpty && nearbyLoading)) {
+    if (gem.loading) {
       return const SliverToBoxAdapter(
         child: Padding(
           padding: EdgeInsets.symmetric(horizontal: 16),
@@ -740,12 +623,8 @@ class _ItemGridSliver extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 16),
       sliver: SliverGrid(
         delegate: SliverChildBuilderDelegate(
-          (ctx, i) {
-            final item = items[i];
-            return item.gem != null
-                ? GemResultCard(gem: item.gem!, onSave: () => onSave(ctx))
-                : PoiResultCard(poi: item.poi!);
-          },
+          (ctx, i) =>
+              GemResultCard(gem: items[i], onSave: () => onSave(ctx)),
           childCount: items.length,
         ),
         // Max-extent (not fixed-count): column count derives from whatever
@@ -1226,9 +1105,6 @@ class GemResultCard extends StatelessWidget {
                           color: AppTheme.primary.withValues(alpha: 0.9),
                           borderRadius: BorderRadius.circular(8),
                         ),
-                        // "GEM · " prefix is the visible distinction from
-                        // PoiResultCard's plain category pill — this is a real,
-                        // app-curated spot, not a generic Mapbox place.
                         child: Text('GEM · ${gem.displayCategory}',
                             style: const TextStyle(
                                 color: Colors.white,
@@ -1297,104 +1173,3 @@ class GemResultCard extends StatelessWidget {
   }
 }
 
-/// A real nearby place from Mapbox Tilequery — same card shape as [GemResultCard]
-/// so the merged grid reads as one consistent layout, but deliberately
-/// simpler: no bookmark (saving one would mean creating a real gem from it,
-/// not wired up), no photo (Tilequery doesn't return one, so a plain icon
-/// tile substitutes), and a neutral grey category pill instead of the
-/// orange "GEM · " one — the visible tell that this isn't app-curated.
-class PoiResultCard extends StatelessWidget {
-  const PoiResultCard({super.key, required this.poi});
-
-  final NearbyPoi poi;
-
-  @override
-  Widget build(BuildContext context) {
-    return Semantics(
-      button: true,
-      label: poi.name,
-      child: GestureDetector(
-        onTap: () => context.push('/gems/poi', extra: poi),
-        child: Container(
-          decoration: BoxDecoration(
-            color: AppTheme.lightCard,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: AppTheme.lightBorder),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: Stack(
-                  children: [
-                    Positioned.fill(
-                      child: ClipRRect(
-                        borderRadius: const BorderRadius.vertical(
-                            top: Radius.circular(16)),
-                        child: Container(
-                          color: AppTheme.lightBorder.withValues(alpha: 0.4),
-                          alignment: Alignment.center,
-                          // Maki-based icon (see NearbyPoi.iconForMaki) instead of
-                          // a single generic pin — kept grey/neutral, not orange,
-                          // to preserve the GEM-vs-generic-POI tell above.
-                          child: Icon(NearbyPoi.iconForMaki(poi.maki),
-                              size: 32, color: AppTheme.lightMute),
-                        ),
-                      ),
-                    ),
-                    if (poi.category != null)
-                      Positioned(
-                        top: 8,
-                        left: 8,
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 8, vertical: 4),
-                          decoration: BoxDecoration(
-                            color: AppTheme.lightMute.withValues(alpha: 0.85),
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: Text(poi.category!,
-                              style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.w600)),
-                        ),
-                      ),
-                  ],
-                ),
-              ),
-              Padding(
-                padding: const EdgeInsets.all(10),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(poi.name,
-                        style: const TextStyle(
-                            fontWeight: FontWeight.w600,
-                            fontSize: 13,
-                            color: AppTheme.lightInk),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis),
-                    if (poi.distanceMeters != null) ...[
-                      const SizedBox(height: 2),
-                      Row(
-                        children: [
-                          const Icon(Icons.location_on,
-                              size: 12, color: AppTheme.lightMute),
-                          const SizedBox(width: 2),
-                          Text('${poi.distanceMeters!.round()}m away',
-                              style: const TextStyle(
-                                  color: AppTheme.lightMute, fontSize: 11)),
-                        ],
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
