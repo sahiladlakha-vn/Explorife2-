@@ -199,6 +199,25 @@ class AuthProvider extends ChangeNotifier {
     await AdminProfileRepository().recordLogin(userId, ip: ip);
   }
 
+  /// Web's OAuth redirect target — explicitly the app's own `/auth/callback`
+  /// route (under the hash, since this app uses Flutter web's default hash
+  /// URL strategy), NOT null/omitted. Leaving `redirectTo` null used to
+  /// mean "fall back to the Supabase project's bare Site URL"
+  /// (`https://explorife2.vercel.app`, no `#/auth/callback`) — fine on a
+  /// SUCCESSFUL sign-in, since supabase_flutter's own session-detection
+  /// strips a success token out of the URL before GoRouter ever sees it as
+  /// a "location" to match. On a FAILED sign-in (e.g. `identity_already_
+  /// exists` when the Google account picked is already linked to a
+  /// different, older real account — a real, expected case now that guest
+  /// upgrades exist, not just a test artifact), GoTrue appends
+  /// `?error=...&error_code=...` to that same bare origin instead, nothing
+  /// strips it, and GoRouter crashes with "no routes for location" trying
+  /// to match the raw query string as a path. Pointing this at a real,
+  /// registered route fixes both cases the same way — _AuthCallbackScreen
+  /// below now branches on whether `error` is present.
+  static String? get _webRedirectTo =>
+      kIsWeb ? '${Uri.base.origin}/#/auth/callback' : null;
+
   /// Signs in with Google — LINKING to the current anonymous session
   /// in-place (same `auth.uid()`, `is_anonymous` flips to false) when the
   /// signed-in user is still a guest, so nothing they saved/created before
@@ -218,21 +237,22 @@ class AuthProvider extends ChangeNotifier {
     if (_user?.isGuest ?? false) {
       final res = await _supabase.auth.getLinkIdentityUrl(
         OAuthProvider.google,
-        redirectTo: kIsWeb ? null : 'io.explorife.app://login-callback',
+        redirectTo:
+            _webRedirectTo ?? 'io.explorife.app://login-callback',
       );
       await launchUrl(Uri.parse(res.url), webOnlyWindowName: '_self');
       return;
     }
     await _supabase.auth.signInWithOAuth(
       OAuthProvider.google,
-      redirectTo: kIsWeb ? null : 'io.explorife.app://login-callback',
+      redirectTo: _webRedirectTo ?? 'io.explorife.app://login-callback',
     );
   }
 
   Future<void> signInWithGitHub() async {
     await _supabase.auth.signInWithOAuth(
       OAuthProvider.github,
-      redirectTo: kIsWeb ? null : 'io.explorife.app://login-callback',
+      redirectTo: _webRedirectTo ?? 'io.explorife.app://login-callback',
     );
   }
 

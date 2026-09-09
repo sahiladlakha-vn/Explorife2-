@@ -51,6 +51,39 @@ class AppRouter {
   static GoRouter create(Listenable authRefresh) => GoRouter(
         refreshListenable: authRefresh,
         initialLocation: '/home',
+        // Defense-in-depth: a raw "GoException: no routes for location"
+        // screen is never acceptable UX, whatever produces it. The known
+        // cause (an OAuth error redirect landing somewhere GoRouter can't
+        // match) is fixed at the source now — AuthProvider's redirectTo
+        // points at a real route, and _AuthCallbackScreen handles the
+        // error case explicitly — but this stays as a safety net for
+        // anything else that ever lands on an unmatched location.
+        errorBuilder: (context, state) => Scaffold(
+          backgroundColor: AppTheme.lightSurface,
+          body: SafeArea(
+            child: Center(
+              child: Padding(
+                padding: const EdgeInsets.all(32),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.search_off,
+                        size: 48, color: AppTheme.lightMute),
+                    const SizedBox(height: 16),
+                    const Text('Page not found',
+                        style:
+                            TextStyle(color: AppTheme.lightInk, fontSize: 18)),
+                    const SizedBox(height: 24),
+                    ElevatedButton(
+                      onPressed: () => context.go('/home'),
+                      child: const Text('Back to Explorife'),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
         routes: [
           GoRoute(
             path: '/auth',
@@ -235,11 +268,12 @@ class _AuthCallbackScreen extends StatefulWidget {
 }
 
 class _AuthCallbackScreenState extends State<_AuthCallbackScreen> {
-  @override
-  void initState() {
-    super.initState();
-    _resume();
-  }
+  // Guards both branches below so a rebuild (e.g. from GoRouterState still
+  // resolving) never double-fires _resume()'s navigation or discards a
+  // second PendingAction. Deliberately set from build(), not initState —
+  // GoRouterState.of(context) reads an InheritedWidget-backed ModalRoute
+  // that isn't safely available that early.
+  bool _handled = false;
 
   /// If a write action was deferred by requireAccount() before this OAuth
   /// redirect fired (see PendingAction/sign_in_sheet.dart), re-run it now
@@ -255,8 +289,81 @@ class _AuthCallbackScreenState extends State<_AuthCallbackScreen> {
     if (mounted) context.go(destination);
   }
 
+  /// GoTrue redirects here with `?error=...&error_code=...&error_description=...`
+  /// (not a session) when the OAuth attempt itself failed server-side —
+  /// e.g. the Google account picked is already linked to a different,
+  /// older real account (`identity_already_exists`, a real and expected
+  /// case now that guest→real upgrades exist, not just a test artifact).
+  /// Before AuthProvider.signInWithGoogle's redirectTo pointed here
+  /// explicitly, this case fell back to the project's bare Site URL
+  /// instead, where nothing stripped the error params out of the URL and
+  /// GoRouter crashed trying to match them as a location — this branch is
+  /// what actually fixes that, not just the redirectTo change alone.
+  String? _friendlyError(Map<String, String> params) {
+    final code = params['error_code'];
+    if (code == null) return null;
+    switch (code) {
+      case 'identity_already_exists':
+        return 'That Google account is already linked to a different '
+            'Explorife profile. Try a different Google account, or sign '
+            'out of this guest session first and sign in with that '
+            'account directly.';
+      default:
+        final description = params['error_description'];
+        return description != null
+            ? description.replaceAll('+', ' ')
+            : 'Sign-in failed. Please try again.';
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    final params = GoRouterState.of(context).uri.queryParameters;
+    final error = _friendlyError(params);
+
+    if (error != null) {
+      if (!_handled) {
+        _handled = true;
+        // The sign-in didn't actually complete — resuming whatever gated
+        // action queued this attempt would be wrong (and possibly repeat
+        // it against the wrong account once the user retries). One-shot
+        // clear, same as the success path already does.
+        PendingAction.takeAndClear();
+      }
+      return Scaffold(
+        backgroundColor: AppTheme.lightSurface,
+        body: SafeArea(
+          child: Center(
+            child: Padding(
+              padding: const EdgeInsets.all(32),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.error_outline,
+                      size: 48, color: AppTheme.lightMute),
+                  const SizedBox(height: 16),
+                  Text(
+                    error,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(color: AppTheme.lightInk, fontSize: 15),
+                  ),
+                  const SizedBox(height: 24),
+                  ElevatedButton(
+                    onPressed: () => context.go('/home'),
+                    child: const Text('Back to Explorife'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    if (!_handled) {
+      _handled = true;
+      _resume();
+    }
     return const Scaffold(
       backgroundColor: AppTheme.lightSurface,
       body: Center(child: CircularProgressIndicator(color: AppTheme.primary)),
