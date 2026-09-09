@@ -51,39 +51,53 @@ class AppRouter {
   static GoRouter create(Listenable authRefresh) => GoRouter(
         refreshListenable: authRefresh,
         initialLocation: '/home',
-        // Defense-in-depth: a raw "GoException: no routes for location"
-        // screen is never acceptable UX, whatever produces it. The known
-        // cause (an OAuth error redirect landing somewhere GoRouter can't
-        // match) is fixed at the source now — AuthProvider's redirectTo
-        // points at a real route, and _AuthCallbackScreen handles the
-        // error case explicitly — but this stays as a safety net for
-        // anything else that ever lands on an unmatched location.
-        errorBuilder: (context, state) => Scaffold(
-          backgroundColor: AppTheme.lightSurface,
-          body: SafeArea(
-            child: Center(
-              child: Padding(
-                padding: const EdgeInsets.all(32),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Icon(Icons.search_off,
-                        size: 48, color: AppTheme.lightMute),
-                    const SizedBox(height: 16),
-                    const Text('Page not found',
-                        style:
-                            TextStyle(color: AppTheme.lightInk, fontSize: 18)),
-                    const SizedBox(height: 24),
-                    ElevatedButton(
-                      onPressed: () => context.go('/home'),
-                      child: const Text('Back to Explorife'),
-                    ),
-                  ],
+        // Defense-in-depth against two DIFFERENT failure shapes, not one:
+        // (1) a genuinely unmatched location (typo'd link, stale bookmark);
+        // (2) GoTrue's error redirect for certain link-callback failures
+        // (e.g. identity_already_exists) — which, it turns out, bypasses
+        // AuthProvider's custom redirectTo entirely and lands on the
+        // project's bare Site URL instead, error encoded as ordinary query
+        // params. That never matches any GoRoute (so _AuthCallbackScreen's
+        // own '/auth/callback' handling never even runs) and falls through
+        // to here — Uri.base.queryParameters (the actual browser location)
+        // is what still lets this be recognized and shown with the same
+        // friendly, code-specific message rather than a generic 404.
+        errorBuilder: (context, state) {
+          final authError = _friendlyAuthError(Uri.base.queryParameters);
+          if (authError != null) {
+            // Same reasoning as _AuthCallbackScreen's error branch: the
+            // sign-in didn't complete, so any action queued before it
+            // shouldn't be silently resumed on the next successful one.
+            PendingAction.takeAndClear();
+            return _authErrorScaffold(context, authError);
+          }
+          return Scaffold(
+            backgroundColor: AppTheme.lightSurface,
+            body: SafeArea(
+              child: Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(32),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.search_off,
+                          size: 48, color: AppTheme.lightMute),
+                      const SizedBox(height: 16),
+                      const Text('Page not found',
+                          style: TextStyle(
+                              color: AppTheme.lightInk, fontSize: 18)),
+                      const SizedBox(height: 24),
+                      ElevatedButton(
+                        onPressed: () => context.go('/home'),
+                        child: const Text('Back to Explorife'),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),
-          ),
-        ),
+          );
+        },
         routes: [
           GoRoute(
             path: '/auth',
@@ -153,7 +167,8 @@ class AppRouter {
                   if (extra is ProfileDeepLink) {
                     return ProfileScreen(deepLink: extra);
                   }
-                  final tab = int.tryParse(state.uri.queryParameters['tab'] ?? '');
+                  final tab =
+                      int.tryParse(state.uri.queryParameters['tab'] ?? '');
                   return ProfileScreen(
                       deepLink: tab != null ? ProfileDeepLink(tab: tab) : null);
                 },
@@ -261,6 +276,60 @@ class AppRouter {
       );
 }
 
+/// Shared by both _AuthCallbackScreen (the normal '/auth/callback' landing)
+/// and AppRouter's errorBuilder (GoTrue's bare-Site-URL fallback for certain
+/// link-callback failures — see errorBuilder's own doc comment) so the two
+/// paths that can both receive the exact same GoTrue error show identical
+/// copy rather than one showing a friendly message and the other a generic
+/// 404 depending on which of the two ever happened to catch it.
+String? _friendlyAuthError(Map<String, String> params) {
+  final code = params['error_code'];
+  if (code == null) return null;
+  switch (code) {
+    case 'identity_already_exists':
+      return 'That Google account is already linked to a different '
+          'Explorife profile. Try a different Google account, or sign '
+          'out of this guest session first and sign in with that '
+          'account directly.';
+    default:
+      final description = params['error_description'];
+      return description != null
+          ? description.replaceAll('+', ' ')
+          : 'Sign-in failed. Please try again.';
+  }
+}
+
+Widget _authErrorScaffold(BuildContext context, String message) {
+  return Scaffold(
+    backgroundColor: AppTheme.lightSurface,
+    body: SafeArea(
+      child: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.error_outline,
+                  size: 48, color: AppTheme.lightMute),
+              const SizedBox(height: 16),
+              Text(
+                message,
+                textAlign: TextAlign.center,
+                style: const TextStyle(color: AppTheme.lightInk, fontSize: 15),
+              ),
+              const SizedBox(height: 24),
+              ElevatedButton(
+                onPressed: () => context.go('/home'),
+                child: const Text('Back to Explorife'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    ),
+  );
+}
+
 class _AuthCallbackScreen extends StatefulWidget {
   const _AuthCallbackScreen();
   @override
@@ -284,42 +353,22 @@ class _AuthCallbackScreenState extends State<_AuthCallbackScreen> {
     await Future.delayed(const Duration(milliseconds: 500));
     if (!mounted) return;
     final pending = await PendingAction.takeAndClear();
-    final destination =
-        pending == null ? '/home' : await resolvePendingAction(context, pending);
+    final destination = pending == null
+        ? '/home'
+        : await resolvePendingAction(context, pending);
     if (mounted) context.go(destination);
-  }
-
-  /// GoTrue redirects here with `?error=...&error_code=...&error_description=...`
-  /// (not a session) when the OAuth attempt itself failed server-side —
-  /// e.g. the Google account picked is already linked to a different,
-  /// older real account (`identity_already_exists`, a real and expected
-  /// case now that guest→real upgrades exist, not just a test artifact).
-  /// Before AuthProvider.signInWithGoogle's redirectTo pointed here
-  /// explicitly, this case fell back to the project's bare Site URL
-  /// instead, where nothing stripped the error params out of the URL and
-  /// GoRouter crashed trying to match them as a location — this branch is
-  /// what actually fixes that, not just the redirectTo change alone.
-  String? _friendlyError(Map<String, String> params) {
-    final code = params['error_code'];
-    if (code == null) return null;
-    switch (code) {
-      case 'identity_already_exists':
-        return 'That Google account is already linked to a different '
-            'Explorife profile. Try a different Google account, or sign '
-            'out of this guest session first and sign in with that '
-            'account directly.';
-      default:
-        final description = params['error_description'];
-        return description != null
-            ? description.replaceAll('+', ' ')
-            : 'Sign-in failed. Please try again.';
-    }
   }
 
   @override
   Widget build(BuildContext context) {
+    // GoTrue redirects here with `?error=...&error_code=...&error_description=...`
+    // (not a session) when the OAuth attempt itself failed server-side —
+    // e.g. the Google account picked is already linked to a different,
+    // older real account (`identity_already_exists`). Some failures in
+    // this same class instead land on AppRouter's errorBuilder (bare Site
+    // URL fallback) rather than here — see _friendlyAuthError's own doc.
     final params = GoRouterState.of(context).uri.queryParameters;
-    final error = _friendlyError(params);
+    final error = _friendlyAuthError(params);
 
     if (error != null) {
       if (!_handled) {
@@ -330,34 +379,7 @@ class _AuthCallbackScreenState extends State<_AuthCallbackScreen> {
         // clear, same as the success path already does.
         PendingAction.takeAndClear();
       }
-      return Scaffold(
-        backgroundColor: AppTheme.lightSurface,
-        body: SafeArea(
-          child: Center(
-            child: Padding(
-              padding: const EdgeInsets.all(32),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Icon(Icons.error_outline,
-                      size: 48, color: AppTheme.lightMute),
-                  const SizedBox(height: 16),
-                  Text(
-                    error,
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(color: AppTheme.lightInk, fontSize: 15),
-                  ),
-                  const SizedBox(height: 24),
-                  ElevatedButton(
-                    onPressed: () => context.go('/home'),
-                    child: const Text('Back to Explorife'),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      );
+      return _authErrorScaffold(context, error);
     }
 
     if (!_handled) {
