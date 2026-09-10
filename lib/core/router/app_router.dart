@@ -306,23 +306,32 @@ Widget _authErrorScaffold(BuildContext context, String message) {
       child: Center(
         child: Padding(
           padding: const EdgeInsets.all(32),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(Icons.error_outline,
-                  size: 48, color: AppTheme.lightMute),
-              const SizedBox(height: 16),
-              Text(
-                message,
-                textAlign: TextAlign.center,
-                style: const TextStyle(color: AppTheme.lightInk, fontSize: 15),
-              ),
-              const SizedBox(height: 24),
-              ElevatedButton(
-                onPressed: () => context.go('/home'),
-                child: const Text('Back to Explorife'),
-              ),
-            ],
+          // Without a cap here, a wide desktop viewport gives this long a
+          // sentence enough room to lay out as one unwrapped line spanning
+          // almost the full screen instead of a readable, centered
+          // paragraph — 420 keeps it wrapping at a normal paragraph width
+          // on any viewport, not just narrow ones.
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 420),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.error_outline,
+                    size: 48, color: AppTheme.lightMute),
+                const SizedBox(height: 16),
+                Text(
+                  message,
+                  textAlign: TextAlign.center,
+                  style:
+                      const TextStyle(color: AppTheme.lightInk, fontSize: 15),
+                ),
+                const SizedBox(height: 24),
+                ElevatedButton(
+                  onPressed: () => context.go('/home'),
+                  child: const Text('Back to Explorife'),
+                ),
+              ],
+            ),
           ),
         ),
       ),
