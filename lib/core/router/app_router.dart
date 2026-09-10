@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:provider/provider.dart';
 import '../../core/services/pending_action.dart';
 import '../../core/services/resolve_pending_action.dart';
 import '../../core/theme/app_theme.dart';
+import '../../providers/auth_provider.dart';
+import '../../widgets/auth/oauth_button.dart';
 import '../../screens/auth/auth_screen.dart';
 import '../../screens/home/home_screen.dart';
 import '../../screens/home/destination_landing_screen.dart';
@@ -63,13 +66,15 @@ class AppRouter {
         // is what still lets this be recognized and shown with the same
         // friendly, code-specific message rather than a generic 404.
         errorBuilder: (context, state) {
-          final authError = _friendlyAuthError(Uri.base.queryParameters);
+          final params = Uri.base.queryParameters;
+          final authError = _friendlyAuthError(params);
           if (authError != null) {
             // Same reasoning as _AuthCallbackScreen's error branch: the
             // sign-in didn't complete, so any action queued before it
             // shouldn't be silently resumed on the next successful one.
             PendingAction.takeAndClear();
-            return _authErrorScaffold(context, authError);
+            return _AuthErrorScreen(
+                message: authError, errorCode: params['error_code']);
           }
           return Scaffold(
             backgroundColor: AppTheme.lightSurface,
@@ -299,44 +304,105 @@ String? _friendlyAuthError(Map<String, String> params) {
   }
 }
 
-Widget _authErrorScaffold(BuildContext context, String message) {
-  return Scaffold(
-    backgroundColor: AppTheme.lightSurface,
-    body: SafeArea(
-      child: Center(
-        child: Padding(
-          padding: const EdgeInsets.all(32),
-          // Without a cap here, a wide desktop viewport gives this long a
-          // sentence enough room to lay out as one unwrapped line spanning
-          // almost the full screen instead of a readable, centered
-          // paragraph — 420 keeps it wrapping at a normal paragraph width
-          // on any viewport, not just narrow ones.
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 420),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Icon(Icons.error_outline,
-                    size: 48, color: AppTheme.lightMute),
-                const SizedBox(height: 16),
-                Text(
-                  message,
-                  textAlign: TextAlign.center,
-                  style:
-                      const TextStyle(color: AppTheme.lightInk, fontSize: 15),
-                ),
-                const SizedBox(height: 24),
-                ElevatedButton(
-                  onPressed: () => context.go('/home'),
-                  child: const Text('Back to Explorife'),
-                ),
-              ],
+class _AuthErrorScreen extends StatefulWidget {
+  const _AuthErrorScreen({required this.message, required this.errorCode});
+
+  final String message;
+  final String? errorCode;
+
+  @override
+  State<_AuthErrorScreen> createState() => _AuthErrorScreenState();
+}
+
+class _AuthErrorScreenState extends State<_AuthErrorScreen> {
+  bool _retrying = false;
+  String? _retryError;
+
+  /// The recovery action for `identity_already_exists` specifically: the
+  /// Google identity already belongs to a real account, so rather than
+  /// leave the user stuck on an error, offer to just sign into THAT
+  /// account directly (see AuthProvider.signInWithGoogleDirect's own doc).
+  Future<void> _signInWithThisAccount() async {
+    setState(() {
+      _retrying = true;
+      _retryError = null;
+    });
+    try {
+      await context.read<AuthProvider>().signInWithGoogleDirect();
+      // No further UI update expected on web past this point — the page
+      // navigates away for the fresh OAuth round-trip.
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _retrying = false;
+          _retryError = e.toString();
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final offerDirectSignIn = widget.errorCode == 'identity_already_exists';
+    return Scaffold(
+      backgroundColor: AppTheme.lightSurface,
+      body: SafeArea(
+        child: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(32),
+            // Without a cap here, a wide desktop viewport gives this long a
+            // sentence enough room to lay out as one unwrapped line spanning
+            // almost the full screen instead of a readable, centered
+            // paragraph — 420 keeps it wrapping at a normal paragraph width
+            // on any viewport, not just narrow ones.
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 420),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.error_outline,
+                      size: 48, color: AppTheme.lightMute),
+                  const SizedBox(height: 16),
+                  Text(
+                    widget.message,
+                    textAlign: TextAlign.center,
+                    style:
+                        const TextStyle(color: AppTheme.lightInk, fontSize: 15),
+                  ),
+                  if (_retryError != null) ...[
+                    const SizedBox(height: 12),
+                    Text(
+                      _retryError!,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(color: Colors.red, fontSize: 12),
+                    ),
+                  ],
+                  const SizedBox(height: 24),
+                  if (offerDirectSignIn) ...[
+                    OAuthButton(
+                      label: 'Sign in with this account',
+                      icon: googleIcon,
+                      loading: _retrying,
+                      onTap: _signInWithThisAccount,
+                    ),
+                    const SizedBox(height: 12),
+                    TextButton(
+                      onPressed: _retrying ? null : () => context.go('/home'),
+                      child: const Text('Back to Explorife'),
+                    ),
+                  ] else
+                    ElevatedButton(
+                      onPressed: () => context.go('/home'),
+                      child: const Text('Back to Explorife'),
+                    ),
+                ],
+              ),
             ),
           ),
         ),
       ),
-    ),
-  );
+    );
+  }
 }
 
 class _AuthCallbackScreen extends StatefulWidget {
@@ -388,7 +454,7 @@ class _AuthCallbackScreenState extends State<_AuthCallbackScreen> {
         // clear, same as the success path already does.
         PendingAction.takeAndClear();
       }
-      return _authErrorScaffold(context, error);
+      return _AuthErrorScreen(message: error, errorCode: params['error_code']);
     }
 
     if (!_handled) {

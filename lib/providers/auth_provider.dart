@@ -170,7 +170,8 @@ class AuthProvider extends ChangeNotifier {
               (meta['name'] as String?) ??
               authUser.email?.split('@').first ??
               'Explorer',
-      avatarUrl: (meta['avatar_url'] as String?) ?? (meta['picture'] as String?),
+      avatarUrl:
+          (meta['avatar_url'] as String?) ?? (meta['picture'] as String?),
       provider: authUser.appMetadata['provider'] as String?,
       isGuest: authUser.isAnonymous,
       // role deliberately left at its Role.traveler default here — this is
@@ -192,7 +193,8 @@ class AuthProvider extends ChangeNotifier {
       final res = await http
           .get(Uri.parse('https://api.ipify.org'))
           .timeout(const Duration(seconds: 3));
-      if (res.statusCode == 200 && res.body.trim().isNotEmpty) ip = res.body.trim();
+      if (res.statusCode == 200 && res.body.trim().isNotEmpty)
+        ip = res.body.trim();
     } catch (_) {
       // No IP this time — last_login itself still gets recorded below.
     }
@@ -237,12 +239,28 @@ class AuthProvider extends ChangeNotifier {
     if (_user?.isGuest ?? false) {
       final res = await _supabase.auth.getLinkIdentityUrl(
         OAuthProvider.google,
-        redirectTo:
-            _webRedirectTo ?? 'io.explorife.app://login-callback',
+        redirectTo: _webRedirectTo ?? 'io.explorife.app://login-callback',
       );
       await launchUrl(Uri.parse(res.url), webOnlyWindowName: '_self');
       return;
     }
+    await _supabase.auth.signInWithOAuth(
+      OAuthProvider.google,
+      redirectTo: _webRedirectTo ?? 'io.explorife.app://login-callback',
+    );
+  }
+
+  /// Always a plain (non-linking) Google sign-in, regardless of the current
+  /// session's guest state — the recovery action for the `identity_already_
+  /// exists` error screen (app_router.dart). [signInWithGoogle]'s link
+  /// attempt is exactly what fails when the picked Google identity already
+  /// belongs to a different, older real account; this bypasses linking
+  /// entirely and just signs the browser into whatever account that
+  /// identity already owns, same as visiting /auth fresh would. Replaces
+  /// the current anonymous session outright — any guest-only data isn't
+  /// preserved, same tradeoff as any other "sign into an existing account"
+  /// transition.
+  Future<void> signInWithGoogleDirect() async {
     await _supabase.auth.signInWithOAuth(
       OAuthProvider.google,
       redirectTo: _webRedirectTo ?? 'io.explorife.app://login-callback',
@@ -279,8 +297,7 @@ class AuthProvider extends ChangeNotifier {
     if (_user == null) return;
     await _supabase
         .from('profiles')
-        .update({'display_name': name})
-        .eq('id', _user!.id);
+        .update({'display_name': name}).eq('id', _user!.id);
     _user = AuthUser(
       id: _user!.id,
       name: name,
@@ -301,8 +318,7 @@ class AuthProvider extends ChangeNotifier {
     final normalized = username.trim().toLowerCase();
     await _supabase
         .from('profiles')
-        .update({'username': normalized})
-        .eq('id', _user!.id);
+        .update({'username': normalized}).eq('id', _user!.id);
     _user = AuthUser(
       id: _user!.id,
       name: _user!.name,
@@ -323,8 +339,8 @@ class AuthProvider extends ChangeNotifier {
   Future<PublicProfile?> findUserByIdentifier(String identifier) async {
     final trimmed = identifier.trim();
     if (trimmed.isEmpty) return null;
-    final rows = await _supabase
-        .rpc('find_user_by_identifier', params: {'p_identifier': trimmed}) as List;
+    final rows = await _supabase.rpc('find_user_by_identifier',
+        params: {'p_identifier': trimmed}) as List;
     if (rows.isEmpty) return null;
     final row = rows.first as Map<String, dynamic>;
     final displayName = row['display_name'] as String?;
