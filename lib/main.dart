@@ -8,6 +8,7 @@ import 'core/theme/app_theme.dart';
 import 'models/gem.dart';
 import 'providers/auth_provider.dart';
 import 'providers/booking_provider.dart';
+import 'providers/curated_collection_provider.dart';
 import 'providers/destination_provider.dart';
 import 'providers/gem_provider.dart';
 import 'providers/tour_provider.dart';
@@ -52,6 +53,7 @@ class _ExplorIfeAppState extends State<ExplorIfeApp> {
     return MultiProvider(
       providers: [
         ChangeNotifierProvider<AuthProvider>.value(value: _auth),
+        ChangeNotifierProvider(create: (_) => CuratedCollectionProvider()),
         ChangeNotifierProvider(create: (_) => DestinationProvider()),
         ChangeNotifierProvider(create: (_) => GemProvider()),
         ChangeNotifierProvider(create: (_) => TourProvider()),

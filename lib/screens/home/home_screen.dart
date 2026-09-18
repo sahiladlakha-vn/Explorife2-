@@ -3,13 +3,14 @@ import 'package:geolocator/geolocator.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
-import '../../core/constants/curated_collections.dart';
 import '../../core/constants/gem_categories.dart';
 import '../../core/layout/breakpoints.dart';
 import '../../core/services/geocoding_service.dart';
 import '../../core/theme/app_theme.dart';
+import '../../providers/curated_collection_provider.dart';
 import '../../providers/gem_provider.dart';
 import '../../providers/tour_provider.dart';
+import '../../models/curated_collection.dart';
 import '../../models/gem.dart';
 import '../../models/tour.dart';
 import '../../widgets/app_network_image.dart';
@@ -142,18 +143,35 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ),
               SliverToBoxAdapter(
-                child: _RailOrGrid(
-                  tier: tier,
-                  itemCount: CuratedCollections.all.length,
-                  tabletColumns: 2,
-                  desktopColumns: 3,
-                  childAspectRatio: 0.78,
-                  itemBuilder: (ctx, i) => _CollectionCard(
-                    collection: CuratedCollections.all[i],
-                    margin: tier == ScreenTier.phone
-                        ? const EdgeInsets.only(right: 14)
-                        : EdgeInsets.zero,
-                  ),
+                child: Consumer<CuratedCollectionProvider>(
+                  builder: (context, collectionProv, _) {
+                    final collections = collectionProv.collections;
+                    if (collectionProv.loading) {
+                      return const FeaturedRowSkeleton();
+                    }
+                    if (collectionProv.hasError) {
+                      return ErrorStateView(
+                          onRetry: collectionProv.refresh,
+                          message: collectionProv.error);
+                    }
+                    if (collections.isEmpty) {
+                      return const EmptyStateView(
+                          text: 'No ideas available yet.');
+                    }
+                    return _RailOrGrid(
+                      tier: tier,
+                      itemCount: collections.length,
+                      tabletColumns: 2,
+                      desktopColumns: 3,
+                      childAspectRatio: 0.78,
+                      itemBuilder: (ctx, i) => _CollectionCard(
+                        collection: collections[i],
+                        margin: tier == ScreenTier.phone
+                            ? const EdgeInsets.only(right: 14)
+                            : EdgeInsets.zero,
+                      ),
+                    );
+                  },
                 ),
               ),
               const SliverPadding(padding: EdgeInsets.only(top: 20)),
@@ -1058,7 +1076,7 @@ class _FeaturedGemCard extends StatelessWidget {
 }
 
 /// One card in Home's "EXPLORE IDEAS" rail — a real, curated collection
-/// (curated_collections.dart), not a synthetic Gem, but built on the exact
+/// (public.curated_collections), not a synthetic Gem, but built on the exact
 /// same [PhotoInfoCard] shell _FeaturedGemCard uses above. Tapping navigates
 /// straight into the same Search Results / Destination Detail screens Phase
 /// 1 built; this card runs no query/retrieval logic of its own.
