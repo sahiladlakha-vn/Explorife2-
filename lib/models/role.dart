@@ -1,3 +1,5 @@
+import 'dart:ui' show Color;
+
 /// The single, unambiguous role taxonomy for every account on the
 /// platform — matches `public.user_role` (Postgres enum) exactly. Every
 /// account has exactly one [Role] (stated directly in the source Roles &
@@ -70,5 +72,28 @@ enum Role {
         Role.regionalAdmin => 'Regional Admin',
         Role.superAdmin => 'Super Admin',
         Role.financeAdmin => 'Finance Admin',
+      };
+
+  /// Single source of truth for the role pill's tint — shared by the
+  /// profile header's identity badge (profile_chrome.dart's `_Header`) and
+  /// the admin Users/Profiles table's ROLE column (settings_tab.dart's
+  /// `_UserRow`), so the two surfaces can't independently drift on what
+  /// color a given role reads as. [isAdminTier] roles get a saturated,
+  /// attention-grabbing hue (consumers additionally raise alpha/weight for
+  /// these — see each call site); [Role.superAdmin] specifically reuses
+  /// this screen's existing "critical" red accent (matches the sign-out
+  /// icon / alert-severity color already on this surface) since it's the
+  /// single most powerful tier. [Role.guide]/[Role.traveler] (and
+  /// [Role.businessOwner], which carries no elevated platform privilege)
+  /// stay in the surface's existing muted/teal/blue hues instead.
+  Color get badgeColor => switch (this) {
+        Role.superAdmin => const Color(0xFFEF5350),
+        Role.financeAdmin ||
+        Role.regionalAdmin ||
+        Role.contentModerator =>
+          const Color(0xFFD4A017),
+        Role.businessOwner => const Color(0xFF5B8DEF),
+        Role.guide => const Color(0xFF12A594),
+        Role.traveler => const Color(0xFF9A9A9A),
       };
 }

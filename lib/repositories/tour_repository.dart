@@ -17,9 +17,16 @@ class TourRepository {
 
   Future<List<Tour>> fetchTours({int limit = 50}) async {
     try {
+      // Curated tours always lead (is_curated desc), newest-first within
+      // each group — a blank/test row (no photos, no description; created
+      // directly in Supabase since there's no authoring UI yet) must never
+      // be able to bump a real, fully-written tour out of the front of the
+      // Home rail just by having a newer created_at. See Tour.isCurated's
+      // own doc comment for the same "never automatic" rule this respects.
       final data = await _db
           .from(table)
           .select()
+          .order('is_curated', ascending: false)
           .order('created_at', ascending: false)
           .limit(limit);
       return (data as List)

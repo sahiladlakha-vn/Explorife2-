@@ -226,6 +226,12 @@ function syncRow_(sheet, row) {
   // behavior — replaces whatever mix of raw URLs/filenames was there before.
   if (allPhotoUrls.length) {
     sheet.getRange(row, COL.PHOTO_URL).setValue(allPhotoUrls.join(', '));
+  } else {
+    // A gem with no photo renders a generic placeholder icon in the app
+    // instead of a real cover photo — block the publish instead of letting
+    // that slip through silently, same as the category check above.
+    setStatus_(sheet, row, 'Error: at least one Photo URL or Photo Filename is required');
+    return;
   }
 
   const payload = {

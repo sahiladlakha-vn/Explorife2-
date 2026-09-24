@@ -1,12 +1,20 @@
+import 'dart:async';
 import 'dart:ui' show ImageFilter;
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
+import '../../core/layout/app_spacing.dart';
+import '../../core/layout/breakpoints.dart';
 import '../../core/layout/max_width_center.dart';
 import '../../core/services/geocoding_service.dart';
 import '../../core/theme/app_theme.dart';
+import '../../repositories/admin_user_repository.dart';
+import '../../models/role.dart';
 import '../../core/logic/currency.dart';
 import '../../core/logic/booking_itinerary.dart';
 import '../../core/logic/trip_insights.dart';
@@ -41,12 +49,14 @@ import '../trip_map/trip_map_dialog.dart';
 import '../trip_setup/edit_trip_sheet.dart';
 import '../trip_builder/widgets/add_stop_sheet.dart';
 import '../trips/trips_list_screen.dart' show showTripSwitcherSheet;
+import '../explore/map_engine.dart';
 
 part 'profile_palette.dart';
 part 'widgets/profile_atoms.dart';
 part 'widgets/profile_chrome.dart';
 part 'tabs/overview_tab.dart';
 part 'tabs/trips_tab.dart';
+part 'tabs/trip_day_map.dart';
 part 'tabs/stories_tab.dart';
 part 'tabs/saved_tab.dart';
 part 'tabs/badges_tab.dart';
@@ -272,41 +282,63 @@ class _ProfileScreenState extends State<ProfileScreen> {
       BadgeMetric.bookings: 0,
     });
 
+    // Item 7 of the 2026-09-18 full-viewport redesign: on desktop the four
+    // stats move inline into _Header next to the name/handle, replacing the
+    // separate full-width _StatsBar row below it. Mobile keeps the original
+    // two-block stacked shape unchanged. _StatsBar is otherwise rendered
+    // identically regardless of which top-level tab (_tab) is active, so
+    // this gates on width alone, same as My Trip's other desktop changes.
+    final isDesktop = Breakpoints.isDesktop(context);
+    // Computed once and threaded to both _Header (mobile/desktop subtext
+    // line) and the Settings tab's desktop Edit Profile panel, rather than
+    // each calling _memberSince independently — same list, same result,
+    // no reason to derive it twice.
+    final memberSince = _memberSince(gems, myStories);
+
     return Scaffold(
       backgroundColor: _kPage,
       body: Column(
         children: [
-          Stack(
-            children: [
-              const _ChromeGlow(),
-              Column(
-                children: [
-                  _Header(
-                    user: user,
-                    onMenu: () => AppShellScope.of(context).openMenu(),
-                    onSettings: () => setState(() => _tab = 5),
-                    onSignOut: () => confirmSignOut(context),
-                    memberSince: _memberSince(gems, myStories),
-                  ),
-                  _StatsBar(
+          // Was a Stack with a decorative _ChromeGlow (two gradient blobs)
+          // painted behind this Column — purely ornamental, added nothing
+          // informational, and was the only gradient-blob decoration
+          // anywhere in the app (every other "glass" surface here uses a
+          // flat frosted blur, not a colored glow). Removed outright rather
+          // than replaced; the glass stats bar reads fine against the plain
+          // page background.
+          _Header(
+            user: user,
+            onMenu: () => AppShellScope.of(context).openMenu(),
+            onSettings: () => setState(() => _tab = 5),
+            onSignOut: () => confirmSignOut(context),
+            memberSince: memberSince,
+            stats: isDesktop
+                ? _StatsBar(
                     gems: savedCount,
                     trips: tripCount,
                     alerts: alertCount,
                     spent: _spent,
                     loading: _statsLoading,
-                  ),
-                ],
-              ),
-            ],
+                    compact: true,
+                  )
+                : null,
           ),
+          if (!isDesktop)
+            _StatsBar(
+              gems: savedCount,
+              trips: tripCount,
+              alerts: alertCount,
+              spent: _spent,
+              loading: _statsLoading,
+            ),
           _TabBar(
             tabs: _tabs,
             active: _tab,
             onSelect: (i) => setState(() => _tab = i),
           ),
           Expanded(
-            child: _body(
-                context, myStories, tripCount, badges, alerts, pace, active),
+            child: _body(context, myStories, tripCount, badges, alerts, pace,
+                active, memberSince),
           ),
         ],
       ),
@@ -320,7 +352,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
       List<BadgeProgress> badges,
       List<Alert> alerts,
       TripPace? pace,
-      Trip? active) {
+      Trip? active,
+      String? memberSince) {
     switch (_tab) {
       case 1:
         return _MyTripTab(
@@ -335,7 +368,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
       case 4:
         return _BadgesTab(badges: badges);
       case 5:
-        return _SettingsTab(onSignOut: () => confirmSignOut(context));
+        return _SettingsTab(
+          onSignOut: () => confirmSignOut(context),
+          memberSince: memberSince,
+        );
       default:
         return _OverviewTab(
           spent: _spent,

@@ -51,6 +51,7 @@ class _TripCompactHeader extends StatelessWidget {
     required this.onOpenMap,
     required this.onList,
     required this.onNewTrip,
+    this.segmentedControl,
   });
 
   final Trip trip;
@@ -59,6 +60,11 @@ class _TripCompactHeader extends StatelessWidget {
   final VoidCallback onOpenMap;
   final VoidCallback onList;
   final VoidCallback onNewTrip;
+  // Desktop-only (item 8 of the 2026-09-18 full-viewport redesign): the
+  // Trip/Itinerary/Dashboard/Bookings sub-tabs, rendered inline here instead
+  // of _MyTripTabState stacking them in their own row below. Null on mobile,
+  // where that separate stacked row is kept unchanged.
+  final Widget? segmentedControl;
 
   @override
   Widget build(BuildContext context) {
@@ -68,12 +74,33 @@ class _TripCompactHeader extends StatelessWidget {
         Expanded(
           child: Row(
             children: [
+              // Two-line "DD escape / Aug 12–21 · 9 nights" — was one
+              // ALL-CAPS line (an artifact of the old Bebas Neue display
+              // font); now a bold title over a gray subtext line, normal
+              // case throughout.
               Flexible(
-                child: Text(
-                  '${trip.displayName} · ${Trip.formatDateRange(trip.startDate, trip.endDate)} · ${trip.nights} ${trip.nights == 1 ? 'night' : 'nights'}',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: GoogleFonts.bebasNeue(fontSize: 19, color: _kInk),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      trip.displayName,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: GoogleFonts.inter(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w700,
+                          color: _kInk,
+                          height: 1.15),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      '${Trip.formatDateRange(trip.startDate, trip.endDate)} · ${trip.nights} ${trip.nights == 1 ? 'night' : 'nights'}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: GoogleFonts.inter(fontSize: 12.5, color: _kMute),
+                    ),
+                  ],
                 ),
               ),
               const SizedBox(width: 4),
@@ -102,6 +129,10 @@ class _TripCompactHeader extends StatelessWidget {
             ],
           ),
         ),
+        if (segmentedControl != null) ...[
+          const SizedBox(width: 16),
+          segmentedControl!,
+        ],
         const SizedBox(width: 8),
         Semantics(
           button: true,
@@ -115,7 +146,7 @@ class _TripCompactHeader extends StatelessWidget {
                 width: 40,
                 height: 40,
                 decoration: BoxDecoration(
-                  color: Colors.white,
+                  color: _kCard,
                   borderRadius: BorderRadius.circular(10),
                   border: Border.all(color: _kBorder),
                 ),
@@ -140,7 +171,7 @@ class _TripCompactHeader extends StatelessWidget {
                   borderRadius: BorderRadius.circular(10),
                 ),
                 child: Text('+ New Trip',
-                    style: GoogleFonts.fredoka(
+                    style: GoogleFonts.inter(
                         fontSize: 13,
                         fontWeight: FontWeight.w700,
                         color: Colors.white)),
@@ -232,7 +263,7 @@ class _AddPill extends StatelessWidget {
                     child: CircularProgressIndicator(strokeWidth: 2, color: _kMute),
                   )
                 : Text(label,
-                    style: GoogleFonts.fredoka(
+                    style: GoogleFonts.inter(
                         fontSize: 12.5, fontWeight: FontWeight.w600, color: _kMute)),
           ),
         ),
@@ -295,11 +326,11 @@ class _PickerField extends StatelessWidget {
                       child: Text(text,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: GoogleFonts.fredoka(
+                          style: GoogleFonts.inter(
                               fontSize: 14, color: hasValue ? _kInk : _kMute)),
                     )
                   : Text(text,
-                      style: GoogleFonts.fredoka(
+                      style: GoogleFonts.inter(
                           fontSize: 14, color: hasValue ? _kInk : _kMute)),
               if (trailingChevron)
                 const Icon(Icons.keyboard_arrow_down, size: 20, color: _kMute),
@@ -356,62 +387,102 @@ class _MyTripTabState extends State<_MyTripTab> {
         widget.trip ??
         provider.trips.first;
 
+    // Itinerary on desktop is a full-bleed split workspace (map wants
+    // "however wide the screen is" — MaxWidthCenter's 640 cap, meant for the
+    // other three segments' single-column card lists, would defeat that
+    // outright), so it skips the width cap entirely rather than just the
+    // scroll fix below. Every other segment, and Itinerary itself on phone
+    // widths, keeps the centered/capped shape unchanged.
+    final isDesktop = Breakpoints.isDesktop(context);
+    final fullBleedItinerary =
+        isDesktop && _segment == TripDetailSegment.itinerary;
+
+    // Item 8 of the 2026-09-18 redesign: on desktop the trip title and the
+    // sub-tabs share one row (via _TripCompactHeader's segmentedControl
+    // slot) instead of stacking in two — built once here regardless of
+    // which shape consumes it below.
+    final segmentedControl = _SegmentedControl(
+      labels: [for (final s in TripDetailSegment.values) s.label],
+      active: _segment.index,
+      onSelect: (i) => setState(() => _segment = TripDetailSegment.values[i]),
+      stretch: !isDesktop,
+    );
+
     // Fixed header + segmented control, scrolling body: unlike Overview's
     // carousel card (a quick-glance shortcut), My Trip is a workspace — the
     // header/tabs are navigation chrome the user wants available at a
     // glance, not content to scroll past. Only the active segment's content
     // (day-rail/itinerary, travelers, dashboard, bookings) scrolls, so a
     // typical phone screen shows real itinerary content without scrolling.
-    return MaxWidthCenter(
-      child: Column(
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 18, 16, 0),
-            child: _TripCompactHeader(
-              trip: trip,
-              onSwitch: () => _openSwitcher(trip.id),
-              onEdit: () => showModalBottomSheet<void>(
-                context: context,
-                isScrollControlled: true,
-                backgroundColor: Colors.transparent,
-                builder: (_) => EditTripSheet(trip: trip),
-              ),
-              onOpenMap: () => showDialog<void>(
-                context: context,
-                barrierColor: Colors.black.withValues(alpha: 0.6),
-                builder: (_) => TripMapDialog(tripId: trip.id),
-              ),
-              onList: () => context.go('/trips'),
-              onNewTrip: () => context.push('/trips/new'),
+    final content = Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 18, 16, 0),
+          child: _TripCompactHeader(
+            trip: trip,
+            onSwitch: () => _openSwitcher(trip.id),
+            onEdit: () => showModalBottomSheet<void>(
+              context: context,
+              isScrollControlled: true,
+              backgroundColor: Colors.transparent,
+              builder: (_) => EditTripSheet(trip: trip),
             ),
+            onOpenMap: () => showDialog<void>(
+              context: context,
+              barrierColor: Colors.black.withValues(alpha: 0.6),
+              builder: (_) => TripMapDialog(tripId: trip.id),
+            ),
+            onList: () => context.go('/trips'),
+            onNewTrip: () => context.push('/trips/new'),
+            segmentedControl: isDesktop ? segmentedControl : null,
           ),
-          const SizedBox(height: 12),
+        ),
+        // Header-card → content gap and content → itinerary-body gap both
+        // now come from the shared AppSpacing scale (see its own doc
+        // comment) instead of this screen's old standalone 12/16 pair —
+        // _TripCompactHeader above is this tab's own "header card", the
+        // segmented-control + body below it is the "itinerary card", so
+        // this is the exact pairing AppSpacing was introduced to keep in
+        // sync with Home's.
+        if (!isDesktop) ...[
+          const SizedBox(height: AppSpacing.headerGap),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: _SegmentedControl(
-              labels: [for (final s in TripDetailSegment.values) s.label],
-              active: _segment.index,
-              onSelect: (i) =>
-                  setState(() => _segment = TripDetailSegment.values[i]),
-            ),
-          ),
-          const SizedBox(height: 16),
-          Expanded(
-            child: ListView(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 100),
-              children: [
-                switch (_segment) {
-                  TripDetailSegment.trip => _TripSegment(trip: trip),
-                  TripDetailSegment.itinerary => _ItinerarySegment(trip: trip),
-                  TripDetailSegment.dashboard => _DashboardSegment(trip: trip),
-                  TripDetailSegment.bookings => _BookingsSegment(trip: trip),
-                },
-              ],
-            ),
+            child: segmentedControl,
           ),
         ],
-      ),
+        const SizedBox(height: AppSpacing.sectionGap),
+        // Itinerary gets a different scroll shape on desktop: the day-panel/
+        // map split wants a real bounded height (map fills it, only the day
+        // list scrolls internally — see _ItinerarySegment), which an outer
+        // ListView's unbounded main axis can't provide. Every other
+        // segment, and Itinerary itself on phone widths, keeps the plain
+        // scrolling ListView it always had.
+        Expanded(
+          child: fullBleedItinerary
+              ? Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                  child: _ItinerarySegment(trip: trip),
+                )
+              : ListView(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 100),
+                  children: [
+                    switch (_segment) {
+                      TripDetailSegment.trip => _TripSegment(trip: trip),
+                      TripDetailSegment.itinerary =>
+                        _ItinerarySegment(trip: trip),
+                      TripDetailSegment.dashboard =>
+                        _DashboardSegment(trip: trip),
+                      TripDetailSegment.bookings =>
+                        _BookingsSegment(trip: trip),
+                    },
+                  ],
+                ),
+        ),
+      ],
     );
+
+    return fullBleedItinerary ? content : MaxWidthCenter(child: content);
   }
 
   void _openSwitcher(String currentId) {
@@ -423,68 +494,72 @@ class _MyTripTabState extends State<_MyTripTab> {
   }
 }
 
+// Plain text sub-tabs — no pill/card background anymore. The active tab is
+// blue with a blue underline beneath it; inactive tabs stay plain gray text.
 class _SegmentedControl extends StatelessWidget {
   final List<String> labels;
   final int active;
   final ValueChanged<int> onSelect;
-  const _SegmentedControl(
-      {required this.labels, required this.active, required this.onSelect});
+  // True (default): every tab is Expanded, so the row always fills its
+  // parent's width — the original phone shape, still used there as its own
+  // full-width block below _TripCompactHeader. False: tabs shrink-wrap their
+  // label text instead, for desktop's merged header row (item 8 of the
+  // 2026-09-18 full-viewport redesign), where the control sits inline next
+  // to the trip title rather than claiming a row of its own.
+  final bool stretch;
+  const _SegmentedControl({
+    required this.labels,
+    required this.active,
+    required this.onSelect,
+    this.stretch = true,
+  });
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(4),
-      decoration: BoxDecoration(
-        color: _kCard,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: _kBorder),
-      ),
-      child: Row(
-        children: [
-          for (final (i, label) in labels.indexed)
-            Expanded(
-              child: Semantics(
-                button: true,
-                selected: i == active,
-                label: label,
-                child: Material(
-                  color: Colors.transparent,
-                  child: InkWell(
-                    onTap: () => onSelect(i),
-                    borderRadius: BorderRadius.circular(9),
-                    child: AnimatedContainer(
-                      duration: const Duration(milliseconds: 150),
-                      padding: const EdgeInsets.symmetric(vertical: 9),
-                      decoration: BoxDecoration(
-                        color: i == active ? Colors.white : Colors.transparent,
-                        borderRadius: BorderRadius.circular(9),
-                        boxShadow: i == active
-                            ? [
-                                BoxShadow(
-                                    color: _kInk.withValues(alpha: 0.10),
-                                    blurRadius: 4,
-                                    offset: const Offset(0, 1))
-                              ]
-                            : null,
-                      ),
-                      child: Text(
-                        label,
-                        textAlign: TextAlign.center,
-                        style: GoogleFonts.fredoka(
-                          fontSize: 12,
-                          fontWeight:
-                              i == active ? FontWeight.w700 : FontWeight.w500,
-                          color: i == active ? _kInk : _kMute,
-                        ),
-                      ),
-                    ),
-                  ),
+    return Row(
+      mainAxisSize: stretch ? MainAxisSize.max : MainAxisSize.min,
+      children: [
+        for (final (i, label) in labels.indexed) _tab(i, label),
+      ],
+    );
+  }
+
+  Widget _tab(int i, String label) {
+    final tab = Semantics(
+      button: true,
+      selected: i == active,
+      label: label,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: () => onSelect(i),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 150),
+            padding: EdgeInsets.symmetric(
+                vertical: 9, horizontal: stretch ? 0 : 14),
+            decoration: BoxDecoration(
+              border: Border(
+                bottom: BorderSide(
+                  color: i == active ? _kBlue : Colors.transparent,
+                  width: 2,
                 ),
               ),
             ),
-        ],
+            child: Text(
+              label,
+              textAlign: TextAlign.center,
+              style: GoogleFonts.inter(
+                fontSize: 12,
+                fontWeight:
+                    i == active ? FontWeight.w700 : FontWeight.w500,
+                color: i == active ? _kBlue : _kMute,
+              ),
+            ),
+          ),
+        ),
       ),
     );
+    return stretch ? Expanded(child: tab) : tab;
   }
 }
 
@@ -641,13 +716,13 @@ class _TravelerRow extends StatelessWidget {
                 Text(traveler.displayName,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: GoogleFonts.fredoka(
+                    style: GoogleFonts.inter(
                         fontSize: 14,
                         fontWeight: FontWeight.w700,
                         color: _kInk)),
                 const SizedBox(height: 2),
                 Text(roleLabel,
-                    style: GoogleFonts.fredoka(fontSize: 11, color: _kMute)),
+                    style: GoogleFonts.inter(fontSize: 11, color: _kMute)),
               ],
             ),
           ),
@@ -659,7 +734,7 @@ class _TravelerRow extends StatelessWidget {
               borderRadius: BorderRadius.circular(999),
             ),
             child: Text(pillLabel,
-                style: GoogleFonts.jetBrainsMono(
+                style: GoogleFonts.inter(
                     fontSize: 9.5,
                     fontWeight: FontWeight.w700,
                     color: pillColor,
@@ -702,7 +777,7 @@ class _TravelerAvatar extends StatelessWidget {
         shape: BoxShape.circle,
       ),
       child: Text(initials,
-          style: GoogleFonts.fredoka(
+          style: GoogleFonts.inter(
               fontSize: size * 0.39,
               fontWeight: FontWeight.w700,
               color: AppTheme.primary)),
@@ -841,17 +916,17 @@ class _DocumentRow extends StatelessWidget {
                 Text(document.title,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: GoogleFonts.fredoka(
+                    style: GoogleFonts.inter(
                         fontSize: 14,
                         fontWeight: FontWeight.w700,
                         color: _kInk)),
                 const SizedBox(height: 2),
                 Text(subtitle,
-                    style: GoogleFonts.fredoka(fontSize: 11, color: _kMute)),
+                    style: GoogleFonts.inter(fontSize: 11, color: _kMute)),
                 if (document.expiresOn != null) ...[
                   const SizedBox(height: 2),
                   Text('Expires ${_fmtDocDate(document.expiresOn!)}',
-                      style: GoogleFonts.fredoka(fontSize: 11, color: _kMute)),
+                      style: GoogleFonts.inter(fontSize: 11, color: _kMute)),
                 ],
                 if (alert != null) ...[
                   const SizedBox(height: 6),
@@ -863,7 +938,7 @@ class _DocumentRow extends StatelessWidget {
                       borderRadius: BorderRadius.circular(999),
                     ),
                     child: Text(alert.label,
-                        style: GoogleFonts.jetBrainsMono(
+                        style: GoogleFonts.inter(
                             fontSize: 9.5,
                             fontWeight: FontWeight.w700,
                             color: alert.color,
@@ -973,7 +1048,7 @@ class _AddDocumentSheetState extends State<_AddDocumentSheet> {
                   children: [
                     Text('Add document',
                         style:
-                            GoogleFonts.bebasNeue(fontSize: 18, color: _kInk)),
+                            GoogleFonts.inter(fontSize: 18, color: _kInk)),
                     const SizedBox(height: 16),
                     Wrap(
                       spacing: 8,
@@ -990,7 +1065,7 @@ class _AddDocumentSheetState extends State<_AddDocumentSheet> {
                     const SizedBox(height: 12),
                     TextField(
                       controller: _titleCtrl,
-                      style: GoogleFonts.fredoka(fontSize: 14, color: _kInk),
+                      style: GoogleFonts.inter(fontSize: 14, color: _kInk),
                       decoration: _lightFieldDecoration('Title'),
                     ),
                     const SizedBox(height: 12),
@@ -1006,7 +1081,7 @@ class _AddDocumentSheetState extends State<_AddDocumentSheet> {
                     const SizedBox(height: 12),
                     TextField(
                       controller: _urlCtrl,
-                      style: GoogleFonts.fredoka(fontSize: 14, color: _kInk),
+                      style: GoogleFonts.inter(fontSize: 14, color: _kInk),
                       decoration: _lightFieldDecoration('Link (optional)'),
                     ),
                     const SizedBox(height: 20),
@@ -1016,7 +1091,7 @@ class _AddDocumentSheetState extends State<_AddDocumentSheet> {
                           backgroundColor: AppTheme.primary,
                           padding: const EdgeInsets.symmetric(vertical: 14)),
                       child: Text('Save',
-                          style: GoogleFonts.fredoka(
+                          style: GoogleFonts.inter(
                               fontSize: 15,
                               fontWeight: FontWeight.w700,
                               color: Colors.white)),
@@ -1058,7 +1133,7 @@ class _TypeChip extends StatelessWidget {
               border: Border.all(color: selected ? AppTheme.primary : _kBorder),
             ),
             child: Text(label,
-                style: GoogleFonts.fredoka(
+                style: GoogleFonts.inter(
                     fontSize: 12.5,
                     fontWeight: FontWeight.w600,
                     color: selected ? Colors.white : _kMute)),
@@ -1090,7 +1165,7 @@ class _PackingCard extends StatelessWidget {
       children: [
         if (items.isNotEmpty) ...[
           Text('$packed / $total packed',
-              style: GoogleFonts.fredoka(
+              style: GoogleFonts.inter(
                   fontSize: 12, color: _kMute, fontWeight: FontWeight.w600)),
           const SizedBox(height: 6),
           ClipRRect(
@@ -1196,7 +1271,7 @@ class _PackingRow extends StatelessWidget {
                 Text(item.label,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: GoogleFonts.fredoka(
+                    style: GoogleFonts.inter(
                       fontSize: 14,
                       fontWeight: FontWeight.w700,
                       color: item.isPacked ? _kMute : _kInk,
@@ -1206,7 +1281,7 @@ class _PackingRow extends StatelessWidget {
                 if (subtitleParts.isNotEmpty) ...[
                   const SizedBox(height: 2),
                   Text(subtitleParts.join(' · '),
-                      style: GoogleFonts.fredoka(fontSize: 11, color: _kMute)),
+                      style: GoogleFonts.inter(fontSize: 11, color: _kMute)),
                 ],
               ],
             ),
@@ -1311,11 +1386,11 @@ class _AddPackingItemSheetState extends State<_AddPackingItemSheet> {
                   children: [
                     Text('Add packing item',
                         style:
-                            GoogleFonts.bebasNeue(fontSize: 18, color: _kInk)),
+                            GoogleFonts.inter(fontSize: 18, color: _kInk)),
                     const SizedBox(height: 16),
                     TextField(
                       controller: _labelCtrl,
-                      style: GoogleFonts.fredoka(fontSize: 14, color: _kInk),
+                      style: GoogleFonts.inter(fontSize: 14, color: _kInk),
                       decoration: _lightFieldDecoration('Item'),
                     ),
                     const SizedBox(height: 12),
@@ -1326,7 +1401,7 @@ class _AddPackingItemSheetState extends State<_AddPackingItemSheet> {
                           child: TextField(
                             controller: _categoryCtrl,
                             style:
-                                GoogleFonts.fredoka(fontSize: 14, color: _kInk),
+                                GoogleFonts.inter(fontSize: 14, color: _kInk),
                             decoration:
                                 _lightFieldDecoration('Category (optional)'),
                           ),
@@ -1365,7 +1440,7 @@ class _AddPackingItemSheetState extends State<_AddPackingItemSheet> {
                           backgroundColor: AppTheme.primary,
                           padding: const EdgeInsets.symmetric(vertical: 14)),
                       child: Text('Save',
-                          style: GoogleFonts.fredoka(
+                          style: GoogleFonts.inter(
                               fontSize: 15,
                               fontWeight: FontWeight.w700,
                               color: Colors.white)),
@@ -1408,7 +1483,7 @@ class _QuantityStepper extends StatelessWidget {
             width: 20,
             child: Text('$quantity',
                 textAlign: TextAlign.center,
-                style: GoogleFonts.fredoka(
+                style: GoogleFonts.inter(
                     fontSize: 14, fontWeight: FontWeight.w700, color: _kInk)),
           ),
           IconButton(
@@ -1459,6 +1534,22 @@ class _ItinerarySegmentState extends State<_ItinerarySegment> {
         context.watch<TripProvider>().allStopsOrdered(trip.id, dayCount);
     final safeDay = _activeDay.clamp(1, dayCount);
 
+    final dayPanel = _DayPanel(
+      trip: trip,
+      day: safeDay,
+      dayCount: dayCount,
+      gemsById: gemsById,
+      bookings: bookings,
+      allStops: allStops,
+    );
+    // Selected-day-only pins, not the whole trip — clicking a different day
+    // chip changes `safeDay`, which rebuilds this with a new `day`, so the
+    // list and the map always update together off the same state.
+    final mapPanel =
+        _DayMapPanel(day: safeDay, allStops: allStops, gemsById: gemsById);
+
+    final isDesktop = Breakpoints.isDesktop(context);
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -1472,15 +1563,87 @@ class _ItinerarySegmentState extends State<_ItinerarySegment> {
             setState(() => _activeDay = dayCount + 1); // land on the new day
           },
         ),
-        const SizedBox(height: 12),
-        _DayPanel(
-          trip: trip,
-          day: safeDay,
-          dayCount: dayCount,
-          gemsById: gemsById,
-          bookings: bookings,
-          allStops: allStops,
-        ),
+        const SizedBox(height: AppSpacing.headerGap),
+        if (isDesktop)
+          // Desktop: _MyTripTab hands this segment a real bounded height (no
+          // outer ListView — see its own comment) AND full viewport width (no
+          // MaxWidthCenter cap — see its own comment), so the split below can
+          // finally match the brief: a fixed-width itinerary sidebar (not a
+          // flex ratio — a day's content doesn't want to keep growing just
+          // because the window does) and a map that takes every remaining
+          // pixel via Expanded, in both height and width. Only the sidebar
+          // scrolls internally; CrossAxisAlignment.stretch on the Row is safe
+          // here (unlike the IntrinsicHeight this briefly used) because the
+          // Row itself already has a bounded height from the Expanded above
+          // — stretch just hands that same tight height down to each child,
+          // it never queries a child's own intrinsic dimensions the way
+          // IntrinsicHeight did, so mapPanel's HtmlElementView-backed
+          // MapEngineView still never gets an intrinsic-dimension query.
+          Expanded(
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                // 460px sidebar needs real breathing room for the map beside
+                // it to still read as a map (not a sliver) — below this the
+                // window's too narrow for a side-by-side split to make sense
+                // even on desktop, so fall back to the stacked shape.
+                if (constraints.maxWidth >= 760) {
+                  return Row(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      SizedBox(
+                        width: 460,
+                        child: SingleChildScrollView(child: dayPanel),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(child: mapPanel),
+                    ],
+                  );
+                }
+                // Desktop window narrow enough to miss the split — still
+                // bounded height, so wrap the stacked fallback in its own
+                // scroll view rather than assuming an ancestor ListView
+                // exists (there isn't one — see _MyTripTab).
+                return SingleChildScrollView(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      dayPanel,
+                      const SizedBox(height: AppSpacing.headerGap),
+                      SizedBox(height: 260, child: mapPanel),
+                    ],
+                  ),
+                );
+              },
+            ),
+          )
+        else
+          // Mobile: unchanged from before — this whole segment still sits
+          // inside _MyTripTab's unbounded ListView, so dayPanel/mapPanel
+          // just grow to their natural sizes and the page scrolls.
+          LayoutBuilder(
+            builder: (context, constraints) {
+              if (constraints.maxWidth >= 560) {
+                return Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(flex: 6, child: dayPanel),
+                    const SizedBox(width: 12),
+                    Expanded(
+                        flex: 5,
+                        child: SizedBox(height: 420, child: mapPanel)),
+                  ],
+                );
+              }
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  dayPanel,
+                  const SizedBox(height: AppSpacing.headerGap),
+                  SizedBox(height: 260, child: mapPanel),
+                ],
+              );
+            },
+          ),
       ],
     );
   }
@@ -1549,27 +1712,32 @@ class _DayRailChip extends StatelessWidget {
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 150),
             width: 52,
-            padding: const EdgeInsets.symmetric(vertical: 8),
+            // vertical: 8 (matching _AddDayChip) overflowed the fixed-height
+            // 56px rail by ~6px every render — JetBrains Mono/Bebas Neue's
+            // actual line-box heights exceed what naive font-size arithmetic
+            // suggests. 4 leaves a couple px of headroom instead of eyeballing
+            // an exact fit that a font-metrics change could blow through again.
+            padding: const EdgeInsets.symmetric(vertical: 4),
             decoration: BoxDecoration(
-              color: active ? AppTheme.primary : _kCard,
+              color: active ? Colors.white : _kCard,
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: active ? AppTheme.primary : _kBorder),
+              border: Border.all(color: active ? Colors.white : _kBorder),
             ),
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 Text(_weekdayAbbr[date.weekday - 1],
-                    style: GoogleFonts.jetBrainsMono(
+                    style: GoogleFonts.inter(
                         fontSize: 9,
                         fontWeight: FontWeight.w700,
                         letterSpacing: 0.6,
                         color: active
-                            ? Colors.white.withValues(alpha: 0.85)
+                            ? Colors.black.withValues(alpha: 0.6)
                             : _kMute)),
                 const SizedBox(height: 2),
                 Text('${date.day}',
-                    style: GoogleFonts.bebasNeue(
-                        fontSize: 20, color: active ? Colors.white : _kInk)),
+                    style: GoogleFonts.inter(
+                        fontSize: 20, color: active ? Colors.black : _kInk)),
               ],
             ),
           ),
@@ -1595,7 +1763,9 @@ class _AddDayChip extends StatelessWidget {
           borderRadius: BorderRadius.circular(12),
           child: Container(
             width: 46,
-            padding: const EdgeInsets.symmetric(vertical: 8),
+            // See _DayRailChip's matching comment: 8 overflowed this same
+            // fixed-height rail by ~6px.
+            padding: const EdgeInsets.symmetric(vertical: 4),
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(12),
               border: Border.all(color: _kBorder),
@@ -1603,15 +1773,15 @@ class _AddDayChip extends StatelessWidget {
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Text('ADD',
-                    style: GoogleFonts.jetBrainsMono(
+                Text('Add',
+                    style: GoogleFonts.inter(
                         fontSize: 9,
                         fontWeight: FontWeight.w700,
                         color: _kMute,
                         letterSpacing: 0.6)),
                 const SizedBox(height: 2),
                 Text('+',
-                    style: GoogleFonts.bebasNeue(fontSize: 20, color: _kMute)),
+                    style: GoogleFonts.inter(fontSize: 20, color: _kMute)),
               ],
             ),
           ),
@@ -1662,20 +1832,8 @@ class _DayPanel extends StatelessWidget {
             child: Row(
               children: [
                 Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('Day $day — ${_dateLabel(date)}',
-                          style: GoogleFonts.bebasNeue(
-                              fontSize: 20, color: _kInk)),
-                      Text(
-                          stops.isEmpty
-                              ? 'NO ACTIVITIES'
-                              : '${stops.length} ${stops.length == 1 ? 'ACTIVITY' : 'ACTIVITIES'}',
-                          style: GoogleFonts.jetBrainsMono(
-                              fontSize: 10, color: _kMute, letterSpacing: 0.5)),
-                    ],
-                  ),
+                  child: Text('Day $day — ${_dateLabel(date)}',
+                      style: GoogleFonts.inter(fontSize: 20, color: _kInk)),
                 ),
                 IconButton(
                   tooltip: 'Duplicate day',
@@ -1718,23 +1876,25 @@ class _DayPanel extends StatelessWidget {
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
-        backgroundColor: Colors.white,
+        backgroundColor: _kCard,
+        surfaceTintColor: Colors.transparent,
         title: Text('Delete Day $day?',
-            style: GoogleFonts.bebasNeue(fontSize: 20, color: _kInk)),
+            style: GoogleFonts.inter(fontSize: 20, color: _kInk)),
         content: Text(
             'This removes all of this day\'s activities and shifts later days back by one.',
-            style: GoogleFonts.fredoka(color: _kMute)),
+            style: GoogleFonts.inter(color: _kMute)),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
+            child: Text('Cancel', style: GoogleFonts.inter(color: _kMute)),
           ),
           TextButton(
             onPressed: () {
               Navigator.pop(context);
               context.read<TripProvider>().deleteDay(trip.id, day);
             },
-            child: const Text('Delete', style: TextStyle(color: _kCritical)),
+            child: Text('Delete',
+                style: GoogleFonts.inter(color: _kCritical)),
           ),
         ],
       ),
@@ -1742,50 +1902,6 @@ class _DayPanel extends StatelessWidget {
   }
 
   String _dateLabel(DateTime d) => '${_months[d.month - 1]} ${d.day}';
-}
-
-/// Formats [DayRollup.plannedMinutes] as 'Xh Ym' ('Ym' under an hour, '0m'
-/// for nothing timed yet).
-String _fmtPlannedMinutes(int minutes) {
-  if (minutes <= 0) return '0m';
-  final h = minutes ~/ 60;
-  final m = minutes % 60;
-  if (h == 0) return '${m}m';
-  if (m == 0) return '${h}h';
-  return '${h}h ${m}m';
-}
-
-/// Planned-time / planned-cost strip, under the day header. Distance is
-/// deliberately omitted — see [dayRollup]'s doc comment for why.
-class _DaySummaryStrip extends StatelessWidget {
-  final DayRollup rollup;
-  final String symbol;
-  const _DaySummaryStrip({required this.rollup, required this.symbol});
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
-      child: Row(
-        children: [
-          const Icon(Icons.schedule, size: 13, color: _kMute),
-          const SizedBox(width: 4),
-          Text(_fmtPlannedMinutes(rollup.plannedMinutes),
-              style: GoogleFonts.jetBrainsMono(fontSize: 11, color: _kMute)),
-          const SizedBox(width: 12),
-          const Icon(Icons.payments_outlined, size: 13, color: _kMute),
-          const SizedBox(width: 4),
-          Text('$symbol${Trip.formatVnd(rollup.plannedCostVnd, short: true)}',
-              style: GoogleFonts.jetBrainsMono(fontSize: 11, color: _kMute)),
-          if (rollup.tbdCount > 0) ...[
-            const SizedBox(width: 4),
-            Text('(+${rollup.tbdCount} TBD)',
-                style: GoogleFonts.jetBrainsMono(fontSize: 11, color: _kWarn)),
-          ],
-        ],
-      ),
-    );
-  }
 }
 
 /// Slot label/icon — shared by [_SlotSection]'s header and the edit sheet's
@@ -1825,13 +1941,10 @@ class _DayBody extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    Gem? resolveGem(String id) => gemsById[id];
-    final rollup =
-        dayRollup(stops: stops, bookings: bookings, resolveGem: resolveGem);
     final symbol = currencyFor(trip.currency).symbol;
     // Same stopId->booking relationship unbookedStopAlerts already uses (see
-    // dayRollup's doc comment) — built once here, shared by the rollup above
-    // and every _SpotRow's own Booked-chip/cost-fallback check below.
+    // dayRollup's doc comment) — built once here, shared by
+    // every _SpotRow's own Booked-chip/cost-fallback check below.
     final bookingByStopId = {
       for (final b in bookings)
         if (b.stopId != null) b.stopId!: b,
@@ -1848,7 +1961,6 @@ class _DayBody extends StatelessWidget {
               booking: b, trip: trip, stops: allStops, gemsById: gemsById),
           const SizedBox(height: 10),
         ],
-        if (stops.isNotEmpty) _DaySummaryStrip(rollup: rollup, symbol: symbol),
         for (final slot in const ['morning', 'afternoon', 'evening'])
           Padding(
             padding: const EdgeInsets.only(bottom: 10),
@@ -1925,6 +2037,7 @@ class _SlotSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isEmpty = stops.isEmpty && bookingChips.isEmpty;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -1934,13 +2047,17 @@ class _SlotSection extends StatelessWidget {
             children: [
               Icon(_slotIcon(slot), size: 14, color: _kMute),
               const SizedBox(width: 6),
-              Text(_slotLabel(slot).toUpperCase(),
-                  style: GoogleFonts.jetBrainsMono(
-                      fontSize: 10.5,
+              Text(_slotLabel(slot),
+                  style: GoogleFonts.inter(
+                      fontSize: 12,
                       color: _kMute,
-                      fontWeight: FontWeight.w700,
-                      letterSpacing: 0.6)),
+                      fontWeight: FontWeight.w600)),
               const Spacer(),
+              // Now shown regardless of whether the slot is empty — the
+              // dashed _EmptySlotState below is still rendered for the empty
+              // case too, so an empty slot gets both the header link AND the
+              // dashed prompt (per the 2026-09-13 dark-redesign spec, item 9),
+              // reversing this section's earlier "that's redundant" call.
               Semantics(
                 button: true,
                 label: 'Add to ${_slotLabel(slot)}',
@@ -1957,12 +2074,11 @@ class _SlotSection extends StatelessWidget {
                     borderRadius: BorderRadius.circular(6),
                     child: Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
-                      child: Text('+ ADD',
-                          style: GoogleFonts.jetBrainsMono(
-                              fontSize: 10.5,
-                              color: AppTheme.primary,
-                              fontWeight: FontWeight.w700,
-                              letterSpacing: 0.6)),
+                      child: Text('+ Add',
+                          style: GoogleFonts.inter(
+                              fontSize: 11.5,
+                              color: _kBlue,
+                              fontWeight: FontWeight.w600)),
                     ),
                   ),
                 ),
@@ -1973,12 +2089,10 @@ class _SlotSection extends StatelessWidget {
         for (final chip in bookingChips) ...[
           Padding(padding: const EdgeInsets.only(bottom: 8), child: chip),
         ],
-        if (stops.isEmpty && bookingChips.isEmpty)
+        if (isEmpty)
           Padding(
             padding: const EdgeInsets.only(bottom: 4),
-            child: Text('No activities',
-                style: GoogleFonts.fredoka(
-                    fontSize: 12, color: _kMute, fontStyle: FontStyle.italic)),
+            child: _EmptySlotState(tripId: tripId, day: day, slot: slot),
           )
         else if (stops.isEmpty)
           const SizedBox.shrink()
@@ -2017,6 +2131,102 @@ class _SlotSection extends StatelessWidget {
       ],
     );
   }
+}
+
+/// A slot's empty state: one dashed-border tappable box, replacing the old
+/// pair of affordances (an always-shown header "+ ADD" link plus a separate
+/// italic "No activities" line below it). Tapping anywhere in the box opens
+/// the same [AddStopSheet] the header link used to.
+class _EmptySlotState extends StatelessWidget {
+  final String tripId;
+  final int day;
+  final String slot;
+  const _EmptySlotState(
+      {required this.tripId, required this.day, required this.slot});
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      button: true,
+      label: 'Add to ${_slotLabel(slot)}',
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(10),
+          onTap: () => showModalBottomSheet<void>(
+            context: context,
+            isScrollControlled: true,
+            backgroundColor: Colors.transparent,
+            builder: (_) => AddStopSheet(
+                tripId: tripId, day: day, initialSlot: slot, light: true),
+          ),
+          child: CustomPaint(
+            painter: const _DashedRRectPainter(
+                color: _kBorder, radius: 10, strokeWidth: 1.2),
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(vertical: 10),
+              alignment: Alignment.center,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.add, size: 14, color: _kMute),
+                  const SizedBox(width: 6),
+                  Text(
+                      'Add your first stop for the ${_slotLabel(slot).toLowerCase()}',
+                      style: GoogleFonts.inter(
+                          fontSize: 11,
+                          color: _kMute,
+                          fontWeight: FontWeight.w600)),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Minimal dashed rounded-rect border painter for [_EmptySlotState]. No
+/// dashed-border widget exists elsewhere in the app or in pubspec.yaml;
+/// pulling in a package for one box was heavier than this ~20-line painter.
+class _DashedRRectPainter extends CustomPainter {
+  final Color color;
+  final double radius;
+  final double strokeWidth;
+  const _DashedRRectPainter(
+      {required this.color, required this.radius, required this.strokeWidth});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final rrect =
+        RRect.fromRectAndRadius(Offset.zero & size, Radius.circular(radius));
+    final path = Path()..addRRect(rrect);
+    final paint = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = strokeWidth;
+    const dashWidth = 5.0;
+    const gapWidth = 4.0;
+    for (final metric in path.computeMetrics()) {
+      var distance = 0.0;
+      while (distance < metric.length) {
+        final next = distance + dashWidth;
+        canvas.drawPath(
+          metric.extractPath(distance, next.clamp(0, metric.length)),
+          paint,
+        );
+        distance = next + gapWidth;
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _DashedRRectPainter oldDelegate) =>
+      oldDelegate.color != color ||
+      oldDelegate.radius != radius ||
+      oldDelegate.strokeWidth != strokeWidth;
 }
 
 /// Display-only slot → representative clock time, used only when a stop has
@@ -2071,7 +2281,7 @@ class _TransitThread extends StatelessWidget {
           Icon(_transitIcon(stop.transitMode!), size: 13, color: _kMute),
           const SizedBox(width: 8),
           Text(parts.join(' · '),
-              style: GoogleFonts.jetBrainsMono(fontSize: 10.5, color: _kMute)),
+              style: GoogleFonts.inter(fontSize: 10.5, color: _kMute)),
         ],
       ),
     );
@@ -2095,7 +2305,7 @@ class _StatusChip extends StatelessWidget {
         borderRadius: BorderRadius.circular(999),
       ),
       child: Text(label,
-          style: GoogleFonts.jetBrainsMono(
+          style: GoogleFonts.inter(
               fontSize: 9.5,
               fontWeight: FontWeight.w700,
               color: color,
@@ -2196,7 +2406,7 @@ class _SpotRow extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(timeLabel,
-                    style: GoogleFonts.fredoka(
+                    style: GoogleFonts.inter(
                         fontSize: 11,
                         fontWeight: FontWeight.w700,
                         color: _kMute)),
@@ -2204,7 +2414,7 @@ class _SpotRow extends StatelessWidget {
                 Text(title,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: GoogleFonts.fredoka(
+                    style: GoogleFonts.inter(
                         fontSize: 14,
                         fontWeight: FontWeight.w700,
                         color: _kInk)),
@@ -2212,7 +2422,7 @@ class _SpotRow extends StatelessWidget {
                 Text(metaParts.join(' · '),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: GoogleFonts.jetBrainsMono(
+                    style: GoogleFonts.inter(
                         fontSize: 10.5, color: _kMute, letterSpacing: 0.3)),
                 if (resolvedCost == null || booking != null) ...[
                   const SizedBox(height: 6),
@@ -2231,7 +2441,7 @@ class _SpotRow extends StatelessWidget {
                   Text(stop.notes!,
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
-                      style: GoogleFonts.fredoka(
+                      style: GoogleFonts.inter(
                           fontSize: 11, color: _kMute, height: 1.3)),
                 ],
               ],
@@ -2271,7 +2481,7 @@ class _SpotRow extends StatelessWidget {
 /// rather than inheriting the ambient dark defaults.
 InputDecoration _lightFieldDecoration(String hint) => InputDecoration(
       hintText: hint,
-      hintStyle: GoogleFonts.fredoka(fontSize: 14, color: _kMute),
+      hintStyle: GoogleFonts.inter(fontSize: 14, color: _kMute),
       filled: true,
       fillColor: _kCard,
       contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
@@ -2400,12 +2610,12 @@ class _ActivityEditSheetState extends State<_ActivityEditSheet> {
                   children: [
                     Text('Edit activity',
                         style:
-                            GoogleFonts.bebasNeue(fontSize: 18, color: _kInk)),
+                            GoogleFonts.inter(fontSize: 18, color: _kInk)),
                     const SizedBox(height: 16),
                     if (widget.stop.isCustom) ...[
                       TextField(
                         controller: _titleCtrl,
-                        style: GoogleFonts.fredoka(fontSize: 14, color: _kInk),
+                        style: GoogleFonts.inter(fontSize: 14, color: _kInk),
                         decoration: _lightFieldDecoration('Title'),
                       ),
                       const SizedBox(height: 12),
@@ -2439,7 +2649,7 @@ class _ActivityEditSheetState extends State<_ActivityEditSheet> {
                       keyboardType: TextInputType.number,
                       inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                       onChanged: (_) => setState(() {}),
-                      style: GoogleFonts.fredoka(fontSize: 14, color: _kInk),
+                      style: GoogleFonts.inter(fontSize: 14, color: _kInk),
                       decoration: _lightFieldDecoration(
                               'Price — blank for TBD, 0 for free')
                           .copyWith(prefixText: '$symbol '),
@@ -2448,13 +2658,13 @@ class _ActivityEditSheetState extends State<_ActivityEditSheet> {
                       const SizedBox(height: 4),
                       Text('Leave blank if you don\'t know the cost yet.',
                           style:
-                              GoogleFonts.fredoka(fontSize: 11, color: _kMute)),
+                              GoogleFonts.inter(fontSize: 11, color: _kMute)),
                     ],
                     const SizedBox(height: 12),
                     TextField(
                       controller: _notesCtrl,
                       maxLines: 3,
-                      style: GoogleFonts.fredoka(fontSize: 14, color: _kInk),
+                      style: GoogleFonts.inter(fontSize: 14, color: _kInk),
                       decoration: _lightFieldDecoration('Notes (optional)'),
                     ),
                     const SizedBox(height: 20),
@@ -2464,7 +2674,7 @@ class _ActivityEditSheetState extends State<_ActivityEditSheet> {
                           backgroundColor: AppTheme.primary,
                           padding: const EdgeInsets.symmetric(vertical: 14)),
                       child: Text('Save',
-                          style: GoogleFonts.fredoka(
+                          style: GoogleFonts.inter(
                               fontSize: 15,
                               fontWeight: FontWeight.w700,
                               color: Colors.white)),
@@ -2564,7 +2774,7 @@ class _BookingChipRow extends StatelessWidget {
               child: Text(data.label,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: GoogleFonts.fredoka(
+                  style: GoogleFonts.inter(
                       fontSize: 12.5,
                       fontWeight: FontWeight.w700,
                       color: _kInk)),
@@ -2576,7 +2786,7 @@ class _BookingChipRow extends StatelessWidget {
                   color: color.withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(999)),
               child: Text(label,
-                  style: GoogleFonts.jetBrainsMono(
+                  style: GoogleFonts.inter(
                       fontSize: 8.5,
                       fontWeight: FontWeight.w700,
                       color: color,
@@ -2626,7 +2836,7 @@ class _StayBanner extends StatelessWidget {
               child: Text('Staying at ${booking.title}',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: GoogleFonts.fredoka(
+                  style: GoogleFonts.inter(
                       fontSize: 12.5,
                       fontWeight: FontWeight.w700,
                       color: _kInk)),
@@ -2761,10 +2971,10 @@ class _BookingCardState extends State<_BookingCard> {
       builder: (_) => AlertDialog(
         backgroundColor: Colors.white,
         title: Text('Delete booking?',
-            style: GoogleFonts.bebasNeue(fontSize: 20, color: _kInk)),
+            style: GoogleFonts.inter(fontSize: 20, color: _kInk)),
         content: Text(
             'This removes "${widget.booking.title}" from this trip\'s bookings.',
-            style: GoogleFonts.fredoka(color: _kMute)),
+            style: GoogleFonts.inter(color: _kMute)),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(context),
@@ -2850,14 +3060,14 @@ class _BookingCardState extends State<_BookingCard> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(booking.title,
-                        style: GoogleFonts.fredoka(
+                        style: GoogleFonts.inter(
                             fontSize: 14,
                             fontWeight: FontWeight.w700,
                             color: _kInk)),
                     const SizedBox(height: 3),
                     Text(_subtitle(booking),
                         style:
-                            GoogleFonts.fredoka(fontSize: 11, color: _kMute)),
+                            GoogleFonts.inter(fontSize: 11, color: _kMute)),
                   ],
                 ),
               ),
@@ -2869,7 +3079,7 @@ class _BookingCardState extends State<_BookingCard> {
                   borderRadius: BorderRadius.circular(999),
                 ),
                 child: Text(label,
-                    style: GoogleFonts.jetBrainsMono(
+                    style: GoogleFonts.inter(
                         fontSize: 9.5,
                         fontWeight: FontWeight.w700,
                         color: color,
@@ -2906,9 +3116,9 @@ class _BookingCardState extends State<_BookingCard> {
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Text('Confirmation',
-                      style: GoogleFonts.fredoka(fontSize: 11, color: _kMute)),
+                      style: GoogleFonts.inter(fontSize: 11, color: _kMute)),
                   Text(booking.confirmationRef!,
-                      style: GoogleFonts.jetBrainsMono(
+                      style: GoogleFonts.inter(
                           fontSize: 11,
                           fontWeight: FontWeight.w700,
                           color: _kInk,
@@ -2926,7 +3136,7 @@ class _BookingCardState extends State<_BookingCard> {
                     booking.amountVnd == 0
                         ? 'Free'
                         : '${widget.symbol}${Trip.formatVnd(booking.amountVnd!, short: true)}',
-                    style: GoogleFonts.jetBrainsMono(
+                    style: GoogleFonts.inter(
                         fontSize: 12,
                         fontWeight: FontWeight.w700,
                         color: _kInk),
@@ -2940,7 +3150,7 @@ class _BookingCardState extends State<_BookingCard> {
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style:
-                            GoogleFonts.fredoka(fontSize: 11, color: _kTeal)),
+                            GoogleFonts.inter(fontSize: 11, color: _kTeal)),
                   ),
                 ],
                 const Spacer(),
@@ -2965,7 +3175,7 @@ class _BookingCardState extends State<_BookingCard> {
                                       strokeWidth: 2, color: AppTheme.primary),
                                 )
                               : Text('Log expense',
-                                  style: GoogleFonts.fredoka(
+                                  style: GoogleFonts.inter(
                                       fontSize: 11,
                                       fontWeight: FontWeight.w700,
                                       color: AppTheme.primary)),
@@ -3203,7 +3413,7 @@ class _BookingFormSheetState extends State<_BookingFormSheet> {
                   children: [
                     Text(_isEdit ? 'Edit booking' : 'Add booking',
                         style:
-                            GoogleFonts.bebasNeue(fontSize: 18, color: _kInk)),
+                            GoogleFonts.inter(fontSize: 18, color: _kInk)),
                     const SizedBox(height: 16),
                     Wrap(
                       spacing: 8,
@@ -3220,13 +3430,13 @@ class _BookingFormSheetState extends State<_BookingFormSheet> {
                     const SizedBox(height: 12),
                     TextField(
                       controller: _titleCtrl,
-                      style: GoogleFonts.fredoka(fontSize: 14, color: _kInk),
+                      style: GoogleFonts.inter(fontSize: 14, color: _kInk),
                       decoration: _lightFieldDecoration('Title'),
                     ),
                     const SizedBox(height: 12),
                     TextField(
                       controller: _providerCtrl,
-                      style: GoogleFonts.fredoka(fontSize: 14, color: _kInk),
+                      style: GoogleFonts.inter(fontSize: 14, color: _kInk),
                       decoration:
                           _lightFieldDecoration(_bookingProviderHint(_type)),
                     ),
@@ -3249,7 +3459,7 @@ class _BookingFormSheetState extends State<_BookingFormSheet> {
                     const SizedBox(height: 12),
                     TextField(
                       controller: _confirmationCtrl,
-                      style: GoogleFonts.fredoka(fontSize: 14, color: _kInk),
+                      style: GoogleFonts.inter(fontSize: 14, color: _kInk),
                       decoration: _lightFieldDecoration(
                           'Confirmation number (optional)'),
                     ),
@@ -3258,13 +3468,13 @@ class _BookingFormSheetState extends State<_BookingFormSheet> {
                       controller: _amountCtrl,
                       keyboardType: TextInputType.number,
                       inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                      style: GoogleFonts.fredoka(fontSize: 14, color: _kInk),
+                      style: GoogleFonts.inter(fontSize: 14, color: _kInk),
                       decoration: _lightFieldDecoration('Blank = TBD, 0 = free')
                           .copyWith(prefixText: '$symbol '),
                     ),
                     const SizedBox(height: 14),
                     Text('Status',
-                        style: GoogleFonts.fredoka(
+                        style: GoogleFonts.inter(
                             fontSize: 12,
                             fontWeight: FontWeight.w700,
                             color: _kMute)),
@@ -3282,7 +3492,7 @@ class _BookingFormSheetState extends State<_BookingFormSheet> {
                     ),
                     const SizedBox(height: 14),
                     Text('Itinerary stop',
-                        style: GoogleFonts.fredoka(
+                        style: GoogleFonts.inter(
                             fontSize: 12,
                             fontWeight: FontWeight.w700,
                             color: _kMute)),
@@ -3310,7 +3520,7 @@ class _BookingFormSheetState extends State<_BookingFormSheet> {
                                   strokeWidth: 2, color: Colors.white),
                             )
                           : Text('Save',
-                              style: GoogleFonts.fredoka(
+                              style: GoogleFonts.inter(
                                   fontSize: 15,
                                   fontWeight: FontWeight.w700,
                                   color: Colors.white)),
@@ -3623,13 +3833,13 @@ class _OverallCard extends StatelessWidget {
             textBaseline: TextBaseline.alphabetic,
             children: [
               Text('$symbol${Trip.formatVnd(spentVnd, short: true)}',
-                  style: GoogleFonts.bebasNeue(fontSize: 26, color: _kInk)),
+                  style: GoogleFonts.inter(fontSize: 26, color: _kInk)),
               const SizedBox(width: 6),
               Text('/ $symbol${Trip.formatVnd(budgetVnd, short: true)}',
-                  style: GoogleFonts.fredoka(fontSize: 13, color: _kMute)),
+                  style: GoogleFonts.inter(fontSize: 13, color: _kMute)),
               const Spacer(),
               Text('$pct% SPENT',
-                  style: GoogleFonts.jetBrainsMono(
+                  style: GoogleFonts.inter(
                       fontSize: 10.5,
                       color: _kMute,
                       fontWeight: FontWeight.w700)),
@@ -3724,7 +3934,7 @@ class _CategoryBudgetRow extends StatelessWidget {
         Row(
           children: [
             Text(label,
-                style: GoogleFonts.fredoka(
+                style: GoogleFonts.inter(
                     fontSize: 13, fontWeight: FontWeight.w700, color: _kInk)),
             if (status.over) ...[
               const SizedBox(width: 6),
@@ -3734,7 +3944,7 @@ class _CategoryBudgetRow extends StatelessWidget {
                     color: _kCritical.withValues(alpha: 0.12),
                     borderRadius: BorderRadius.circular(5)),
                 child: Text('OVER',
-                    style: GoogleFonts.jetBrainsMono(
+                    style: GoogleFonts.inter(
                         fontSize: 9,
                         color: _kCritical,
                         fontWeight: FontWeight.w700)),
@@ -3743,7 +3953,7 @@ class _CategoryBudgetRow extends StatelessWidget {
             const Spacer(),
             Text(
                 '$symbol${Trip.formatVnd(actualVnd, short: true)} / $symbol${Trip.formatVnd(plannedVnd, short: true)}',
-                style: GoogleFonts.jetBrainsMono(fontSize: 11, color: _kMute)),
+                style: GoogleFonts.inter(fontSize: 11, color: _kMute)),
           ],
         ),
         const SizedBox(height: 6),
@@ -3867,7 +4077,7 @@ class _ExpenseRow extends StatelessWidget {
                           Text(expense.title,
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
-                              style: GoogleFonts.fredoka(
+                              style: GoogleFonts.inter(
                                   fontSize: 14,
                                   fontWeight: FontWeight.w700,
                                   color: _kInk)),
@@ -3875,7 +4085,7 @@ class _ExpenseRow extends StatelessWidget {
                           Text(_metaLine,
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
-                              style: GoogleFonts.jetBrainsMono(
+                              style: GoogleFonts.inter(
                                   fontSize: 10.5, color: _kMute)),
                         ],
                       ),
@@ -3883,7 +4093,7 @@ class _ExpenseRow extends StatelessWidget {
                     const SizedBox(width: 8),
                     Text(
                         '$symbol${Trip.formatVnd(expense.amount.round(), short: true)}',
-                        style: GoogleFonts.fredoka(
+                        style: GoogleFonts.inter(
                             fontSize: 14,
                             fontWeight: FontWeight.w700,
                             color: _kInk)),
@@ -3955,7 +4165,7 @@ class _SplitDetails extends StatelessWidget {
             hasRealShares
                 ? 'CUSTOM SPLIT'
                 : 'EQUAL SPLIT · ${memberIds.length} ${memberIds.length == 1 ? 'PERSON' : 'PEOPLE'}',
-            style: GoogleFonts.jetBrainsMono(
+            style: GoogleFonts.inter(
                 fontSize: 9.5,
                 color: _kMute,
                 letterSpacing: 0.6,
@@ -4017,7 +4227,7 @@ class _SplitMemberRow extends StatelessWidget {
             child: Text(traveler?.displayName ?? 'Unknown',
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: GoogleFonts.fredoka(fontSize: 12.5, color: _kInk)),
+                style: GoogleFonts.inter(fontSize: 12.5, color: _kInk)),
           ),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
@@ -4025,7 +4235,7 @@ class _SplitMemberRow extends StatelessWidget {
                 color: color.withValues(alpha: 0.12),
                 borderRadius: BorderRadius.circular(999)),
             child: Text(label,
-                style: GoogleFonts.jetBrainsMono(
+                style: GoogleFonts.inter(
                     fontSize: 9.5,
                     fontWeight: FontWeight.w700,
                     color: color,
@@ -4103,7 +4313,7 @@ class _SettleUpRow extends StatelessWidget {
                 '${from?.displayName ?? 'Someone'} → ${to?.displayName ?? 'someone'}',
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: GoogleFonts.fredoka(
+                style: GoogleFonts.inter(
                     fontSize: 13, fontWeight: FontWeight.w600, color: _kInk)),
           ),
           const SizedBox(width: 8),
@@ -4111,7 +4321,7 @@ class _SettleUpRow extends StatelessWidget {
           const SizedBox(width: 10),
           Text(
               '$symbol${Trip.formatVnd(balance.amountVnd.round(), short: true)}',
-              style: GoogleFonts.jetBrainsMono(
+              style: GoogleFonts.inter(
                   fontSize: 13,
                   fontWeight: FontWeight.w700,
                   color: AppTheme.primary)),

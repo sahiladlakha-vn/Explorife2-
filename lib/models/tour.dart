@@ -10,17 +10,26 @@ class TourItineraryStep {
   final String title;
   final String? description;
 
-  const TourItineraryStep({required this.title, this.description});
+  /// Free text (e.g. "9:00 AM", "Day 1 — morning") — same "no structured
+  /// type" reasoning as [Tour.durationLabel]/[Tour.cancellationPolicy]:
+  /// itineraries here are single-day or loosely staged, so a real
+  /// start-time/duration pair would be more structure than any current
+  /// data source actually has. Null renders as an untimed step, not "TBD".
+  final String? time;
+
+  const TourItineraryStep({required this.title, this.description, this.time});
 
   factory TourItineraryStep.fromJson(Map<String, dynamic> json) =>
       TourItineraryStep(
         title: json['title'] as String? ?? '',
         description: json['description'] as String?,
+        time: json['time'] as String?,
       );
 
   Map<String, dynamic> toJson() => {
         'title': title,
         if (description != null) 'description': description,
+        if (time != null) 'time': time,
       };
 }
 
@@ -69,8 +78,18 @@ class Tour {
   final bool pickupIncluded;
   final String? pickupDetail;
 
+  /// Free text, e.g. "Small group (max 12)", "Private tour" — same
+  /// no-structured-type reasoning as [durationLabel]. Null renders as
+  /// "Not specified" in the quick-facts row rather than a fabricated size.
+  final String? groupSizeLabel;
+
   final List<String> guideLanguages;
   final List<String> includes;
+
+  /// What this tour's price does NOT cover (e.g. "Entrance fees",
+  /// "Alcoholic drinks") — shown alongside [includes] as two independent
+  /// lists on the Includes tab. Empty (not fabricated) when unknown.
+  final List<String> excludes;
   final List<TourItineraryStep> itinerary;
   final List<String> highlights;
   final String? fullDescription;
@@ -94,8 +113,10 @@ class Tour {
     this.cancellationPolicy,
     this.pickupIncluded = false,
     this.pickupDetail,
+    this.groupSizeLabel,
     this.guideLanguages = const [],
     this.includes = const [],
+    this.excludes = const [],
     this.itinerary = const [],
     this.highlights = const [],
     this.fullDescription,
@@ -114,9 +135,11 @@ class Tour {
         cancellationPolicy: json['cancellation_policy'] as String?,
         pickupIncluded: json['pickup_included'] as bool? ?? false,
         pickupDetail: json['pickup_detail'] as String?,
+        groupSizeLabel: json['group_size_label'] as String?,
         guideLanguages:
             (json['guide_languages'] as List?)?.cast<String>() ?? const [],
         includes: (json['includes'] as List?)?.cast<String>() ?? const [],
+        excludes: (json['excludes'] as List?)?.cast<String>() ?? const [],
         itinerary: (json['itinerary'] as List?)
                 ?.map((e) => TourItineraryStep.fromJson(e as Map<String, dynamic>))
                 .toList() ??

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -39,10 +40,11 @@ import '../../../widgets/app_network_image.dart';
 // through into the payload whenever Mapbox has them (immediately for a
 // Tilequery nearby result; resolved via one retrieve() call on tap for a
 // Search Box suggestion), which is what makes them show up on the trip map
-// (trip_route.dart's `_syntheticPlottableGem`). Only a genuinely-typed
-// custom stop (the "+ Add a custom stop" fallback below) stays coordinate-
-// less and map-invisible — that's a real gap (no location was ever
-// searched), not a bug.
+// (trip_route.dart's `_syntheticPlottableGem`). A genuinely-typed custom stop
+// (the "+ Add a custom stop" fallback below), or a selected place whose
+// retrieve() failed, never had a searched coordinate of its own — see
+// `_confirm`/`_jitteredFallbackCoords`, which fall both back to the trip's
+// destination center instead of leaving the stop map-invisible.
 
 /// Below this many location-tagged matches, discovery gives up on the
 /// location filter and shows the whole catalogue instead. A trip whose city
@@ -325,6 +327,19 @@ class _AddStopSheetState extends State<AddStopSheet> {
       _selectedPlace != null ||
       (_customMode && _customNameCtrl.text.trim().isNotEmpty);
 
+  // A manually-typed custom stop, or a selected place whose real-time
+  // retrieve() failed, has no searched coordinates of its own — previously
+  // that meant the stop was silently invisible on the day map (plotStops
+  // simply drops anything without lat/lng). Falling back to the trip's own
+  // destination center (jittered a little so several such stops on the same
+  // day don't stack on one point) keeps every added stop plottable instead.
+  (double, double) _jitteredFallbackCoords() {
+    final (lat, lng) = _proximity;
+    final rng = Random();
+    return (lat + (rng.nextDouble() - 0.5) * 0.01,
+        lng + (rng.nextDouble() - 0.5) * 0.01);
+  }
+
   // Fire-and-forget: addStop is optimistic and self-rolls-back on error,
   // same convention as every other stop mutation in this app (TimeSlotBlock's
   // old drag-drop, the itinerary segment's edit sheet, etc.).
@@ -341,23 +356,29 @@ class _AddStopSheetState extends State<AddStopSheet> {
           );
     } else if (_selectedPlace != null) {
       final place = _selectedPlace!;
+      final (fallbackLat, fallbackLng) = _jitteredFallbackCoords();
       context.read<TripProvider>().addStop(
             tripId: widget.tripId,
             day: widget.day,
             slot: _slot,
             customPayload: {
               'title': place.name,
-              if (place.lat != null && place.lng != null) 'lat': place.lat,
-              if (place.lat != null && place.lng != null) 'lng': place.lng,
+              'lat': place.lat ?? fallbackLat,
+              'lng': place.lng ?? fallbackLng,
             },
             startTime: _time,
           );
     } else {
+      final (lat, lng) = _jitteredFallbackCoords();
       context.read<TripProvider>().addStop(
             tripId: widget.tripId,
             day: widget.day,
             slot: _slot,
-            customPayload: {'title': _customNameCtrl.text.trim()},
+            customPayload: {
+              'title': _customNameCtrl.text.trim(),
+              'lat': lat,
+              'lng': lng,
+            },
             startTime: _time,
           );
     }
@@ -803,11 +824,8 @@ class _GemResultRow extends StatelessWidget {
 /// [lat]/[lng]: Tilequery results have them from the start; a Search Box
 /// suggestion doesn't until [_AddStopSheetState._selectPlace] resolves it via
 /// `MapboxSearchService.retrieve` on tap (hence [mapboxId] — the resolve
-/// target). Whatever ends up here is exactly what gets written into the
-/// stop's custom_payload, which is what makes it plottable on the trip map
-/// (see trip_route.dart's `_syntheticPlottableGem`) — a place with no
-/// resolvable coordinates still gets added, just as a title-only stop, same
-/// as a manual custom entry.
+/// target). If that resolve fails, `_confirm` substitutes the trip's own
+/// destination-center fallback rather than leaving the stop unplottable.
 class _RealPlace {
   final String name;
   final String? category;

@@ -40,7 +40,7 @@ class _CardHeader extends StatelessWidget {
         const SizedBox(width: 8),
         Text(
           label,
-          style: GoogleFonts.jetBrainsMono(
+          style: GoogleFonts.inter(
             fontSize: 13,
             fontWeight: FontWeight.w700,
             color: color,
@@ -86,14 +86,13 @@ class _StoryRow extends StatelessWidget {
                     story.title,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: GoogleFonts.fredoka(
+                    style: GoogleFonts.inter(
                         fontSize: 16, fontWeight: FontWeight.w800, color: _kInk),
                   ),
                   const SizedBox(height: 3),
                   Text(
-                    (story.location ?? 'UNKNOWN').toUpperCase(),
-                    style: GoogleFonts.jetBrainsMono(
-                        fontSize: 11, color: _kMute, letterSpacing: 0.5),
+                    story.location ?? 'Unknown',
+                    style: GoogleFonts.inter(fontSize: 11, color: _kMute),
                   ),
                 ],
               ),
@@ -113,12 +112,11 @@ class _StoryRow extends StatelessWidget {
                       size: 12, color: pillColor),
                   const SizedBox(width: 4),
                   Text(
-                    story.status.toUpperCase(),
-                    style: GoogleFonts.jetBrainsMono(
-                        fontSize: 10,
-                        fontWeight: FontWeight.w700,
-                        color: pillColor,
-                        letterSpacing: 0.5),
+                    story.status,
+                    style: GoogleFonts.inter(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        color: pillColor),
                   ),
                 ],
               ),
@@ -155,11 +153,11 @@ class _EmptyState extends StatelessWidget {
             Icon(icon, size: 56, color: _kBorder),
             const SizedBox(height: 16),
             Text(title,
-                style: GoogleFonts.bebasNeue(fontSize: 26, color: _kInk)),
+                style: GoogleFonts.inter(fontSize: 26, color: _kInk)),
             const SizedBox(height: 6),
             Text(subtitle,
                 textAlign: TextAlign.center,
-                style: GoogleFonts.fredoka(
+                style: GoogleFonts.inter(
                     fontSize: 14, color: _kMute, height: 1.5)),
             if (cta != null) ...[
               const SizedBox(height: 20),
@@ -173,7 +171,7 @@ class _EmptyState extends StatelessWidget {
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: Text(cta!,
-                      style: GoogleFonts.fredoka(
+                      style: GoogleFonts.inter(
                           fontSize: 14,
                           fontWeight: FontWeight.w700,
                           color: Colors.white)),
@@ -198,7 +196,7 @@ class _SignInPrompt extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppTheme.lightSurface,
+      backgroundColor: _kPage,
       body: SafeArea(
         child: Center(
           child: SingleChildScrollView(

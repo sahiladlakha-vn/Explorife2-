@@ -145,6 +145,15 @@ class MapEngineView extends StatefulWidget {
   /// selected" state in sync without guessing.
   final VoidCallback? onCalloutClosed;
 
+  /// False for a read-only "here's the pin" preview (e.g. GemDetailScreen's
+  /// map sidebar) — disables all flutter_map gestures (drag/zoom/rotate) so
+  /// the map is a plain, unclickable snapshot. True (default) everywhere the
+  /// map is the primary, pannable/zoomable surface. See map_engine_web.dart's
+  /// doc comment for why this exists — a web-only wheel/focus-capture issue —
+  /// but it's threaded through here too for API parity and so the "static
+  /// preview" behavior is identical cross-platform, not just a web patch.
+  final bool interactive;
+
   const MapEngineView({
     super.key,
     required this.markers,
@@ -159,6 +168,7 @@ class MapEngineView extends StatefulWidget {
     this.userLng,
     this.routes,
     this.onCalloutClosed,
+    this.interactive = true,
   });
 
   @override
@@ -227,6 +237,9 @@ class _MapEngineViewState extends State<MapEngineView> {
         initialZoom: 3,
         minZoom: 2,
         maxZoom: 18,
+        interactionOptions: InteractionOptions(
+          flags: widget.interactive ? InteractiveFlag.all : InteractiveFlag.none,
+        ),
         onMapReady: () => widget.onReady(_NativeController(
             _controller, _fit, _showCallout, () => _hideCallout())),
         // Tapping empty map space (not a marker) dismisses any open callout

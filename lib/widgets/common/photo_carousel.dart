@@ -29,6 +29,7 @@ class PhotoCarousel extends StatefulWidget {
     this.aspectRatio = 4 / 3,
     this.topLeft,
     this.topRight,
+    this.showIndexBadge = false,
   });
 
   final List<String> photos;
@@ -51,6 +52,11 @@ class PhotoCarousel extends StatefulWidget {
   /// several icons. Null means that side renders nothing.
   final Widget? topLeft;
   final Widget? topRight;
+
+  /// Shows a "1 / 8" pill in the bottom-right corner when there's more than
+  /// one photo. Opt-in (defaults off) so existing callers (GemDetailScreen)
+  /// keep their current look unless they ask for this too.
+  final bool showIndexBadge;
 
   @override
   State<PhotoCarousel> createState() => _PhotoCarouselState();
@@ -181,6 +187,24 @@ class _PhotoCarouselState extends State<PhotoCarousel> {
                           ),
                         ),
                     ],
+                  ),
+                ),
+              if (widget.showIndexBadge && hasMultiple)
+                Positioned(
+                  bottom: 14,
+                  right: 14,
+                  child: Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withValues(alpha: 0.55),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Text('${_index + 1} / $count',
+                        style: GoogleFonts.jetBrainsMono(
+                            fontSize: 11,
+                            color: Colors.white,
+                            fontWeight: FontWeight.w600)),
                   ),
                 ),
             ],

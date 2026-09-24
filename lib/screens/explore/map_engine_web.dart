@@ -13,8 +13,8 @@ import 'map_types.dart';
 
 // ── JS bridge externs (must match window.explorife* in mapbox_globe.js) ──
 @JS('explorifeMapInit')
-external void _mapInit(
-    web.HTMLElement el, JSString token, JSString style, JSFunction onTap);
+external void _mapInit(web.HTMLElement el, JSString token, JSString style,
+    JSFunction onTap, JSBoolean interactive);
 
 @JS('explorifeMapSetGems')
 external void _mapSetGems(web.HTMLElement el, JSString gemsJson);
@@ -227,6 +227,13 @@ class MapEngineView extends StatefulWidget {
   /// keep its own "which marker is selected" state in sync without guessing.
   final VoidCallback? onCalloutClosed;
 
+  /// False for a read-only "here's the pin" preview (e.g. GemDetailScreen's
+  /// map sidebar) — disables Mapbox's own scroll-zoom/drag-pan/keyboard-pan
+  /// handlers so the map doesn't fight the surrounding page for the mouse
+  /// wheel or keyboard focus. True (default) everywhere the map is the
+  /// primary, pannable/zoomable surface (explore, itinerary, placement).
+  final bool interactive;
+
   const MapEngineView({
     super.key,
     required this.markers,
@@ -241,6 +248,7 @@ class MapEngineView extends StatefulWidget {
     this.userLng,
     this.routes,
     this.onCalloutClosed,
+    this.interactive = true,
   });
 
   @override
@@ -269,7 +277,8 @@ class _MapEngineViewState extends State<MapEngineView> {
     _initialised = true;
     final onTap =
         ((JSString id) => widget.onMarkerTap(id.toDart)).toJS;
-    _mapInit(_host, widget.token.toJS, widget.styleId.toJS, onTap);
+    _mapInit(_host, widget.token.toJS, widget.styleId.toJS, onTap,
+        widget.interactive.toJS);
     _pushMarkers();
     if (widget.onCameraIdle != null) {
       final onIdle = ((JSNumber lat, JSNumber lng, JSNumber west, JSNumber south,

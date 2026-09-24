@@ -77,7 +77,7 @@
     } catch (e) { /* active style has no 'basemap' config (not Standard) */ }
   }
 
-  window.explorifeMapInit = function (el, token, style, onTap) {
+  window.explorifeMapInit = function (el, token, style, onTap, interactive) {
     if (!libReady()) {
       console.error('[explorife] mapbox-gl not loaded');
       return;
@@ -94,6 +94,21 @@
       projection: 'globe',
       attributionControl: false,
     });
+
+    // Read-only "here's the pin" preview (e.g. GemDetailScreen's map
+    // sidebar): strip every interaction handler so the map can't grab the
+    // page's scroll wheel or keyboard focus away from the surrounding
+    // Flutter content — a plain, unclickable snapshot with just the pin.
+    if (interactive === false) {
+      map.scrollZoom.disable();
+      map.boxZoom.disable();
+      map.dragRotate.disable();
+      map.dragPan.disable();
+      map.keyboard.disable();
+      map.doubleClickZoom.disable();
+      map.touchZoomRotate.disable();
+      map.touchPitch.disable();
+    }
 
     el._mb = map;
     el._markers = {};
