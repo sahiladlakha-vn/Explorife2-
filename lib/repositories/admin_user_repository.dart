@@ -14,6 +14,29 @@ class AdminRoleUpdateException implements Exception {
   String toString() => message;
 }
 
+/// Thrown by [AdminUserRepository.createUser] and
+/// [AdminUserRepository.resendInvite] — both go through the `admin-create-
+/// user` Edge Function (see that function's own doc comment for why this
+/// can't just be a plain RPC: it needs the service-role key for the Auth
+/// Admin API, which must never reach the client). The function always
+/// responds with a JSON `{"error": "..."}` body on a non-2xx status, so this
+/// carries that message straight through rather than a generic
+/// [FunctionException] with an opaque status code.
+class AdminUserActionException implements Exception {
+  final String message;
+  AdminUserActionException(this.message);
+  @override
+  String toString() => message;
+
+  static AdminUserActionException from(FunctionException e, String fallback) {
+    final details = e.details;
+    if (details is Map && details['error'] is String) {
+      return AdminUserActionException(details['error'] as String);
+    }
+    return AdminUserActionException(fallback);
+  }
+}
+
 /// One row of the admin "Users" roster — see [AdminUserRepository] for
 /// where this data actually comes from and why.
 class AdminUserRow {
@@ -27,6 +50,35 @@ class AdminUserRow {
   final Role role;
   final DateTime createdAt;
   final int tripCount;
+  // From auth.users, added by the `admin_list_users_invite_status`
+  // migration. A row is a "Pending invite" iff it was invited AND has never
+  // confirmed its email — the same two columns `admin_create_user_profile`
+  // itself gates on server-side, so this client-side label can't drift from
+  // what the Edge Function/RPC actually treat as "still pending".
+  final DateTime? invitedAt;
+  final DateTime? emailConfirmedAt;
+
+  bool get isPendingInvite => invitedAt != null && emailConfirmedAt == null;
+
+  // Backs the Users panel's optimistic post-reassignment update (see
+  // _UsersPanelState._reassign) — lets the row's role badge flip the
+  // instant admin_update_user_role succeeds, without a full re-fetch (and
+  // the loading-spinner flash that replaces the whole table while it's in
+  // flight; see _UsersPanelState.build's `if (_loading)` branch).
+  AdminUserRow copyWith({Role? role}) => AdminUserRow(
+        id: id,
+        displayName: displayName,
+        username: username,
+        avatarUrl: avatarUrl,
+        email: email,
+        provider: provider,
+        isAnonymous: isAnonymous,
+        role: role ?? this.role,
+        createdAt: createdAt,
+        tripCount: tripCount,
+        invitedAt: invitedAt,
+        emailConfirmedAt: emailConfirmedAt,
+      );
 
   AdminUserRow({
     required this.id,
@@ -39,6 +91,8 @@ class AdminUserRow {
     required this.role,
     required this.createdAt,
     required this.tripCount,
+    this.invitedAt,
+    this.emailConfirmedAt,
   });
 
   factory AdminUserRow.fromJson(Map<String, dynamic> json) => AdminUserRow(
@@ -52,6 +106,12 @@ class AdminUserRow {
         role: Role.fromWire(json['role'] as String?),
         createdAt: DateTime.parse(json['created_at'] as String),
         tripCount: (json['trip_count'] as num?)?.toInt() ?? 0,
+        invitedAt: json['invited_at'] == null
+            ? null
+            : DateTime.parse(json['invited_at'] as String),
+        emailConfirmedAt: json['email_confirmed_at'] == null
+            ? null
+            : DateTime.parse(json['email_confirmed_at'] as String),
       );
 }
 
@@ -164,6 +224,52 @@ class AdminUserRepository {
       });
     } on PostgrestException catch (e) {
       throw AdminRoleUpdateException(e.message);
+    }
+  }
+
+  /// Backs the Users panel's "New User" form. Goes through the
+  /// `admin-create-user` Edge Function rather than any client-side call —
+  /// sending the invite email requires the service-role key
+  /// (`auth.admin.inviteUserByEmail`), which must never reach the client;
+  /// see that function's own doc comment for the full two-client design.
+  /// The function itself re-checks super_admin server-side, so this is
+  /// exactly as safe to call as [updateRole] is — a non-admin caller just
+  /// gets [AdminUserActionException] back instead of anything happening.
+  Future<AdminUserRow> createUser({
+    required String fullName,
+    required String email,
+    String? username,
+    required Role role,
+  }) async {
+    try {
+      final response = await _db.functions.invoke('admin-create-user', body: {
+        'full_name': fullName,
+        'email': email,
+        if (username != null && username.trim().isNotEmpty)
+          'username': username.trim(),
+        'role': role.wire,
+      });
+      final data = response.data as Map<String, dynamic>;
+      return AdminUserRow.fromJson(data['user'] as Map<String, dynamic>);
+    } on FunctionException catch (e) {
+      throw AdminUserActionException.from(e, 'Could not create the user.');
+    }
+  }
+
+  /// Backs the Users panel's row-level "Resend invite" action, shown only
+  /// for a row where [AdminUserRow.isPendingInvite] is true. Deliberately
+  /// sends only the target's id — the Edge Function looks up the email
+  /// server-side via the service-role Auth Admin API rather than trusting
+  /// one from the client, and independently re-confirms the invite is still
+  /// pending before resending (see that function's `handleResendInvite`).
+  Future<void> resendInvite(String userId) async {
+    try {
+      await _db.functions.invoke('admin-create-user', body: {
+        'action': 'resend_invite',
+        'user_id': userId,
+      });
+    } on FunctionException catch (e) {
+      throw AdminUserActionException.from(e, 'Could not resend the invite.');
     }
   }
 }

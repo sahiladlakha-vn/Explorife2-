@@ -76,17 +76,6 @@ class _SettingsTabState extends State<_SettingsTab> {
   bool _isAdmin(BuildContext context) =>
       context.watch<AuthProvider>().role.isAdminTier;
 
-  // Narrower than _isAdmin above — gates the ROLE column's edit affordance
-  // inside the Users/Profiles tables, not a sidebar item. Mirrors
-  // is_super_admin() server-side (profiles_update_admin policy +
-  // admin_update_user_role RPC): the full admin tier can already *see*
-  // every profile via _isAdmin, but only a super_admin can actually change
-  // someone's role. This is UI convenience only — the RPC re-checks the
-  // caller's role itself and raises for anyone else, same defense-in-depth
-  // pattern as _isAdmin's own doc comment.
-  bool _isSuperAdmin(BuildContext context) =>
-      context.watch<AuthProvider>().role == Role.superAdmin;
-
   // ── Mobile — unchanged from before this redesign. ──
   Widget _buildMobile(BuildContext context) {
     return ListView(
@@ -380,8 +369,15 @@ class _SettingsTabState extends State<_SettingsTab> {
         // admin_list_users function server-side) — covers the edge case
         // of _category already being `users` when isAdmin flips to false
         // (e.g. a role change lands mid-session), so the panel doesn't
-        // sit on a sidebar item that just disappeared.
-        return isAdmin ? const _UsersPanel() : _EditProfilePanel(memberSince: widget.memberSince);
+        // sit on a sidebar item that just disappeared. allowReassign: true
+        // here (unlike the pre-existing default) turns on "New user" /
+        // "Change profile" / "Resend invite" for a super_admin caller — see
+        // _UsersPanel's doc comment; _UsersPanelState.build() further ANDs
+        // this with isSuperAdmin, so a non-super_admin admin-tier caller
+        // still gets a plain read-only roster.
+        return isAdmin
+            ? const _UsersPanel(allowReassign: true)
+            : _EditProfilePanel(memberSince: widget.memberSince);
       case _SettingsCategory.profiles:
         // Same defensive fallback as Users, above. This used to be the
         // same raw/anonymous-inclusive _UsersPanel as Users with different
@@ -648,15 +644,14 @@ class _HelpSupportPanel extends StatelessWidget {
 /// Admin-only roster — see [_SettingsTabState._isAdmin]'s doc comment for
 /// why reaching this panel at all already implies an admin-tier role, and
 /// [AdminUserRepository]'s doc comment for why the actual access control
-/// lives server-side (the `admin_list_users` function), not here.
+/// lives server-side (the `admin_list_users` function/`admin-create-user`
+/// Edge Function), not here.
 ///
-/// Read-only by default (no row-level "..." overflow menu) — what an admin
-/// should be able to *do* to another account beyond viewing is a separate
-/// scope/risk decision, still undecided in general. The one deliberate
-/// exception is [allowReassign]: the Profiles detail page (_ProfileDetailPanel)
-/// passes it true for its "Assigned Users" section specifically, since
-/// reassigning a user's profile from that page was an explicit, scoped
-/// requirement — everywhere else this stays read-only.
+/// Row actions ("New user", the ⋯ menu's "Change profile"/"Resend invite")
+/// are all additionally gated to a super_admin caller specifically — see
+/// [allowReassign]'s doc comment below, and the "Users" sidebar item's own
+/// `isAdmin` gate (content_moderator/regional_admin/finance_admin can still
+/// *see* this roster, same as ever, just without those controls).
 class _UsersPanel extends StatefulWidget {
   // Set by _ProfileDetailPanel to scope the roster to one profile/role;
   // null (the default, plain "Users" sidebar item) matches every role.
@@ -666,9 +661,22 @@ class _UsersPanel extends StatefulWidget {
   // "Profiles" raw dump moved to), off when embedded read-only inside a
   // Profile detail page (a role-scoped roster has no "guest sessions"
   // reading to toggle in the first place; every guest defaults to the
-  // traveler role but isn't meaningfully "assigned" to it).
+  // traveler role but isn't meaningfully "assigned" to it). Reused as the
+  // same discriminator for the "New user" button — that action belongs to
+  // the plain Users page, not the embedded Assigned Users table.
   final bool showAllAccountsToggle;
   final bool showAdminTag;
+  // Governs both the row-level "Change profile" menu item and (together
+  // with [showAllAccountsToggle]) the "New user" button and "Resend invite"
+  // menu item. Mirrors is_super_admin() server-side (profiles_update_admin
+  // policy + admin_update_user_role/admin_create_user_profile/
+  // admin_log_resend_invite RPCs, all called through the same
+  // AdminUserRepository/admin-create-user Edge Function): the full admin
+  // tier can already *see* every profile via the sidebar's isAdmin gate,
+  // but only a super_admin can actually create a user or change one's role.
+  // This is UI convenience only — every one of those server calls re-checks
+  // the caller's role itself and raises/403s for anyone else, same
+  // defense-in-depth pattern as _isAdmin's own doc comment.
   final bool allowReassign;
   final String title;
   final String subtitle;
@@ -678,8 +686,7 @@ class _UsersPanel extends StatefulWidget {
     this.showAdminTag = true,
     this.allowReassign = false,
     this.title = 'Users',
-    this.subtitle = 'Every account on the platform. Read-only for now — '
-        'no row actions yet.',
+    this.subtitle = 'Every account on the platform.',
   });
 
   @override
@@ -782,7 +789,28 @@ class _UsersPanelState extends State<_UsersPanel> {
       messenger.showSnackBar(SnackBar(
           content: Text(
               '${user.displayName ?? 'User'} reassigned to ${newRole.label}.')));
-      _load();
+      // Optimistic local patch instead of _load() — the RPC above already
+      // succeeded, so a full re-fetch would just be re-learning something
+      // already known, at the cost of build()'s `if (_loading)` branch
+      // swapping the *entire table* out for a spinner just to redraw one
+      // badge (see AdminUserRow.copyWith's doc comment). A role-scoped
+      // roster (widget.role != null — the Profile detail page's "Assigned
+      // Users" section) instead drops the row entirely, since it no longer
+      // belongs in that scope — the same outcome a full _load() would have
+      // produced, just without the round trip or the flash.
+      final users = List<AdminUserRow>.of(_result.users);
+      final index = users.indexWhere((u) => u.id == user.id);
+      if (index != -1) {
+        setState(() {
+          if (widget.role != null && newRole != widget.role) {
+            users.removeAt(index);
+            _result = AdminUserPage(users: users, total: _result.total - 1);
+          } else {
+            users[index] = users[index].copyWith(role: newRole);
+            _result = AdminUserPage(users: users, total: _result.total);
+          }
+        });
+      }
     } on AdminRoleUpdateException catch (e) {
       messenger.showSnackBar(SnackBar(
           content: Text(e.message), backgroundColor: _kCritical));
@@ -793,11 +821,63 @@ class _UsersPanelState extends State<_UsersPanel> {
     }
   }
 
+  // Opens the "New User" form; see _NewUserDialog for the actual fields/
+  // submit flow. Only reloads the roster on an actual success (the dialog
+  // pops `true` itself right after AdminUserRepository.createUser resolves
+  // without throwing) — a cancel or a still-open dialog after a caught
+  // error never touches the list.
+  Future<void> _showNewUserDialog() async {
+    final created = await showDialog<bool>(
+      context: context,
+      builder: (_) => _NewUserDialog(
+        onCreate: ({
+          required String fullName,
+          required String email,
+          String? username,
+          required Role role,
+        }) =>
+            _repo.createUser(
+                fullName: fullName, email: email, username: username, role: role),
+      ),
+    );
+    if (created == true) _load();
+  }
+
+  // Backs the ⋯ menu's "Resend invite" item (only offered for a row where
+  // AdminUserRow.isPendingInvite is true — see _UserRow). The Edge Function
+  // re-derives the email server-side and independently re-confirms the
+  // invite is still pending (AdminUserRepository.resendInvite's doc
+  // comment), so this can't be used to redirect a resend anywhere the
+  // admin doesn't already see in this exact row.
+  Future<void> _resendInvite(AdminUserRow user) async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await _repo.resendInvite(user.id);
+      if (!mounted) return;
+      messenger.showSnackBar(SnackBar(
+          content:
+              Text('Invite resent to ${user.email ?? 'this user'}.')));
+    } on AdminUserActionException catch (e) {
+      messenger.showSnackBar(SnackBar(
+          content: Text(e.message), backgroundColor: _kCritical));
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(
+          content: Text('Could not resend the invite: $e'),
+          backgroundColor: _kCritical));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final total = _result.total;
     final totalPages = total == 0 ? 1 : ((total - 1) ~/ _pageSize) + 1;
     final isSuperAdmin = context.watch<AuthProvider>().role == Role.superAdmin;
+    // "New user" belongs to the plain Users page only (showAllAccountsToggle
+    // doubles as that discriminator — see _UsersPanel's doc comment), and
+    // only for a super_admin — same gate as the row-level "Change
+    // profile"/"Resend invite" menu items below.
+    final showNewUserButton =
+        widget.showAllAccountsToggle && widget.allowReassign && isSuperAdmin;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -820,6 +900,24 @@ class _UsersPanelState extends State<_UsersPanel> {
                         fontSize: 10,
                         fontWeight: FontWeight.w700,
                         color: AppTheme.primary)),
+              ),
+            ],
+            if (showNewUserButton) ...[
+              const Spacer(),
+              ElevatedButton.icon(
+                onPressed: _showNewUserDialog,
+                icon: const Icon(Icons.person_add_alt_1, size: 16),
+                label: Text('New user',
+                    style: GoogleFonts.inter(
+                        fontSize: 13, fontWeight: FontWeight.w700)),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppTheme.primary,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 16, vertical: 10),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10)),
+                ),
               ),
             ],
           ],
@@ -881,6 +979,7 @@ class _UsersPanelState extends State<_UsersPanel> {
             users: _result.users,
             allowReassign: widget.allowReassign && isSuperAdmin,
             onReassign: _reassign,
+            onResendInvite: _resendInvite,
           ),
         const SizedBox(height: 14),
         Row(
@@ -963,16 +1062,22 @@ class _AccountsScopeToggle extends StatelessWidget {
 
 class _UsersTable extends StatelessWidget {
   final List<AdminUserRow> users;
-  // See _UsersPanel's doc comment on [allowReassign] — only the Profile
-  // detail page's Assigned Users section (and only for a super_admin caller)
-  // ever passes true. [onReassign] is required together with it so a
-  // caller can't turn on the affordance without wiring up what it does.
+  // See _UsersPanel's doc comment on [allowReassign] — only a super_admin
+  // caller ever gets true here now (both the plain Users page and the
+  // Profile detail page's Assigned Users section). [onReassign] is required
+  // together with it so a caller can't turn on the affordance without
+  // wiring up what it does.
   final bool allowReassign;
   final void Function(AdminUserRow user, Role newRole)? onReassign;
+  // "Resend invite" is offered per-row independent of [allowReassign] —
+  // see _UserRow, which only actually shows it when both allowReassign is
+  // true AND that row's AdminUserRow.isPendingInvite is true.
+  final void Function(AdminUserRow user)? onResendInvite;
   const _UsersTable({
     required this.users,
     this.allowReassign = false,
     this.onReassign,
+    this.onResendInvite,
   });
 
   static final _dateFormat = DateFormat('MMM d, yyyy');
@@ -1017,6 +1122,9 @@ class _UsersTable extends StatelessWidget {
             dateFormat: _dateFormat,
             allowReassign: allowReassign,
             onReassign: onReassign == null ? null : (r) => onReassign!(user, r),
+            onResendInvite: onResendInvite == null
+                ? null
+                : () => onResendInvite!(user),
           ),
       ],
     );
@@ -1028,11 +1136,16 @@ class _UserRow extends StatelessWidget {
   final DateFormat dateFormat;
   final bool allowReassign;
   final void Function(Role newRole)? onReassign;
+  // Only ever invoked from the ⋯ menu's "Resend invite" item, which only
+  // renders at all when `allowReassign && user.isPendingInvite` — see
+  // build() below.
+  final VoidCallback? onResendInvite;
   const _UserRow({
     required this.user,
     required this.dateFormat,
     this.allowReassign = false,
     this.onReassign,
+    this.onResendInvite,
   });
 
   // auth.users.raw_app_meta_data->>'provider' as returned by admin_list_users
@@ -1092,10 +1205,39 @@ class _UserRow extends StatelessWidget {
           const SizedBox(width: 12),
           Expanded(
             flex: 3,
-            child: Text(name,
-                overflow: TextOverflow.ellipsis,
-                style: GoogleFonts.inter(
-                    fontSize: 13.5, fontWeight: FontWeight.w600, color: _kInk)),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(name,
+                    overflow: TextOverflow.ellipsis,
+                    style: GoogleFonts.inter(
+                        fontSize: 13.5,
+                        fontWeight: FontWeight.w600,
+                        color: _kInk)),
+                // Based on invited_at/email_confirmed_at (see
+                // AdminUserRow.isPendingInvite's doc comment) — disappears on
+                // its own the moment the invitee actually signs in, no
+                // separate "activate" step needed.
+                if (user.isPendingInvite)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 2),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 6, vertical: 1),
+                      decoration: BoxDecoration(
+                        color: _kWarn.withValues(alpha: 0.16),
+                        borderRadius: BorderRadius.circular(5),
+                      ),
+                      child: Text('Pending invite',
+                          style: GoogleFonts.inter(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w700,
+                              color: _kWarn)),
+                    ),
+                  ),
+              ],
+            ),
           ),
           Expanded(
             flex: 2,
@@ -1173,13 +1315,38 @@ class _UserRow extends StatelessWidget {
           if (allowReassign && !user.isAnonymous)
             SizedBox(
               width: 40,
-              child: IconButton(
-                onPressed: () => _showReassignDialog(context),
-                icon: const Icon(Icons.edit_outlined, size: 17),
-                color: _kMute,
-                tooltip: 'Reassign profile',
+              child: PopupMenuButton<String>(
+                icon: const Icon(Icons.more_vert, size: 17, color: _kMute),
+                tooltip: 'Actions',
+                color: _kCard,
                 padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                onSelected: (value) {
+                  switch (value) {
+                    case 'reassign':
+                      _showReassignDialog(context);
+                      break;
+                    case 'resend_invite':
+                      onResendInvite?.call();
+                      break;
+                  }
+                },
+                itemBuilder: (context) => [
+                  PopupMenuItem(
+                    value: 'reassign',
+                    child: Text('Change profile',
+                        style: GoogleFonts.inter(fontSize: 13.5, color: _kInk)),
+                  ),
+                  // Only offered while the invite is actually still pending
+                  // — see AdminUserRow.isPendingInvite's doc comment; once
+                  // the invitee signs in this option just disappears rather
+                  // than erroring if clicked.
+                  if (user.isPendingInvite)
+                    PopupMenuItem(
+                      value: 'resend_invite',
+                      child: Text('Resend invite',
+                          style: GoogleFonts.inter(fontSize: 13.5, color: _kInk)),
+                    ),
+                ],
               ),
             )
           else if (allowReassign)
@@ -1297,6 +1464,236 @@ class _UserRow extends StatelessWidget {
       ),
     );
     if (confirmed == true) onReassign?.call(newRole);
+  }
+}
+
+/// The Users panel's "New user" button opens this. Deliberately a dedicated
+/// [StatefulWidget] rather than the inline `StatefulBuilder` pattern
+/// [_UserRow._showReassignDialog] uses above — that pattern fits a single
+/// synchronous dropdown pick, but this form has its own async submit/
+/// loading/error state (the actual invite send + profile row creation
+/// happens server-side in the `admin-create-user` Edge Function, which can
+/// take a moment and can fail in several distinct, user-facing ways — taken
+/// username, invalid email, already-invited email, etc; see
+/// AdminUserRepository.createUser's doc comment).
+class _NewUserDialog extends StatefulWidget {
+  const _NewUserDialog({required this.onCreate});
+
+  final Future<AdminUserRow> Function({
+    required String fullName,
+    required String email,
+    String? username,
+    required Role role,
+  }) onCreate;
+
+  @override
+  State<_NewUserDialog> createState() => _NewUserDialogState();
+}
+
+class _NewUserDialogState extends State<_NewUserDialog> {
+  final _nameCtrl = TextEditingController();
+  final _emailCtrl = TextEditingController();
+  final _usernameCtrl = TextEditingController();
+  Role _role = Role.traveler;
+  bool _submitting = false;
+  String? _error;
+
+  @override
+  void dispose() {
+    _nameCtrl.dispose();
+    _emailCtrl.dispose();
+    _usernameCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    final fullName = _nameCtrl.text.trim();
+    final email = _emailCtrl.text.trim();
+    final username = _usernameCtrl.text.trim();
+    if (fullName.isEmpty) {
+      setState(() => _error = 'Full name is required.');
+      return;
+    }
+    if (email.isEmpty) {
+      setState(() => _error = 'Email is required.');
+      return;
+    }
+    setState(() {
+      _submitting = true;
+      _error = null;
+    });
+    try {
+      await widget.onCreate(
+        fullName: fullName,
+        email: email,
+        username: username.isEmpty ? null : username,
+        role: _role,
+      );
+      if (!mounted) return;
+      Navigator.of(context).pop(true);
+    } on AdminUserActionException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _submitting = false;
+        _error = e.message;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _submitting = false;
+        _error = 'Could not create the user: $e';
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      backgroundColor: _kCard,
+      title: Text('New user',
+          style: GoogleFonts.inter(
+              fontSize: 17, fontWeight: FontWeight.w700, color: _kInk)),
+      content: SizedBox(
+        width: 360,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+                'Sends an email invite. The account is created as soon as '
+                'they accept it.',
+                style: GoogleFonts.inter(fontSize: 13, color: _kMute)),
+            const SizedBox(height: 16),
+            _FormField(label: 'Full name', controller: _nameCtrl),
+            const SizedBox(height: 12),
+            _FormField(
+                label: 'Email',
+                controller: _emailCtrl,
+                keyboardType: TextInputType.emailAddress),
+            const SizedBox(height: 12),
+            _FormField(
+                label: 'Username (optional)',
+                controller: _usernameCtrl,
+                hint: 'lowercase letters, numbers, underscores'),
+            const SizedBox(height: 12),
+            Text('Profile',
+                style: GoogleFonts.inter(
+                    fontSize: 12.5, fontWeight: FontWeight.w600, color: _kMute)),
+            const SizedBox(height: 6),
+            DropdownButtonFormField<Role>(
+              initialValue: _role,
+              isExpanded: true,
+              dropdownColor: _kCard,
+              style: GoogleFonts.inter(fontSize: 14, color: _kInk),
+              decoration: InputDecoration(
+                filled: true,
+                fillColor: _kPage,
+                contentPadding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(10),
+                  borderSide: const BorderSide(color: _kBorder),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(10),
+                  borderSide: const BorderSide(color: AppTheme.primary),
+                ),
+              ),
+              items: [
+                for (final role in Role.byPrivilege)
+                  DropdownMenuItem(value: role, child: Text(role.label)),
+              ],
+              onChanged: _submitting
+                  ? null
+                  : (value) {
+                      if (value == null) return;
+                      setState(() => _role = value);
+                    },
+            ),
+            if (_error != null) ...[
+              const SizedBox(height: 12),
+              Text(_error!,
+                  style: GoogleFonts.inter(fontSize: 12.5, color: _kCritical)),
+            ],
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed:
+              _submitting ? null : () => Navigator.of(context).pop(false),
+          child: Text('Cancel',
+              style: GoogleFonts.inter(fontSize: 13.5, color: _kMute)),
+        ),
+        ElevatedButton(
+          onPressed: _submitting ? null : _submit,
+          style: ElevatedButton.styleFrom(backgroundColor: AppTheme.primary),
+          child: _submitting
+              ? const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(
+                      strokeWidth: 2, color: Colors.white),
+                )
+              : Text('Send invite',
+                  style: GoogleFonts.inter(
+                      fontSize: 13.5,
+                      fontWeight: FontWeight.w700,
+                      color: Colors.white)),
+        ),
+      ],
+    );
+  }
+}
+
+/// Shared text-field styling for [_NewUserDialogState] — just factors out
+/// the label + TextFormField pairing so the three fields above don't
+/// repeat the same decoration boilerplate three times.
+class _FormField extends StatelessWidget {
+  const _FormField({
+    required this.label,
+    required this.controller,
+    this.hint,
+    this.keyboardType,
+  });
+
+  final String label;
+  final TextEditingController controller;
+  final String? hint;
+  final TextInputType? keyboardType;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(label,
+            style: GoogleFonts.inter(
+                fontSize: 12.5, fontWeight: FontWeight.w600, color: _kMute)),
+        const SizedBox(height: 6),
+        TextField(
+          controller: controller,
+          keyboardType: keyboardType,
+          style: GoogleFonts.inter(fontSize: 14, color: _kInk),
+          decoration: InputDecoration(
+            hintText: hint,
+            hintStyle: GoogleFonts.inter(fontSize: 12.5, color: _kMute),
+            filled: true,
+            fillColor: _kPage,
+            contentPadding:
+                const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(10),
+              borderSide: const BorderSide(color: _kBorder),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(10),
+              borderSide: const BorderSide(color: AppTheme.primary),
+            ),
+          ),
+        ),
+      ],
+    );
   }
 }
 
