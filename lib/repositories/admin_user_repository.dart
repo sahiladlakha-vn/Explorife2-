@@ -65,6 +65,23 @@ class AdminUserPage {
   static const empty = AdminUserPage(users: [], total: 0);
 }
 
+/// One row of `admin_role_counts()` — how many real (non-anonymous)
+/// accounts currently hold each [Role]. Always has exactly 7 entries, one
+/// per [Role] value, even at 0 users — see that function's doc comment
+/// for why (the admin Profiles list shows every role, Salesforce-style,
+/// not just the ones with members today).
+class AdminRoleCount {
+  final Role role;
+  final int userCount;
+  const AdminRoleCount({required this.role, required this.userCount});
+
+  factory AdminRoleCount.fromJson(Map<String, dynamic> json) =>
+      AdminRoleCount(
+        role: Role.fromWire(json['role'] as String?),
+        userCount: (json['user_count'] as num?)?.toInt() ?? 0,
+      );
+}
+
 /// Backs the desktop Settings screen's admin-only "Users" panel.
 ///
 /// Deliberately calls the `admin_list_users` Postgres function (SECURITY
@@ -89,9 +106,14 @@ class AdminUserRepository {
     required int page,
     int pageSize = 20,
     // Off by default — matches the "Users" panel's curated view (real
-    // accounts only). The "Profiles" panel passes true for the raw,
-    // unfiltered view of every `profiles` row, guest sessions included.
+    // accounts only). The Users tab's "All accounts" view passes true for
+    // the raw, unfiltered view of every `profiles` row, guest sessions
+    // included.
     bool includeAnonymous = false,
+    // Set by the Profiles detail page's "Assigned Users" section to scope
+    // the roster to one role — null (the default) matches every role,
+    // same as every pre-existing call site.
+    Role? role,
   }) async {
     final trimmed = search?.trim();
     final data = await _db.rpc('admin_list_users', params: {
@@ -99,6 +121,7 @@ class AdminUserRepository {
       'p_limit': pageSize,
       'p_offset': page * pageSize,
       'p_include_anonymous': includeAnonymous,
+      if (role != null) 'p_role': role.wire,
     });
     final rows = (data as List).cast<Map<String, dynamic>>();
     if (rows.isEmpty) return AdminUserPage.empty;
@@ -107,6 +130,18 @@ class AdminUserRepository {
       users: rows.map(AdminUserRow.fromJson).toList(),
       total: total,
     );
+  }
+
+  /// Backs the admin Profiles list's "Users" column — one row per [Role],
+  /// always all 7 even at 0 members. See `admin_role_counts()`'s doc
+  /// comment for the admin-gate/anonymous-exclusion behavior (same
+  /// conventions as [fetchUsers]'s default view).
+  Future<List<AdminRoleCount>> fetchRoleCounts() async {
+    final data = await _db.rpc('admin_role_counts');
+    return (data as List)
+        .cast<Map<String, dynamic>>()
+        .map(AdminRoleCount.fromJson)
+        .toList();
   }
 
   /// Changes another account's role. Only a `super_admin` may call this

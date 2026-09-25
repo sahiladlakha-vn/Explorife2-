@@ -187,3 +187,81 @@ bool hasPermission(
     _Grant.no => false,
   };
 }
+
+/// Human-readable label + display grouping for [Permission] — used only
+/// by the admin Profiles detail page's "what this profile can do" list.
+/// Purely presentational; [hasPermission]/[_matrix] above remain the only
+/// real enforcement logic.
+extension PermissionDisplay on Permission {
+  String get label => switch (this) {
+        Permission.browseSearchListings => 'Browse & search listings',
+        Permission.bookHotelTourGuide => 'Book a hotel, tour, or guide',
+        Permission.writeReviews => 'Write reviews',
+        Permission.createEditOwnBusinessProfile =>
+          'Create/edit a business profile',
+        Permission.manageOwnBookingsCalendar => 'Manage bookings & calendar',
+        Permission.approveRejectBusinessListings =>
+          'Approve/reject business listings',
+        Permission.verifyLicensesCertifications =>
+          'Verify licenses & certifications',
+        Permission.moderateReviewsContent => 'Moderate reviews & content',
+        Permission.suspendBanUserOrBusiness =>
+          'Suspend/ban a user or business',
+        Permission.managePaymentsPayouts => 'Manage payments & payouts',
+        Permission.viewPlatformAnalytics => 'View platform analytics',
+        Permission.manageOtherAdminAccounts =>
+          'Manage other admin accounts',
+        Permission.assignChangeUserRoles => 'Assign/change user roles',
+      };
+
+  /// Display-only grouping for the profile detail page's by-area
+  /// sections — not part of the matrix itself, doesn't affect
+  /// [hasPermission].
+  String get area => switch (this) {
+        Permission.browseSearchListings ||
+        Permission.bookHotelTourGuide ||
+        Permission.writeReviews =>
+          'Traveller actions',
+        Permission.createEditOwnBusinessProfile ||
+        Permission.manageOwnBookingsCalendar =>
+          'Business & listings',
+        Permission.approveRejectBusinessListings ||
+        Permission.verifyLicensesCertifications ||
+        Permission.moderateReviewsContent ||
+        Permission.suspendBanUserOrBusiness =>
+          'Moderation & trust & safety',
+        Permission.managePaymentsPayouts ||
+        Permission.viewPlatformAnalytics ||
+        Permission.manageOtherAdminAccounts ||
+        Permission.assignChangeUserRoles =>
+          'Platform & admin',
+      };
+}
+
+/// One permission [role] is actually granted, as shown on the Profiles
+/// detail page. [ownOnly] means the grant is scoped to the account's own
+/// resource (see [hasPermission]'s doc comment on `isOwnResource`), not a
+/// blanket grant — the UI should visibly distinguish the two rather than
+/// rendering every entry the same way.
+class GrantedPermission {
+  final Permission permission;
+  final bool ownOnly;
+  const GrantedPermission(this.permission, {required this.ownOnly});
+}
+
+/// Every permission [role] is actually granted (`yes` or `own only`),
+/// in matrix declaration order — the Profiles detail page's single data
+/// source for "what this profile can actually do." Denied (`no`) cells
+/// are omitted entirely rather than listed as crossed-out/greyed, per the
+/// explicit rule not to imply a permission the app doesn't enforce.
+List<GrantedPermission> permissionsFor(Role role) {
+  final result = <GrantedPermission>[];
+  for (final permission in Permission.values) {
+    final grant = _matrix[permission]?[role] ?? _Grant.no;
+    if (grant == _Grant.no) continue;
+    result.add(
+      GrantedPermission(permission, ownOnly: grant == _Grant.ownOnly),
+    );
+  }
+  return result;
+}

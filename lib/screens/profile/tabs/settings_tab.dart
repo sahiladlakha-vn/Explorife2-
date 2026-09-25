@@ -235,13 +235,12 @@ class _SettingsTabState extends State<_SettingsTab> {
             _navItem(Icons.admin_panel_settings_outlined, 'Users',
                 _SettingsCategory.users,
                 tag: 'Admin'),
-          // Same admin gate as Users, same underlying function
-          // (admin_list_users) — just called with p_include_anonymous:
-          // true. This is the raw, unfiltered `profiles` table (every
-          // guest session included), vs. Users' curated real-accounts-only
-          // view. Not narrowed to a smaller admin subset because the data
-          // it adds beyond Users is guest-session noise, not anything more
-          // sensitive than what Users already shows (email, role, etc.).
+          // Same admin gate as Users. A Salesforce-style "Setup → Profiles"
+          // catalog: one row per [Role] (Permission set + description +
+          // member count), not per account — see _ProfilesPanel. The old
+          // "every profiles row including guest sessions" dump that used to
+          // live here moved under Users as its "All accounts" toggle
+          // instead, so no existing visibility was lost.
           if (isAdmin)
             _navItem(Icons.groups_outlined, 'Profiles',
                 _SettingsCategory.profiles,
@@ -384,15 +383,14 @@ class _SettingsTabState extends State<_SettingsTab> {
         // sit on a sidebar item that just disappeared.
         return isAdmin ? const _UsersPanel() : _EditProfilePanel(memberSince: widget.memberSince);
       case _SettingsCategory.profiles:
-        // Same defensive fallback as Users, above.
+        // Same defensive fallback as Users, above. This used to be the
+        // same raw/anonymous-inclusive _UsersPanel as Users with different
+        // copy — that view now lives inside Users itself as its "All
+        // accounts" toggle (see _UsersPanelState._includeAnonymous). This
+        // is the real Salesforce-style Profiles catalog: one row per
+        // [Role], not per account.
         return isAdmin
-            ? const _UsersPanel(
-                includeAnonymous: true,
-                title: 'Profiles',
-                subtitle: 'Every profile row in the database, including '
-                    'anonymous guest sessions — the unfiltered view behind '
-                    'Users.',
-              )
+            ? const _ProfilesPanel()
             : _EditProfilePanel(memberSince: widget.memberSince);
       case _SettingsCategory.notifications:
         return _TogglePanel(
@@ -650,21 +648,35 @@ class _HelpSupportPanel extends StatelessWidget {
 /// Admin-only roster — see [_SettingsTabState._isAdmin]'s doc comment for
 /// why reaching this panel at all already implies an admin-tier role, and
 /// [AdminUserRepository]'s doc comment for why the actual access control
-/// lives server-side (the `admin_list_users` function), not here. This
-/// widget is read-only by design this pass: no row-level "..." overflow
-/// menu (view/edit/suspend) — what an admin should be able to *do* to
-/// another account is a separate scope and risk decision from "can they
-/// see the roster," and hasn't been made yet.
+/// lives server-side (the `admin_list_users` function), not here.
+///
+/// Read-only by default (no row-level "..." overflow menu) — what an admin
+/// should be able to *do* to another account beyond viewing is a separate
+/// scope/risk decision, still undecided in general. The one deliberate
+/// exception is [allowReassign]: the Profiles detail page (_ProfileDetailPanel)
+/// passes it true for its "Assigned Users" section specifically, since
+/// reassigning a user's profile from that page was an explicit, scoped
+/// requirement — everywhere else this stays read-only.
 class _UsersPanel extends StatefulWidget {
-  // Same widget backs both the "Users" (curated, real-accounts-only) and
-  // "Profiles" (raw, guest-sessions-included) sidebar items — see
-  // _panelFor's two call sites — rather than two near-identical copies of
-  // the search/pagination/table plumbing.
-  final bool includeAnonymous;
+  // Set by _ProfileDetailPanel to scope the roster to one profile/role;
+  // null (the default, plain "Users" sidebar item) matches every role.
+  final Role? role;
+  // Whether to show the Real accounts/All accounts segmented toggle — on
+  // for the plain Users sidebar item (this is where the old, separate
+  // "Profiles" raw dump moved to), off when embedded read-only inside a
+  // Profile detail page (a role-scoped roster has no "guest sessions"
+  // reading to toggle in the first place; every guest defaults to the
+  // traveler role but isn't meaningfully "assigned" to it).
+  final bool showAllAccountsToggle;
+  final bool showAdminTag;
+  final bool allowReassign;
   final String title;
   final String subtitle;
   const _UsersPanel({
-    this.includeAnonymous = false,
+    this.role,
+    this.showAllAccountsToggle = true,
+    this.showAdminTag = true,
+    this.allowReassign = false,
     this.title = 'Users',
     this.subtitle = 'Every account on the platform. Read-only for now — '
         'no row actions yet.',
@@ -685,6 +697,9 @@ class _UsersPanelState extends State<_UsersPanel> {
   bool _loading = true;
   String? _error;
   AdminUserPage _result = AdminUserPage.empty;
+  // Only ever flips away from false when widget.showAllAccountsToggle is
+  // true (the plain Users panel) — see the toggle row in build().
+  bool _includeAnonymous = false;
 
   @override
   void initState() {
@@ -709,7 +724,8 @@ class _UsersPanelState extends State<_UsersPanel> {
           search: _searchCtrl.text,
           page: _page,
           pageSize: _pageSize,
-          includeAnonymous: widget.includeAnonymous);
+          includeAnonymous: _includeAnonymous,
+          role: widget.role);
       if (!mounted) return;
       setState(() {
         _result = result;
@@ -742,10 +758,46 @@ class _UsersPanelState extends State<_UsersPanel> {
     _load();
   }
 
+  void _setIncludeAnonymous(bool value) {
+    if (value == _includeAnonymous) return;
+    setState(() {
+      _includeAnonymous = value;
+      _page = 0;
+    });
+    _load();
+  }
+
+  // Reassignment itself is enforced entirely server-side (the
+  // admin_update_user_role RPC re-checks is_super_admin(), rejects an
+  // anonymous target, and rejects demoting the last remaining super_admin
+  // — see AdminUserRepository.updateRole's doc comment). This just calls
+  // it, surfaces whatever it raises, and refreshes the roster on success
+  // so a user whose role no longer matches widget.role drops out of a
+  // role-scoped list immediately.
+  Future<void> _reassign(AdminUserRow user, Role newRole) async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await _repo.updateRole(userId: user.id, newRole: newRole);
+      if (!mounted) return;
+      messenger.showSnackBar(SnackBar(
+          content: Text(
+              '${user.displayName ?? 'User'} reassigned to ${newRole.label}.')));
+      _load();
+    } on AdminRoleUpdateException catch (e) {
+      messenger.showSnackBar(SnackBar(
+          content: Text(e.message), backgroundColor: _kCritical));
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(
+          content: Text('Could not reassign: $e'),
+          backgroundColor: _kCritical));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final total = _result.total;
     final totalPages = total == 0 ? 1 : ((total - 1) ~/ _pageSize) + 1;
+    final isSuperAdmin = context.watch<AuthProvider>().role == Role.superAdmin;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -754,25 +806,35 @@ class _UsersPanelState extends State<_UsersPanel> {
             Text(widget.title,
                 style: GoogleFonts.inter(
                     fontSize: 20, fontWeight: FontWeight.w700, color: _kInk)),
-            const SizedBox(width: 8),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-              decoration: BoxDecoration(
-                color: AppTheme.primary.withValues(alpha: 0.16),
-                borderRadius: BorderRadius.circular(6),
+            if (widget.showAdminTag) ...[
+              const SizedBox(width: 8),
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                decoration: BoxDecoration(
+                  color: AppTheme.primary.withValues(alpha: 0.16),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Text('Admin',
+                    style: GoogleFonts.inter(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w700,
+                        color: AppTheme.primary)),
               ),
-              child: Text('Admin',
-                  style: GoogleFonts.inter(
-                      fontSize: 10,
-                      fontWeight: FontWeight.w700,
-                      color: AppTheme.primary)),
-            ),
+            ],
           ],
         ),
         const SizedBox(height: 4),
         Text(widget.subtitle,
             style: GoogleFonts.inter(fontSize: 13, color: _kMute)),
         const SizedBox(height: 16),
+        if (widget.showAllAccountsToggle) ...[
+          _AccountsScopeToggle(
+            includeAnonymous: _includeAnonymous,
+            onChanged: _setIncludeAnonymous,
+          ),
+          const SizedBox(height: 14),
+        ],
         TextField(
           controller: _searchCtrl,
           onChanged: _onSearchChanged,
@@ -815,7 +877,11 @@ class _UsersPanelState extends State<_UsersPanel> {
                 style: GoogleFonts.inter(fontSize: 13, color: _kMute)),
           )
         else
-          _UsersTable(users: _result.users),
+          _UsersTable(
+            users: _result.users,
+            allowReassign: widget.allowReassign && isSuperAdmin,
+            onReassign: _reassign,
+          ),
         const SizedBox(height: 14),
         Row(
           children: [
@@ -843,9 +909,71 @@ class _UsersPanelState extends State<_UsersPanel> {
   }
 }
 
+/// "Real accounts" / "All accounts" segmented toggle — replaces the old
+/// separate "Profiles" sidebar item's includeAnonymous:true dump. Real
+/// accounts (the curated, non-guest view) stays the default so nothing
+/// about Users' existing behavior changes for anyone who doesn't touch
+/// this control.
+class _AccountsScopeToggle extends StatelessWidget {
+  final bool includeAnonymous;
+  final ValueChanged<bool> onChanged;
+  const _AccountsScopeToggle(
+      {required this.includeAnonymous, required this.onChanged});
+
+  @override
+  Widget build(BuildContext context) {
+    Widget segment(String label, bool value) {
+      final active = includeAnonymous == value;
+      return GestureDetector(
+        onTap: () => onChanged(value),
+        behavior: HitTestBehavior.opaque,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+          decoration: BoxDecoration(
+            color: active ? Colors.white : Colors.transparent,
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Text(label,
+              style: GoogleFonts.inter(
+                  fontSize: 12.5,
+                  fontWeight: active ? FontWeight.w700 : FontWeight.w500,
+                  color: active ? Colors.black : _kMute)),
+        ),
+      );
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(3),
+      decoration: BoxDecoration(
+        color: _kPage,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: _kBorder),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          segment('Real accounts', false),
+          segment('All accounts', true),
+        ],
+      ),
+    );
+  }
+}
+
 class _UsersTable extends StatelessWidget {
   final List<AdminUserRow> users;
-  const _UsersTable({required this.users});
+  // See _UsersPanel's doc comment on [allowReassign] — only the Profile
+  // detail page's Assigned Users section (and only for a super_admin caller)
+  // ever passes true. [onReassign] is required together with it so a
+  // caller can't turn on the affordance without wiring up what it does.
+  final bool allowReassign;
+  final void Function(AdminUserRow user, Role newRole)? onReassign;
+  const _UsersTable({
+    required this.users,
+    this.allowReassign = false,
+    this.onReassign,
+  });
 
   static final _dateFormat = DateFormat('MMM d, yyyy');
 
@@ -878,11 +1006,18 @@ class _UsersTable extends StatelessWidget {
                   width: 50,
                   child: Text('TRIPS',
                       textAlign: TextAlign.right, style: _headerStyle)),
+              if (allowReassign) const SizedBox(width: 40),
             ],
           ),
         ),
         const Divider(color: _kBorder, height: 1),
-        for (final user in users) _UserRow(user: user, dateFormat: _dateFormat),
+        for (final user in users)
+          _UserRow(
+            user: user,
+            dateFormat: _dateFormat,
+            allowReassign: allowReassign,
+            onReassign: onReassign == null ? null : (r) => onReassign!(user, r),
+          ),
       ],
     );
   }
@@ -891,7 +1026,14 @@ class _UsersTable extends StatelessWidget {
 class _UserRow extends StatelessWidget {
   final AdminUserRow user;
   final DateFormat dateFormat;
-  const _UserRow({required this.user, required this.dateFormat});
+  final bool allowReassign;
+  final void Function(Role newRole)? onReassign;
+  const _UserRow({
+    required this.user,
+    required this.dateFormat,
+    this.allowReassign = false,
+    this.onReassign,
+  });
 
   // auth.users.raw_app_meta_data->>'provider' as returned by admin_list_users
   // — plain lowercase provider slugs (Supabase's own vocabulary), not a
@@ -1023,8 +1165,558 @@ class _UserRow extends StatelessWidget {
                 style: GoogleFonts.inter(
                     fontSize: 13, fontWeight: FontWeight.w600, color: _kInk)),
           ),
+          // Guests/anonymous rows never reach a role-scoped roster in the
+          // first place (admin_update_user_role rejects reassigning one
+          // server-side anyway — see AdminUserRepository.updateRole's doc
+          // comment), but hiding the affordance here too avoids offering an
+          // action that would just come back as an error toast.
+          if (allowReassign && !user.isAnonymous)
+            SizedBox(
+              width: 40,
+              child: IconButton(
+                onPressed: () => _showReassignDialog(context),
+                icon: const Icon(Icons.edit_outlined, size: 17),
+                color: _kMute,
+                tooltip: 'Reassign profile',
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+              ),
+            )
+          else if (allowReassign)
+            const SizedBox(width: 40),
         ],
       ),
+    );
+  }
+
+  Future<void> _showReassignDialog(BuildContext context) async {
+    Role selected = user.role;
+    final displayName =
+        (user.displayName == null || user.displayName!.isEmpty)
+            ? 'this user'
+            : user.displayName!;
+    final newRole = await showDialog<Role>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (dialogContext, setDialogState) => AlertDialog(
+          backgroundColor: _kCard,
+          title: Text('Reassign profile',
+              style: GoogleFonts.inter(
+                  fontSize: 17, fontWeight: FontWeight.w700, color: _kInk)),
+          content: SizedBox(
+            width: 340,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Choose a new profile for $displayName.',
+                    style: GoogleFonts.inter(fontSize: 13.5, color: _kMute)),
+                const SizedBox(height: 16),
+                DropdownButtonFormField<Role>(
+                  initialValue: selected,
+                  isExpanded: true,
+                  dropdownColor: _kCard,
+                  style: GoogleFonts.inter(fontSize: 14, color: _kInk),
+                  decoration: InputDecoration(
+                    filled: true,
+                    fillColor: _kPage,
+                    contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 14, vertical: 10),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      borderSide: const BorderSide(color: _kBorder),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      borderSide: const BorderSide(color: AppTheme.primary),
+                    ),
+                  ),
+                  items: [
+                    for (final role in Role.byPrivilege)
+                      DropdownMenuItem(value: role, child: Text(role.label)),
+                  ],
+                  onChanged: (value) {
+                    if (value == null) return;
+                    setDialogState(() => selected = value);
+                  },
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: Text('Cancel',
+                  style: GoogleFonts.inter(fontSize: 13.5, color: _kMute)),
+            ),
+            ElevatedButton(
+              onPressed: selected == user.role
+                  ? null
+                  : () => Navigator.of(dialogContext).pop(selected),
+              style: ElevatedButton.styleFrom(backgroundColor: AppTheme.primary),
+              child: Text('Reassign',
+                  style: GoogleFonts.inter(
+                      fontSize: 13.5,
+                      fontWeight: FontWeight.w700,
+                      color: Colors.white)),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (newRole == null || !context.mounted) return;
+    // Second, explicit confirmation step — the dropdown pick above is just
+    // choosing a value, this is the actual "yes, do it" per the spec's
+    // requirement that reassignment go through a confirmation step.
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (confirmContext) => AlertDialog(
+        backgroundColor: _kCard,
+        title: Text('Confirm reassignment',
+            style: GoogleFonts.inter(
+                fontSize: 17, fontWeight: FontWeight.w700, color: _kInk)),
+        content: Text(
+            'Reassign $displayName from ${user.role.label} to ${newRole.label}?',
+            style: GoogleFonts.inter(fontSize: 13.5, color: _kMute)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(confirmContext).pop(false),
+            child: Text('Cancel',
+                style: GoogleFonts.inter(fontSize: 13.5, color: _kMute)),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(confirmContext).pop(true),
+            style: ElevatedButton.styleFrom(backgroundColor: _kCritical),
+            child: Text('Confirm',
+                style: GoogleFonts.inter(
+                    fontSize: 13.5,
+                    fontWeight: FontWeight.w700,
+                    color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true) onReassign?.call(newRole);
+  }
+}
+
+/// Salesforce "Setup → Profiles" catalog — one row per [Role] (all 7,
+/// including roles with 0 members today), NOT one row per account (that's
+/// Users). Columns are Name/Description/Users/Type per the approved spec;
+/// deliberately no "Last Modified" column (nothing in this app tracks when
+/// a role's permission set last changed — inventing a value would be
+/// worse than omitting the column) and no "New Profile" button (there's no
+/// data-driven custom-profile mechanism yet — see Role.profileType's doc
+/// comment; adding one is an explicitly separate, larger project).
+class _ProfilesPanel extends StatefulWidget {
+  const _ProfilesPanel();
+
+  @override
+  State<_ProfilesPanel> createState() => _ProfilesPanelState();
+}
+
+class _ProfilesPanelState extends State<_ProfilesPanel> {
+  final _repo = AdminUserRepository();
+  final _searchCtrl = TextEditingController();
+
+  bool _loading = true;
+  String? _error;
+  Map<Role, int> _counts = const {};
+  // Which profile's detail page is open, if any — a client-side selection
+  // swap within this same panel (matching _SettingsTabState's own
+  // category-swap pattern), not a real route; there's no deep-linkable URL
+  // for a single profile today.
+  Role? _selectedRole;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _load() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      final counts = await _repo.fetchRoleCounts();
+      if (!mounted) return;
+      setState(() {
+        _counts = {for (final c in counts) c.role: c.userCount};
+        _loading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = 'Could not load profiles: $e';
+        _loading = false;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final selected = _selectedRole;
+    if (selected != null) {
+      return _ProfileDetailPanel(
+        role: selected,
+        userCount: _counts[selected] ?? 0,
+        onBack: () => setState(() => _selectedRole = null),
+      );
+    }
+
+    final query = _searchCtrl.text.trim().toLowerCase();
+    final roles = Role.byPrivilege.where((role) {
+      if (query.isEmpty) return true;
+      return role.label.toLowerCase().contains(query) ||
+          role.description.toLowerCase().contains(query);
+    }).toList();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Text('Profiles',
+                style: GoogleFonts.inter(
+                    fontSize: 20, fontWeight: FontWeight.w700, color: _kInk)),
+            const SizedBox(width: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+              decoration: BoxDecoration(
+                color: AppTheme.primary.withValues(alpha: 0.16),
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: Text('Admin',
+                  style: GoogleFonts.inter(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w700,
+                      color: AppTheme.primary)),
+            ),
+          ],
+        ),
+        const SizedBox(height: 4),
+        Text(
+            'Permission sets every account on the platform is assigned one of.',
+            style: GoogleFonts.inter(fontSize: 13, color: _kMute)),
+        const SizedBox(height: 16),
+        TextField(
+          controller: _searchCtrl,
+          onChanged: (_) => setState(() {}),
+          style: GoogleFonts.inter(fontSize: 14, color: _kInk),
+          decoration: InputDecoration(
+            hintText: 'Search profiles',
+            hintStyle: GoogleFonts.inter(fontSize: 14, color: _kMute),
+            prefixIcon: const Icon(Icons.search, size: 20, color: _kMute),
+            filled: true,
+            fillColor: _kPage,
+            contentPadding:
+                const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(10),
+              borderSide: const BorderSide(color: _kBorder),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(10),
+              borderSide: const BorderSide(color: AppTheme.primary),
+            ),
+          ),
+        ),
+        const SizedBox(height: 18),
+        if (_loading)
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 40),
+            child: Center(
+                child: CircularProgressIndicator(color: AppTheme.primary)),
+          )
+        else if (_error != null)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 20),
+            child: Text(_error!,
+                style: GoogleFonts.inter(fontSize: 13, color: _kCritical)),
+          )
+        else if (roles.isEmpty)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 20),
+            child: Text('No profiles match "$query".',
+                style: GoogleFonts.inter(fontSize: 13, color: _kMute)),
+          )
+        else
+          _ProfilesTable(
+            roles: roles,
+            counts: _counts,
+            onTap: (role) => setState(() => _selectedRole = role),
+          ),
+      ],
+    );
+  }
+}
+
+class _ProfilesTable extends StatelessWidget {
+  final List<Role> roles;
+  final Map<Role, int> counts;
+  final ValueChanged<Role> onTap;
+  const _ProfilesTable(
+      {required this.roles, required this.counts, required this.onTap});
+
+  TextStyle get _headerStyle => GoogleFonts.inter(
+      fontSize: 11.5, fontWeight: FontWeight.w700, color: _kMute);
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+          child: Row(
+            children: [
+              Expanded(flex: 3, child: Text('NAME', style: _headerStyle)),
+              Expanded(flex: 5, child: Text('DESCRIPTION', style: _headerStyle)),
+              SizedBox(
+                  width: 70,
+                  child: Text('USERS',
+                      textAlign: TextAlign.right, style: _headerStyle)),
+              SizedBox(
+                  width: 90,
+                  child: Text('TYPE',
+                      textAlign: TextAlign.right, style: _headerStyle)),
+            ],
+          ),
+        ),
+        const Divider(color: _kBorder, height: 1),
+        for (final role in roles)
+          _ProfileRow(
+            role: role,
+            userCount: counts[role] ?? 0,
+            onTap: () => onTap(role),
+          ),
+      ],
+    );
+  }
+}
+
+class _ProfileRow extends StatelessWidget {
+  final Role role;
+  final int userCount;
+  final VoidCallback onTap;
+  const _ProfileRow(
+      {required this.role, required this.userCount, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final color = role.badgeColor;
+    final prominent = role.isAdminTier;
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 12),
+        decoration: const BoxDecoration(
+          border: Border(bottom: BorderSide(color: _kBorder)),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Expanded(
+              flex: 3,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 8, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: color.withValues(alpha: prominent ? 0.20 : 0.12),
+                      border: Border.all(
+                          color:
+                              color.withValues(alpha: prominent ? 0.6 : 0.35)),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Text(role.label,
+                        style: GoogleFonts.inter(
+                            fontSize: 12.5,
+                            fontWeight:
+                                prominent ? FontWeight.w700 : FontWeight.w600,
+                            color: color)),
+                  ),
+                ],
+              ),
+            ),
+            Expanded(
+              flex: 5,
+              child: Padding(
+                padding: const EdgeInsets.only(right: 12),
+                child: Text(role.description,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: GoogleFonts.inter(fontSize: 12.5, color: _kMute)),
+              ),
+            ),
+            SizedBox(
+              width: 70,
+              child: Text('$userCount',
+                  textAlign: TextAlign.right,
+                  style: GoogleFonts.inter(
+                      fontSize: 13, fontWeight: FontWeight.w600, color: _kInk)),
+            ),
+            SizedBox(
+              width: 90,
+              child: Text(role.profileType.label,
+                  textAlign: TextAlign.right,
+                  style: GoogleFonts.inter(fontSize: 12.5, color: _kMute)),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// One profile's detail page — header, Permissions (grouped by
+/// [PermissionDisplay.area], strictly [permissionsFor] the role, nothing
+/// invented), and Assigned Users (the same [_UsersPanel] Users itself uses,
+/// scoped to this role via its `role` param). Only a super_admin caller
+/// gets the reassign affordance inside that embedded table — see
+/// [_UsersPanel]'s doc comment; a Content Moderator or Regional Admin can
+/// still open this page (both are admin-tier) but can only look, matching
+/// [hasPermission]'s [Permission.assignChangeUserRoles] cell (super_admin
+/// only).
+class _ProfileDetailPanel extends StatelessWidget {
+  final Role role;
+  final int userCount;
+  final VoidCallback onBack;
+  const _ProfileDetailPanel(
+      {required this.role, required this.userCount, required this.onBack});
+
+  @override
+  Widget build(BuildContext context) {
+    final granted = permissionsFor(role);
+    final byArea = <String, List<GrantedPermission>>{};
+    for (final g in granted) {
+      byArea.putIfAbsent(g.permission.area, () => []).add(g);
+    }
+    final color = role.badgeColor;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        GestureDetector(
+          onTap: onBack,
+          behavior: HitTestBehavior.opaque,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.arrow_back, size: 16, color: _kMute),
+              const SizedBox(width: 6),
+              Text('All profiles',
+                  style: GoogleFonts.inter(fontSize: 13, color: _kMute)),
+            ],
+          ),
+        ),
+        const SizedBox(height: 16),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+              decoration: BoxDecoration(
+                color: color.withValues(alpha: role.isAdminTier ? 0.20 : 0.12),
+                border: Border.all(
+                    color: color
+                        .withValues(alpha: role.isAdminTier ? 0.6 : 0.35)),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Text(role.label,
+                  style: GoogleFonts.inter(
+                      fontSize: 16, fontWeight: FontWeight.w700, color: color)),
+            ),
+            const SizedBox(width: 10),
+            Text(role.profileType.label,
+                style: GoogleFonts.inter(fontSize: 12.5, color: _kMute)),
+          ],
+        ),
+        const SizedBox(height: 10),
+        Text(role.description,
+            style: GoogleFonts.inter(
+                fontSize: 13.5, color: _kMute, height: 1.4)),
+        const SizedBox(height: 8),
+        Text('$userCount user${userCount == 1 ? '' : 's'} assigned',
+            style: GoogleFonts.inter(
+                fontSize: 12.5, fontWeight: FontWeight.w600, color: _kInk)),
+        const SizedBox(height: 28),
+        Text('Permissions',
+            style: GoogleFonts.inter(
+                fontSize: 16, fontWeight: FontWeight.w700, color: _kInk)),
+        const SizedBox(height: 4),
+        Text('What this profile is actually granted — nothing more.',
+            style: GoogleFonts.inter(fontSize: 12.5, color: _kMute)),
+        const SizedBox(height: 14),
+        if (granted.isEmpty)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            child: Text('This profile has no granted permissions.',
+                style: GoogleFonts.inter(fontSize: 13, color: _kMute)),
+          )
+        else
+          for (final area in byArea.keys) ...[
+            Padding(
+              padding: const EdgeInsets.only(top: 10, bottom: 6),
+              child: Text(area,
+                  style: GoogleFonts.inter(
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w700,
+                      color: _kMute,
+                      letterSpacing: 0.3)),
+            ),
+            for (final g in byArea[area]!)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Icon(Icons.check_circle,
+                        size: 15, color: _kGreen),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(g.permission.label,
+                          style: GoogleFonts.inter(
+                              fontSize: 13.5, color: _kInk)),
+                    ),
+                    if (g.ownOnly)
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 7, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: _kWarn.withValues(alpha: 0.16),
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Text('Own only',
+                            style: GoogleFonts.inter(
+                                fontSize: 10.5,
+                                fontWeight: FontWeight.w700,
+                                color: _kWarn)),
+                      ),
+                  ],
+                ),
+              ),
+          ],
+        const SizedBox(height: 28),
+        _UsersPanel(
+          role: role,
+          showAllAccountsToggle: false,
+          showAdminTag: false,
+          allowReassign: true,
+          title: 'Assigned Users',
+          subtitle:
+              'Every real account currently assigned the ${role.label} profile.',
+        ),
+      ],
     );
   }
 }
