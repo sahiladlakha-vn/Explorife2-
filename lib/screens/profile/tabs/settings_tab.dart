@@ -1496,7 +1496,17 @@ class _NewUserDialogState extends State<_NewUserDialog> {
   final _usernameCtrl = TextEditingController();
   Role _role = Role.traveler;
   bool _submitting = false;
+  // Dialog-wide fallback — anything that isn't one of the two known
+  // field-specific conflicts below (validation misses, network errors,
+  // an unrecognized server message) still surfaces here rather than being
+  // silently dropped.
   String? _error;
+  // These two mirror the admin-create-user Edge Function's own exact
+  // conflict messages (see handleCreateUser's 409 branches) so a taken
+  // username/email points at the field it's actually about instead of a
+  // generic banner the admin has to go re-read against both fields.
+  String? _usernameError;
+  String? _emailError;
 
   @override
   void dispose() {
@@ -1521,6 +1531,8 @@ class _NewUserDialogState extends State<_NewUserDialog> {
     setState(() {
       _submitting = true;
       _error = null;
+      _usernameError = null;
+      _emailError = null;
     });
     try {
       await widget.onCreate(
@@ -1535,7 +1547,17 @@ class _NewUserDialogState extends State<_NewUserDialog> {
       if (!mounted) return;
       setState(() {
         _submitting = false;
-        _error = e.message;
+        // Route the two known field-level conflicts to their own field;
+        // anything else (a message the Edge Function might add later, a
+        // wrapped network/500 error, ...) still falls back to the
+        // dialog-wide banner rather than being swallowed.
+        if (e.message == 'That username is already taken.') {
+          _usernameError = e.message;
+        } else if (e.message == 'That email already has an account.') {
+          _emailError = e.message;
+        } else {
+          _error = e.message;
+        }
       });
     } catch (e) {
       if (!mounted) return;
@@ -1569,12 +1591,14 @@ class _NewUserDialogState extends State<_NewUserDialog> {
             _FormField(
                 label: 'Email',
                 controller: _emailCtrl,
-                keyboardType: TextInputType.emailAddress),
+                keyboardType: TextInputType.emailAddress,
+                errorText: _emailError),
             const SizedBox(height: 12),
             _FormField(
                 label: 'Username (optional)',
                 controller: _usernameCtrl,
-                hint: 'lowercase letters, numbers, underscores'),
+                hint: 'lowercase letters, numbers, underscores',
+                errorText: _usernameError),
             const SizedBox(height: 12),
             Text('Profile',
                 style: GoogleFonts.inter(
@@ -1655,12 +1679,18 @@ class _FormField extends StatelessWidget {
     required this.controller,
     this.hint,
     this.keyboardType,
+    this.errorText,
   });
 
   final String label;
   final TextEditingController controller;
   final String? hint;
   final TextInputType? keyboardType;
+  // Field-level conflict message (e.g. "That username is already taken.") —
+  // see _NewUserDialogState._submit's routing of AdminUserActionException.
+  // Rendered via InputDecoration.errorText so it lands under this specific
+  // field instead of the dialog-wide banner.
+  final String? errorText;
 
   @override
   Widget build(BuildContext context) {
@@ -1678,6 +1708,8 @@ class _FormField extends StatelessWidget {
           decoration: InputDecoration(
             hintText: hint,
             hintStyle: GoogleFonts.inter(fontSize: 12.5, color: _kMute),
+            errorText: errorText,
+            errorStyle: GoogleFonts.inter(fontSize: 12, color: _kCritical),
             filled: true,
             fillColor: _kPage,
             contentPadding:
@@ -1689,6 +1721,14 @@ class _FormField extends StatelessWidget {
             focusedBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(10),
               borderSide: const BorderSide(color: AppTheme.primary),
+            ),
+            errorBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(10),
+              borderSide: const BorderSide(color: _kCritical),
+            ),
+            focusedErrorBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(10),
+              borderSide: const BorderSide(color: _kCritical),
             ),
           ),
         ),
