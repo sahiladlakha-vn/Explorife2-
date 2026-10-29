@@ -109,6 +109,7 @@ describe("updateAttraction", () => {
     mockSessionUser({ id: "user-1" });
     mockAttractionOwner("user-1");
     mockActorRole("traveler");
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     await updateAttraction("attr-1", {
       name: "New name",
       verificationStatus: "verified",
@@ -119,12 +120,20 @@ describe("updateAttraction", () => {
       where: { id: "attr-1" },
       data: { name: "New name" },
     });
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    const [message] = warnSpy.mock.calls[0];
+    expect(message).toContain("table=attractions");
+    expect(message).toContain("recordId=attr-1");
+    expect(message).toContain("userId=user-1");
+    expect(message).toContain("fields=verificationStatus,verifiedBy,verifiedAt");
+    warnSpy.mockRestore();
   });
 
-  it("keeps the verification fields when the caller is a moderator", async () => {
+  it("keeps the verification fields when the caller is a moderator, and does not warn", async () => {
     mockSessionUser({ id: "mod-1" });
     mockAttractionOwner("user-1");
     mockActorRole("content_moderator");
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     const verifiedAt = new Date("2026-01-01");
     await updateAttraction("attr-1", {
       verificationStatus: "verified",
@@ -135,35 +144,51 @@ describe("updateAttraction", () => {
       where: { id: "attr-1" },
       data: { verificationStatus: "verified", verifiedBy: "mod-1", verifiedAt },
     });
+    expect(warnSpy).not.toHaveBeenCalled();
+    warnSpy.mockRestore();
   });
 });
 
 describe("setAttractionVerification", () => {
   it("throws AuthError when there's no session", async () => {
     mockSessionUser(null);
-    await expect(
-      setAttractionVerification("attr-1", "verified", "mod-1", new Date()),
-    ).rejects.toBeInstanceOf(AuthError);
+    await expect(setAttractionVerification("attr-1", "verified")).rejects.toBeInstanceOf(
+      AuthError,
+    );
     expect(prisma.attraction.update).not.toHaveBeenCalled();
   });
 
   it("throws ForbiddenError for a signed-in traveler — no partial write", async () => {
     mockSessionUser({ id: "user-1" });
     mockActorRole("traveler");
-    await expect(
-      setAttractionVerification("attr-1", "verified", "user-1", new Date()),
-    ).rejects.toBeInstanceOf(ForbiddenError);
+    await expect(setAttractionVerification("attr-1", "verified")).rejects.toBeInstanceOf(
+      ForbiddenError,
+    );
     expect(prisma.attraction.update).not.toHaveBeenCalled();
   });
 
-  it("resolves and writes verification for a content_moderator", async () => {
+  it("resolves and writes verification for a content_moderator, computing verifiedBy/verifiedAt server-side", async () => {
     mockSessionUser({ id: "mod-1" });
     mockActorRole("content_moderator");
-    const verifiedAt = new Date("2026-01-01");
-    await setAttractionVerification("attr-1", "verified", "mod-1", verifiedAt);
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
+    await setAttractionVerification("attr-1", "verified");
     expect(prisma.attraction.update).toHaveBeenCalledWith({
       where: { id: "attr-1" },
-      data: { verificationStatus: "verified", verifiedBy: "mod-1", verifiedAt },
+      data: {
+        verificationStatus: "verified",
+        verifiedBy: "mod-1",
+        verifiedAt: new Date("2026-01-01T00:00:00.000Z"),
+      },
     });
+    vi.useRealTimers();
+  });
+
+  // The whole point of computing these server-side: a caller can't pass a
+  // different moderator's id or a backdated timestamp through — there's no
+  // parameter for either anymore, but this guards against a future signature
+  // regression that re-adds one without updating this test.
+  it("ignores any attempt to pass verifiedBy/verifiedAt — the function signature has no such parameters", () => {
+    expect(setAttractionVerification.length).toBe(2);
   });
 });

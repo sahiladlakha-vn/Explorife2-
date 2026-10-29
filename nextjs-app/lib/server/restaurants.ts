@@ -1,12 +1,13 @@
 import "server-only";
 import { prisma } from "@/lib/db";
 import {
-  ADMIN_ROLES,
   ForbiddenError,
+  VERIFICATION_MODERATOR_ROLES,
   assertCanVerifyRestaurant,
   getUserRole,
   requireUser,
 } from "@/lib/auth/permissions";
+import { warnStrippedFields } from "./audit-log";
 
 /**
  * The ONLY module allowed to call `prisma.restaurant.create/update/
@@ -52,8 +53,15 @@ export interface RestaurantWritePatch {
 
 /**
  * General-purpose restaurant editor. Requires a session; only the listing's
- * owner or an admin-tier role (`ADMIN_ROLES`) may edit a given restaurant at
- * all. If the patch touches any of `verificationStatus`/`verifiedBy`/
+ * owner or a verification-moderator-tier role (`VERIFICATION_MODERATOR_ROLES`
+ * — `content_moderator`/`regional_admin`/`super_admin`) may edit a given
+ * restaurant at all. This deliberately reuses the same role list as the
+ * verification gate below rather than the broader `ADMIN_ROLES`, to match the
+ * live `"admins can update any restaurant"` RLS policy exactly — see
+ * MIGRATION_PLAN.md's RLS-parity review: `finance_admin` has no RLS grant to
+ * edit someone *else's* restaurant row at all.
+ *
+ * If the patch touches any of `verificationStatus`/`verifiedBy`/
  * `verifiedAt`, all three are only kept when `assertCanVerifyRestaurant()`
  * succeeds for the current session; otherwise all three are silently dropped
  * (not thrown, matching the trigger reverting them as a group) and the rest
@@ -73,24 +81,29 @@ export async function updateRestaurant(restaurantId: string, patch: RestaurantWr
   const isOwner = actor.id === restaurant.ownerId;
   if (!isOwner) {
     const actorRole = await getUserRole(actor.id);
-    if (!actorRole || !ADMIN_ROLES.includes(actorRole)) {
+    if (!actorRole || !VERIFICATION_MODERATOR_ROLES.includes(actorRole)) {
       throw new ForbiddenError("You can only edit your own listing.");
     }
   }
 
   const safePatch: RestaurantWritePatch = { ...patch };
-  const touchesVerificationFields =
-    safePatch.verificationStatus !== undefined ||
-    safePatch.verifiedBy !== undefined ||
-    safePatch.verifiedAt !== undefined;
+  const touchedVerificationFields = (
+    ["verificationStatus", "verifiedBy", "verifiedAt"] as const
+  ).filter((field) => safePatch[field] !== undefined);
 
-  if (touchesVerificationFields) {
+  if (touchedVerificationFields.length > 0) {
     try {
       await assertCanVerifyRestaurant();
     } catch {
       delete safePatch.verificationStatus;
       delete safePatch.verifiedBy;
       delete safePatch.verifiedAt;
+      warnStrippedFields({
+        userId: actor.id,
+        table: "restaurants",
+        recordId: restaurantId,
+        strippedFields: touchedVerificationFields,
+      });
     }
   }
 
@@ -103,16 +116,18 @@ export async function updateRestaurant(restaurantId: string, patch: RestaurantWr
  * above, this throws (AuthError/ForbiddenError) when the caller isn't a
  * content_moderator/regional_admin/super_admin, since setting verification
  * is the entire point of calling it.
+ *
+ * `verifiedBy`/`verifiedAt` are computed server-side from the acting session
+ * (`verifiedBy` = the authenticated moderator's own id, `verifiedAt` =
+ * `new Date()`) rather than accepted as caller-supplied input — a caller
+ * must never be able to backdate a verification or attribute it to someone
+ * else. `status` (`"verified"`/`"rejected"`/etc.) is still caller-supplied
+ * since it isn't an identity/time claim.
  */
-export async function setRestaurantVerification(
-  restaurantId: string,
-  status: string,
-  verifiedBy: string | null,
-  verifiedAt: Date | null,
-) {
-  await assertCanVerifyRestaurant();
+export async function setRestaurantVerification(restaurantId: string, status: string) {
+  const { user } = await assertCanVerifyRestaurant();
   return prisma.restaurant.update({
     where: { id: restaurantId },
-    data: { verificationStatus: status, verifiedBy, verifiedAt },
+    data: { verificationStatus: status, verifiedBy: user.id, verifiedAt: new Date() },
   });
 }

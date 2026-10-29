@@ -1,13 +1,14 @@
 import "server-only";
 import { prisma } from "@/lib/db";
 import {
-  ADMIN_ROLES,
+  PROFILE_ROLE_CHANGE_ROLES,
   ForbiddenError,
   assertCanChangeProfileRole,
   getUserRole,
   requireUser,
   type Role,
 } from "@/lib/auth/permissions";
+import { warnStrippedFields } from "./audit-log";
 
 /**
  * The ONLY module allowed to call `prisma.profile.create/update/updateMany/
@@ -36,7 +37,7 @@ import {
  * not something this module can fix.
  */
 
-/** Fields any profile owner (or admin-tier role) may freely edit. */
+/** Fields any profile owner (or super_admin) may freely edit. */
 export interface ProfileWritePatch {
   name?: string;
   avatarUrl?: string | null;
@@ -59,13 +60,20 @@ export interface ProfileWritePatch {
 
 /**
  * General-purpose profile editor. Requires a session; only the profile's own
- * owner or an admin-tier role (`ADMIN_ROLES`) may edit a given profile at
- * all — a baseline ownership check this module needs regardless of the
- * `role`-locking behavior below, since there's otherwise no gate at all on
- * `prisma.profile.update`. If `patch.role` is present, `role` is only kept
- * when `assertCanChangeProfileRole()` succeeds for the current session;
- * otherwise it's silently dropped (not thrown) and the rest of the patch is
- * still applied, matching the trigger's "revert just this column" behavior
+ * owner or a `super_admin` may edit a given profile at all — a baseline
+ * ownership check this module needs regardless of the `role`-locking
+ * behavior below, since there's otherwise no gate at all on
+ * `prisma.profile.update`. The non-owner gate deliberately reuses
+ * `PROFILE_ROLE_CHANGE_ROLES` (super_admin only) rather than the broader
+ * `ADMIN_ROLES` list, to match the live `profiles_update_admin` RLS policy
+ * (`is_super_admin()`) exactly — see MIGRATION_PLAN.md's RLS-parity review:
+ * `content_moderator`/`regional_admin`/`finance_admin` have no RLS grant to
+ * edit someone *else's* profile row at all, only `super_admin` does.
+ *
+ * If `patch.role` is present, `role` is only kept when
+ * `assertCanChangeProfileRole()` succeeds for the current session; otherwise
+ * it's silently dropped (not thrown) and the rest of the patch is still
+ * applied, matching the trigger's "revert just this column" behavior
  * described above.
  */
 export async function updateProfile(targetUserId: string, patch: ProfileWritePatch) {
@@ -73,7 +81,7 @@ export async function updateProfile(targetUserId: string, patch: ProfileWritePat
   const isSelf = actor.id === targetUserId;
   if (!isSelf) {
     const actorRole = await getUserRole(actor.id);
-    if (!actorRole || !ADMIN_ROLES.includes(actorRole)) {
+    if (!actorRole || !PROFILE_ROLE_CHANGE_ROLES.includes(actorRole)) {
       throw new ForbiddenError("You can only edit your own profile.");
     }
   }
@@ -84,6 +92,12 @@ export async function updateProfile(targetUserId: string, patch: ProfileWritePat
       await assertCanChangeProfileRole();
     } catch {
       delete safePatch.role;
+      warnStrippedFields({
+        userId: actor.id,
+        table: "profiles",
+        recordId: targetUserId,
+        strippedFields: ["role"],
+      });
     }
   }
 
@@ -96,8 +110,47 @@ export async function updateProfile(targetUserId: string, patch: ProfileWritePat
  * (AuthError/ForbiddenError) when the caller isn't a super_admin, since
  * setting the role is the entire point of calling it — there's no "rest of
  * the patch" to fall back to.
+ *
+ * Also writes an `admin_action_log` row in the same transaction as the role
+ * update, matching what the live `admin_update_user_role` SECURITY DEFINER
+ * RPC recorded (`supabase/migrations/20260925000300_admin_update_user_role_
+ * log_columns.sql`): `actor_id` (the acting super_admin), `action_type`
+ * (`"assign_role"`), `target_profile_id`, `old_role`/`new_role`, and a
+ * `details` jsonb mirroring the old/new role pair. `old_role` is read inside
+ * the same transaction as the update to avoid a race against a concurrent
+ * role change.
+ *
+ * Scope note: this only ports the log-write behavior, which is what was
+ * asked for. The live RPC also has several additional guards this function
+ * does NOT reproduce — a target-not-found check, a rejection of
+ * anonymous/guest targets, a same-role no-op short-circuit, and a
+ * last-super-admin-demotion guard. Flagging these as a gap rather than
+ * silently porting or silently omitting them: they're a separate scope
+ * decision, not something implied by "write the log row."
  */
 export async function updateUserRole(targetUserId: string, role: Role) {
-  await assertCanChangeProfileRole();
-  return prisma.profile.update({ where: { id: targetUserId }, data: { role } });
+  const { user: actor } = await assertCanChangeProfileRole();
+
+  return prisma.$transaction(async (tx) => {
+    const target = await tx.profile.findUnique({
+      where: { id: targetUserId },
+      select: { role: true },
+    });
+    const oldRole = target?.role ?? null;
+
+    const updated = await tx.profile.update({ where: { id: targetUserId }, data: { role } });
+
+    await tx.adminActionLog.create({
+      data: {
+        actorId: actor.id,
+        actionType: "assign_role",
+        targetProfileId: targetUserId,
+        oldRole,
+        newRole: role,
+        details: { old_role: oldRole, new_role: role },
+      },
+    });
+
+    return updated;
+  });
 }

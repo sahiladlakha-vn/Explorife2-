@@ -106,6 +106,7 @@ describe("updateRestaurant", () => {
     mockSessionUser({ id: "user-1" });
     mockRestaurantOwner("user-1");
     mockActorRole("traveler");
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     await updateRestaurant("rest-1", {
       name: "New name",
       verificationStatus: "verified",
@@ -116,12 +117,20 @@ describe("updateRestaurant", () => {
       where: { id: "rest-1" },
       data: { name: "New name" },
     });
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    const [message] = warnSpy.mock.calls[0];
+    expect(message).toContain("table=restaurants");
+    expect(message).toContain("recordId=rest-1");
+    expect(message).toContain("userId=user-1");
+    expect(message).toContain("fields=verificationStatus,verifiedBy,verifiedAt");
+    warnSpy.mockRestore();
   });
 
-  it("keeps the verification fields when the caller is a moderator", async () => {
+  it("keeps the verification fields when the caller is a moderator, and does not warn", async () => {
     mockSessionUser({ id: "mod-1" });
     mockRestaurantOwner("user-1");
     mockActorRole("content_moderator");
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     const verifiedAt = new Date("2026-01-01");
     await updateRestaurant("rest-1", {
       verificationStatus: "verified",
@@ -132,35 +141,51 @@ describe("updateRestaurant", () => {
       where: { id: "rest-1" },
       data: { verificationStatus: "verified", verifiedBy: "mod-1", verifiedAt },
     });
+    expect(warnSpy).not.toHaveBeenCalled();
+    warnSpy.mockRestore();
   });
 });
 
 describe("setRestaurantVerification", () => {
   it("throws AuthError when there's no session", async () => {
     mockSessionUser(null);
-    await expect(
-      setRestaurantVerification("rest-1", "verified", "mod-1", new Date()),
-    ).rejects.toBeInstanceOf(AuthError);
+    await expect(setRestaurantVerification("rest-1", "verified")).rejects.toBeInstanceOf(
+      AuthError,
+    );
     expect(prisma.restaurant.update).not.toHaveBeenCalled();
   });
 
   it("throws ForbiddenError for a signed-in traveler — no partial write", async () => {
     mockSessionUser({ id: "user-1" });
     mockActorRole("traveler");
-    await expect(
-      setRestaurantVerification("rest-1", "verified", "user-1", new Date()),
-    ).rejects.toBeInstanceOf(ForbiddenError);
+    await expect(setRestaurantVerification("rest-1", "verified")).rejects.toBeInstanceOf(
+      ForbiddenError,
+    );
     expect(prisma.restaurant.update).not.toHaveBeenCalled();
   });
 
-  it("resolves and writes verification for a content_moderator", async () => {
+  it("resolves and writes verification for a content_moderator, computing verifiedBy/verifiedAt server-side", async () => {
     mockSessionUser({ id: "mod-1" });
     mockActorRole("content_moderator");
-    const verifiedAt = new Date("2026-01-01");
-    await setRestaurantVerification("rest-1", "verified", "mod-1", verifiedAt);
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
+    await setRestaurantVerification("rest-1", "verified");
     expect(prisma.restaurant.update).toHaveBeenCalledWith({
       where: { id: "rest-1" },
-      data: { verificationStatus: "verified", verifiedBy: "mod-1", verifiedAt },
+      data: {
+        verificationStatus: "verified",
+        verifiedBy: "mod-1",
+        verifiedAt: new Date("2026-01-01T00:00:00.000Z"),
+      },
     });
+    vi.useRealTimers();
+  });
+
+  // The whole point of computing these server-side: a caller can't pass a
+  // different moderator's id or a backdated timestamp through — there's no
+  // parameter for either anymore, but this guards against a future signature
+  // regression that re-adds one without updating this test.
+  it("ignores any attempt to pass verifiedBy/verifiedAt — the function signature has no such parameters", () => {
+    expect(setRestaurantVerification.length).toBe(2);
   });
 });
