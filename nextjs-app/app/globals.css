@@ -62,6 +62,25 @@
   --color-light-border: #e7e2d9;
   --color-light-ink: #1a1a1a;
   --color-light-mute: #8a8a8a;
+
+  /*
+   * Semantic aliases for Step 4 (app shell / My Trip layout, see
+   * MIGRATION_PLAN.md §7). New components (profile header, trip header,
+   * trip switcher, dashboard cards, etc.) should use ONLY these semantic
+   * names — never raw `neutral-*`/`gray-*` Tailwind colors — so the whole
+   * shell reads from one palette.
+   *
+   * `surface` and `danger` above already ARE the semantic names (no alias
+   * needed — use `bg-surface`/`text-danger` directly). The four below are
+   * new aliases for tokens that existed under a different, Dart-theme-
+   * derived name; `--color-text-muted` is the one genuinely new value,
+   * replacing the ad hoc `text-ink/55` opacity trick used before this pass.
+   */
+  --color-surface-raised: var(--color-surface-2);
+  --color-border: var(--color-divider);
+  --color-text: var(--color-ink);
+  --color-text-muted: color-mix(in srgb, var(--color-ink) 55%, transparent);
+  --color-accent: var(--color-primary);
 }
 
 body {

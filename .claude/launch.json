@@ -20,6 +20,12 @@
       "runtimeArgs": ["-m", "http.server", "8080", "--directory", "build/web"],
       "port": 8080,
       "autoPort": true
+    },
+    {
+      "name": "nextjs-dev",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev", "--prefix", "nextjs-app"],
+      "port": 3000
     }
   ]
 }

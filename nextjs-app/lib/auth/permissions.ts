@@ -218,3 +218,34 @@ export async function assertCanVerifyAttraction(): Promise<{ user: User; role: R
 export async function assertCanVerifyRestaurant(): Promise<{ user: User; role: Role }> {
   return requireRole(VERIFICATION_MODERATOR_ROLES);
 }
+
+// --- Trip ownership/collaboration primitives ---------------------------
+//
+// Ports the live `is_trip_owner` SECURITY DEFINER function (MIGRATION_PLAN.md
+// §3a) plus a new collaborator-lookup primitive. Prisma bypasses RLS, so
+// `lib/server/trips.ts`'s `requireTripAccess()` (Step 4) composes these two
+// rather than re-querying `trips`/`trip_collaborators` itself — this module
+// stays the single place that decides "is this user allowed to see this
+// trip," per the architecture decision in MIGRATION_PLAN.md §0.
+
+/** Mirrors the live `is_trip_owner(trip_id, user_id)` function. */
+export async function isTripOwner(userId: string, tripId: string): Promise<boolean> {
+  const trip = await prisma.trip.findUnique({
+    where: { id: tripId },
+    select: { ownerId: true },
+  });
+  return trip?.ownerId === userId;
+}
+
+/**
+ * A collaborator only counts as having access once their invite is
+ * `"confirmed"` — a `"pending"` (or any other non-confirmed) status mirrors
+ * an invite that hasn't been accepted yet and must not grant read access.
+ */
+export async function isTripCollaborator(userId: string, tripId: string): Promise<boolean> {
+  const collaborator = await prisma.tripCollaborator.findUnique({
+    where: { tripId_userId: { tripId, userId } },
+    select: { status: true },
+  });
+  return collaborator?.status === "confirmed";
+}

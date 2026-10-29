@@ -1,4 +1,5 @@
 import "server-only";
+import { cache } from "react";
 import { prisma } from "@/lib/db";
 import { Prisma } from "@/lib/generated/prisma/client";
 import {
@@ -236,3 +237,19 @@ export async function updateUserRole(targetUserId: string, role: Role) {
     throw err;
   }
 }
+
+/**
+ * Read-only — for the Step 4 shared `/profile` layout's `ProfileHeader`
+ * (MIGRATION_PLAN.md §7). Not subject to the write-guard rule at the top of
+ * this file (that rule only covers mutating `prisma.profile.*` calls);
+ * grouped here anyway since it's profile-domain data. Wrapped in `cache()` so
+ * the layout can call it without worrying about a second query if a leaf
+ * page ever also needs it within the same request.
+ */
+export const getProfileHeaderData = cache(async function getProfileHeaderData(userId: string) {
+  const [profile, leaderboardEntry] = await Promise.all([
+    prisma.profile.findUnique({ where: { id: userId } }),
+    prisma.leaderboard.findUnique({ where: { userId } }),
+  ]);
+  return { profile, leaderboardEntry };
+});

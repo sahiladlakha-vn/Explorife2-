@@ -49,6 +49,25 @@ npm install
 npm run dev
 ```
 
+## Testing
+
+- `npm run test` (or `npm run test:watch`) — Vitest unit tests for
+  `lib/server/`, `lib/auth/`, `lib/format/`.
+- `npm run test:e2e` — Playwright end-to-end tests (`e2e/`) covering the
+  trip routing shell: `TripHeader` renders at an identical position/size
+  across the trip/itinerary/dashboard/bookings tabs at 1440/1024/768/375px
+  (no layout shift when switching tabs — the original bug this feature was
+  built to fix), `TripSwitcher` opens as a popover at >=768px and a bottom
+  sheet at <768px, and `Escape` closes either and returns focus to the
+  trigger button. First run `npx playwright install chromium` to download
+  the browser binary. These tests drive `/dev-preview/trips/[tripId]/*` —
+  fixture-data routes (`lib/dev-preview/fixtures.ts`) that bypass auth/DB
+  entirely and 404 outside `NODE_ENV=development`/`test` (see
+  `lib/dev-preview/guard.ts`) — so they never touch the live database and
+  never ship in a production build. The suite drives `next dev` directly
+  (`playwright.config.ts`'s `webServer`), reusing an already-running dev
+  server on port 3000 if one exists.
+
 Other scripts: `npm run lint`, `npm run format`, `npm run db:pull`,
 `npm run db:generate`, `npm run db:migrate`.
 
