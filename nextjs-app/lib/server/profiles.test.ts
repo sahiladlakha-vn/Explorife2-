@@ -7,9 +7,6 @@ import type { User } from "@supabase/supabase-js";
 vi.mock("@/lib/supabase/server", () => ({
   createClient: vi.fn(),
 }));
-vi.mock("@/lib/supabase/admin", () => ({
-  createAdminClient: vi.fn(),
-}));
 vi.mock("@/lib/db", () => {
   // Defined and returned entirely inside the factory (rather than referencing
   // an outer-scope variable) to dodge vi.mock's hoisting — $transaction needs
@@ -33,11 +30,10 @@ vi.mock("@/lib/db", () => {
 });
 
 import { createClient } from "@/lib/supabase/server";
-import { createAdminClient } from "@/lib/supabase/admin";
 import { prisma } from "@/lib/db";
 import { Prisma } from "@/lib/generated/prisma/client";
 import { AuthError, ForbiddenError, type Role } from "@/lib/auth/permissions";
-import { updateProfile, updateUserRole } from "./profiles";
+import { ConcurrentRoleChangeError, updateProfile, updateUserRole } from "./profiles";
 
 function mockSessionUser(user: Pick<User, "id"> | null) {
   vi.mocked(createClient).mockResolvedValue({
@@ -55,26 +51,18 @@ function mockActorRole(role: Role | null) {
   );
 }
 
-/** Controls `isAnonymousGuest()`'s Admin API lookup — see permissions.test.ts. */
-function mockTargetIsAnonymous(isAnonymous: boolean) {
-  vi.mocked(createAdminClient).mockReturnValue({
-    auth: {
-      admin: {
-        getUserById: vi.fn().mockResolvedValue({
-          data: { user: { is_anonymous: isAnonymous } },
-          error: null,
-        }),
-      },
-    },
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- partial Supabase Admin client stub
-  } as any);
+/**
+ * Shapes `updateUserRole`'s target lookup: `tx.profile.findUnique({ ...,
+ * include: { user: { select: { isAnonymous: true } } } })`. `isAnonymous`
+ * defaults to `false` since most tests aren't exercising that guard.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- test double, shape mirrors the joined Profile+User.isAnonymous read
+function targetProfile(role: Role, isAnonymous = false): any {
+  return { role, user: { isAnonymous } };
 }
 
 beforeEach(() => {
   vi.clearAllMocks();
-  // Sane default so tests that aren't specifically exercising the
-  // anonymous-guest guard don't each need to opt in.
-  mockTargetIsAnonymous(false);
 });
 
 describe("updateProfile", () => {
@@ -178,12 +166,11 @@ describe("updateUserRole", () => {
   it("resolves and writes the role for a super_admin, and logs the change in admin_action_log", async () => {
     mockSessionUser({ id: "admin-1" });
     // First findUnique call is the actor's own role check (assertCanChangeProfileRole);
-    // second is the target's old role, read inside the transaction.
+    // second is the target's profile + isAnonymous, read inside the transaction.
     vi.mocked(prisma.profile.findUnique)
       // eslint-disable-next-line @typescript-eslint/no-explicit-any -- only `role` is selected
       .mockResolvedValueOnce({ role: "super_admin" } as any)
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- only `role` is selected
-      .mockResolvedValueOnce({ role: "traveler" } as any);
+      .mockResolvedValueOnce(targetProfile("traveler"));
 
     await updateUserRole("user-1", "content_moderator");
 
@@ -221,17 +208,19 @@ describe("updateUserRole", () => {
     expect(prisma.adminActionLog.create).not.toHaveBeenCalled();
   });
 
-  // Guard 3 (anonymous guest target): checked before the transaction opens —
-  // a rejected guest-target call must never touch $transaction at all.
-  it("throws ForbiddenError when the target is an anonymous guest session, before opening a transaction", async () => {
+  // Guard 3 (anonymous guest target): read via the same Prisma join as the
+  // not-found check (`User.isAnonymous`, see prisma/schema.prisma), inside
+  // the Serializable transaction — no separate pre-transaction round-trip.
+  it("throws ForbiddenError when the target is an anonymous guest session", async () => {
     mockSessionUser({ id: "admin-1" });
-    mockActorRole("super_admin");
-    mockTargetIsAnonymous(true);
+    vi.mocked(prisma.profile.findUnique)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- only `role` is selected
+      .mockResolvedValueOnce({ role: "super_admin" } as any)
+      .mockResolvedValueOnce(targetProfile("traveler", true));
 
     await expect(updateUserRole("guest-1", "content_moderator")).rejects.toBeInstanceOf(
       ForbiddenError,
     );
-    expect(prisma.$transaction).not.toHaveBeenCalled();
     expect(prisma.profile.update).not.toHaveBeenCalled();
     expect(prisma.adminActionLog.create).not.toHaveBeenCalled();
   });
@@ -243,12 +232,11 @@ describe("updateUserRole", () => {
     vi.mocked(prisma.profile.findUnique)
       // eslint-disable-next-line @typescript-eslint/no-explicit-any -- only `role` is selected
       .mockResolvedValueOnce({ role: "super_admin" } as any)
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- only `role` is selected
-      .mockResolvedValueOnce({ role: "content_moderator" } as any);
+      .mockResolvedValueOnce(targetProfile("content_moderator"));
 
     const result = await updateUserRole("user-1", "content_moderator");
 
-    expect(result).toEqual({ role: "content_moderator" });
+    expect(result).toEqual(targetProfile("content_moderator"));
     expect(prisma.profile.update).not.toHaveBeenCalled();
     expect(prisma.adminActionLog.create).not.toHaveBeenCalled();
   });
@@ -260,8 +248,7 @@ describe("updateUserRole", () => {
     vi.mocked(prisma.profile.findUnique)
       // eslint-disable-next-line @typescript-eslint/no-explicit-any -- only `role` is selected
       .mockResolvedValueOnce({ role: "super_admin" } as any)
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- only `role` is selected
-      .mockResolvedValueOnce({ role: "super_admin" } as any);
+      .mockResolvedValueOnce(targetProfile("super_admin"));
     vi.mocked(prisma.profile.count).mockResolvedValue(1);
 
     await expect(updateUserRole("admin-1", "content_moderator")).rejects.toBeInstanceOf(
@@ -278,8 +265,7 @@ describe("updateUserRole", () => {
     vi.mocked(prisma.profile.findUnique)
       // eslint-disable-next-line @typescript-eslint/no-explicit-any -- only `role` is selected
       .mockResolvedValueOnce({ role: "super_admin" } as any)
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- only `role` is selected
-      .mockResolvedValueOnce({ role: "super_admin" } as any);
+      .mockResolvedValueOnce(targetProfile("super_admin"));
     vi.mocked(prisma.profile.count).mockResolvedValue(2);
 
     await updateUserRole("admin-1", "content_moderator");
@@ -299,8 +285,7 @@ describe("updateUserRole", () => {
     vi.mocked(prisma.profile.findUnique)
       // eslint-disable-next-line @typescript-eslint/no-explicit-any -- only `role` is selected
       .mockResolvedValueOnce({ role: "super_admin" } as any)
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- only `role` is selected
-      .mockResolvedValueOnce({ role: "super_admin" } as any);
+      .mockResolvedValueOnce(targetProfile("super_admin"));
 
     await updateUserRole("admin-2", "content_moderator");
 
@@ -319,13 +304,50 @@ describe("updateUserRole", () => {
     vi.mocked(prisma.profile.findUnique)
       // eslint-disable-next-line @typescript-eslint/no-explicit-any -- only `role` is selected
       .mockResolvedValueOnce({ role: "super_admin" } as any)
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- only `role` is selected
-      .mockResolvedValueOnce({ role: "traveler" } as any);
+      .mockResolvedValueOnce(targetProfile("traveler"));
 
     await updateUserRole("user-1", "content_moderator");
 
     expect(prisma.$transaction).toHaveBeenCalledWith(expect.any(Function), {
       isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
     });
+  });
+
+  // Concurrency fix's error surface: the "loser" of a write-skew race gets
+  // Prisma's raw P2034 from $transaction — mapped here to a clear,
+  // actionable message instead of leaking a Prisma error code to an admin.
+  it("maps a P2034 write-conflict error to ConcurrentRoleChangeError with a clear retry message", async () => {
+    mockSessionUser({ id: "admin-1" });
+    vi.mocked(prisma.profile.findUnique)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- only `role` is selected
+      .mockResolvedValueOnce({ role: "super_admin" } as any);
+    const conflictError = new Prisma.PrismaClientKnownRequestError(
+      "Transaction failed due to a write conflict or a deadlock. Please retry your transaction",
+      { code: "P2034", clientVersion: "test" },
+    );
+    vi.mocked(prisma.$transaction).mockRejectedValueOnce(conflictError);
+
+    let thrown: unknown;
+    try {
+      await updateUserRole("user-1", "content_moderator");
+    } catch (err) {
+      thrown = err;
+    }
+    expect(thrown).toBeInstanceOf(ConcurrentRoleChangeError);
+    expect((thrown as Error).message).toBe("Roles were changed at the same time — please try again.");
+  });
+
+  it("does not remap other $transaction errors (e.g. a different Prisma error code)", async () => {
+    mockSessionUser({ id: "admin-1" });
+    vi.mocked(prisma.profile.findUnique)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- only `role` is selected
+      .mockResolvedValueOnce({ role: "super_admin" } as any);
+    const otherError = new Prisma.PrismaClientKnownRequestError("Some other failure", {
+      code: "P2002",
+      clientVersion: "test",
+    });
+    vi.mocked(prisma.$transaction).mockRejectedValueOnce(otherError);
+
+    await expect(updateUserRole("user-1", "content_moderator")).rejects.toBe(otherError);
   });
 });

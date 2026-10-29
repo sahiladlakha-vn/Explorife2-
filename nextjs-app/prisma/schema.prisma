@@ -83,13 +83,31 @@ enum GuideSpecialty {
 }
 
 // ---------------------------------------------------------------------------
-// auth schema — owned by Supabase Auth, not Prisma. Only the primary key is
-// modeled; every other Auth-internal column (email, encrypted_password,
-// etc.) is accessed exclusively via @supabase/ssr, never through Prisma.
+// auth schema — owned by Supabase Auth, not Prisma. Only the primary key and
+// `isAnonymous` are modeled; every other Auth-internal column (email,
+// encrypted_password, etc.) is accessed exclusively via @supabase/ssr, never
+// through Prisma. `auth.users` is listed in `prisma.config.ts`'s
+// `tables.external`, so adding `isAnonymous` here changes nothing about how
+// `prisma migrate`/`db push` treats this table — external tables are never
+// diffed/created/altered/dropped regardless of what's declared about them in
+// this file; see that config's comment.
 // ---------------------------------------------------------------------------
 
 model User {
   id String @id @db.Uuid
+
+  /// Read-only from app code — Supabase Auth owns this column exclusively
+  /// (set on anonymous sign-in, cleared on guest→real upgrade via
+  /// `linkIdentity`). No Prisma write path may ever target it: it exists here
+  /// solely so `updateUserRole()` (`lib/server/profiles.ts`) can read a
+  /// role-change target's anonymous status via a plain join, inside the same
+  /// Serializable transaction as the rest of its guards, instead of a
+  /// separate pre-transaction Supabase Admin API round-trip. Modeled as
+  /// nullable (`Boolean?`) rather than trusting NOT NULL, matching the live
+  /// `admin_update_user_role` RPC's own defensive
+  /// `coalesce(au.is_anonymous, false)` — see `isAnonymousGuest` usage in
+  /// `updateUserRole` for the equivalent `?? false` fallback.
+  isAnonymous Boolean? @map("is_anonymous")
 
   profile              Profile?
   travellerProfile     TravellerProfile?

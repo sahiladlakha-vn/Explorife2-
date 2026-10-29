@@ -6,7 +6,6 @@ import {
   ForbiddenError,
   assertCanChangeProfileRole,
   getUserRole,
-  isAnonymousGuest,
   requireUser,
   type Role,
 } from "@/lib/auth/permissions";
@@ -106,6 +105,14 @@ export async function updateProfile(targetUserId: string, patch: ProfileWritePat
   return prisma.profile.update({ where: { id: targetUserId }, data: safePatch });
 }
 
+/** Thrown when two concurrent role changes collide under Serializable isolation. */
+export class ConcurrentRoleChangeError extends Error {
+  constructor(message = "Roles were changed at the same time — please try again.") {
+    super(message);
+    this.name = "ConcurrentRoleChangeError";
+  }
+}
+
 /**
  * Dedicated role-change path — full TypeScript port of the live
  * `admin_update_user_role` SECURITY DEFINER RPC (`explorife_schema_export.sql`),
@@ -116,13 +123,14 @@ export async function updateProfile(targetUserId: string, patch: ProfileWritePat
  *      this pass).
  *   2. `profile not found: %` — the target has no `profiles` row.
  *   3. `cannot assign a role to an anonymous guest session` — the target's
- *      Supabase Auth user has `is_anonymous = true`. Ported via
- *      `isAnonymousGuest()`, which (unlike the RPC's single SQL join) needs a
- *      separate Admin API round-trip — see that function's doc comment in
- *      `lib/auth/permissions.ts`. Checked before opening the transaction
- *      (it's a read-only, no-side-effect check) so a rejected guest-target
- *      call never touches the database at all, matching the RPC's
- *      no-partial-write behavior.
+ *      Supabase Auth user has `is_anonymous = true`. Ported by reading
+ *      `User.isAnonymous` (see that field's doc comment in
+ *      `prisma/schema.prisma`) via a plain join on `tx.profile.findUnique`'s
+ *      `include`, in the SAME query as guard 2's existence check and INSIDE
+ *      the Serializable transaction below — unlike the version of this guard
+ *      from the previous pass, this is no longer a separate pre-transaction
+ *      Supabase Admin API round-trip; it's one Prisma read, consistent with
+ *      the rest of the guard chain's snapshot.
  *   4. `if v_old_role = p_new_role then return;` — same-role is a silent
  *      no-op: no update, no `admin_action_log` row. Ported as an early
  *      `return` inside the transaction once `oldRole` is known.
@@ -163,55 +171,68 @@ export async function updateProfile(targetUserId: string, patch: ProfileWritePat
  * updated" never overlaps between them. Serializable isolation is the
  * version of this fix that actually covers the cross-row case.
  *
- * This function does not itself catch/retry a `P2034` — it lets it propagate
- * so the one loser of the race gets an explicit error rather than a silent
- * partial state. Building automatic retry (re-running the whole guard chain
- * against fresh data) is a reasonable follow-up but a separate, larger
- * decision than "port the guards," so it's flagged rather than added here.
+ * A `P2034` (the "loser" of the race) is caught at this function's boundary
+ * and re-thrown as `ConcurrentRoleChangeError`, a clear "please retry"
+ * message instead of a raw Prisma error code reaching an admin's screen. No
+ * automatic retry is attempted here — re-running the whole guard chain
+ * against fresh data is a reasonable follow-up but a separate, larger
+ * decision than "surface a clear error," so it's flagged rather than added.
+ * Any other error (including the guards' own thrown `Error`/`ForbiddenError`
+ * above) propagates unchanged.
  */
 export async function updateUserRole(targetUserId: string, role: Role) {
   const { user: actor } = await assertCanChangeProfileRole();
 
-  if (await isAnonymousGuest(targetUserId)) {
-    throw new ForbiddenError("Cannot assign a role to an anonymous guest session.");
-  }
-
-  return prisma.$transaction(
-    async (tx) => {
-      const target = await tx.profile.findUnique({ where: { id: targetUserId } });
-      if (!target) {
-        throw new Error(`Profile ${targetUserId} not found.`);
-      }
-
-      const oldRole = target.role;
-      if (oldRole === role) {
-        return target;
-      }
-
-      if (targetUserId === actor.id && role !== "super_admin") {
-        const superAdminCount = await tx.profile.count({ where: { role: "super_admin" } });
-        if (superAdminCount <= 1) {
-          throw new ForbiddenError(
-            "Cannot remove the last super_admin account's super_admin role.",
-          );
+  try {
+    return await prisma.$transaction(
+      async (tx) => {
+        const target = await tx.profile.findUnique({
+          where: { id: targetUserId },
+          include: { user: { select: { isAnonymous: true } } },
+        });
+        if (!target) {
+          throw new Error(`Profile ${targetUserId} not found.`);
         }
-      }
 
-      const updated = await tx.profile.update({ where: { id: targetUserId }, data: { role } });
+        if (target.user.isAnonymous ?? false) {
+          throw new ForbiddenError("Cannot assign a role to an anonymous guest session.");
+        }
 
-      await tx.adminActionLog.create({
-        data: {
-          actorId: actor.id,
-          actionType: "assign_role",
-          targetProfileId: targetUserId,
-          oldRole,
-          newRole: role,
-          details: { old_role: oldRole, new_role: role },
-        },
-      });
+        const oldRole = target.role;
+        if (oldRole === role) {
+          return target;
+        }
 
-      return updated;
-    },
-    { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
-  );
+        if (targetUserId === actor.id && role !== "super_admin") {
+          const superAdminCount = await tx.profile.count({ where: { role: "super_admin" } });
+          if (superAdminCount <= 1) {
+            throw new ForbiddenError(
+              "Cannot remove the last super_admin account's super_admin role.",
+            );
+          }
+        }
+
+        const updated = await tx.profile.update({ where: { id: targetUserId }, data: { role } });
+
+        await tx.adminActionLog.create({
+          data: {
+            actorId: actor.id,
+            actionType: "assign_role",
+            targetProfileId: targetUserId,
+            oldRole,
+            newRole: role,
+            details: { old_role: oldRole, new_role: role },
+          },
+        });
+
+        return updated;
+      },
+      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+    );
+  } catch (err) {
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2034") {
+      throw new ConcurrentRoleChangeError();
+    }
+    throw err;
+  }
 }

@@ -9,9 +9,6 @@ import type { User } from "@supabase/supabase-js";
 vi.mock("@/lib/supabase/server", () => ({
   createClient: vi.fn(),
 }));
-vi.mock("@/lib/supabase/admin", () => ({
-  createAdminClient: vi.fn(),
-}));
 vi.mock("@/lib/db", () => ({
   prisma: {
     profile: {
@@ -21,7 +18,6 @@ vi.mock("@/lib/db", () => ({
 }));
 
 import { createClient } from "@/lib/supabase/server";
-import { createAdminClient } from "@/lib/supabase/admin";
 import { prisma } from "@/lib/db";
 import {
   AuthError,
@@ -32,7 +28,6 @@ import {
   assertCanChangeProfileRole,
   assertCanVerifyAttraction,
   assertCanVerifyRestaurant,
-  isAnonymousGuest,
   PROFILE_ROLE_CHANGE_ROLES,
   VERIFICATION_MODERATOR_ROLES,
   type Role,
@@ -178,44 +173,4 @@ describe.each([
       await expect(assertFn()).resolves.toEqual({ user: { id: "user-1" }, role });
     },
   );
-});
-
-describe("isAnonymousGuest", () => {
-  function mockAdminGetUserById(
-    result: { isAnonymous: boolean } | null,
-    error: unknown = null,
-  ) {
-    vi.mocked(createAdminClient).mockReturnValue({
-      auth: {
-        admin: {
-          getUserById: vi.fn().mockResolvedValue(
-            error
-              ? { data: { user: null }, error }
-              : { data: { user: result === null ? null : { is_anonymous: result.isAnonymous } }, error: null },
-          ),
-        },
-      },
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- partial Supabase Admin client stub, only `auth.admin.getUserById()` is exercised
-    } as any);
-  }
-
-  it("returns true for an anonymous guest session", async () => {
-    mockAdminGetUserById({ isAnonymous: true });
-    await expect(isAnonymousGuest("guest-1")).resolves.toBe(true);
-  });
-
-  it("returns false for a real (non-anonymous) account", async () => {
-    mockAdminGetUserById({ isAnonymous: false });
-    await expect(isAnonymousGuest("user-1")).resolves.toBe(false);
-  });
-
-  it("fails open to false when the Admin API errors", async () => {
-    mockAdminGetUserById(null, new Error("not found"));
-    await expect(isAnonymousGuest("missing-1")).resolves.toBe(false);
-  });
-
-  it("fails open to false when the Admin API finds no user", async () => {
-    mockAdminGetUserById(null);
-    await expect(isAnonymousGuest("missing-1")).resolves.toBe(false);
-  });
 });
