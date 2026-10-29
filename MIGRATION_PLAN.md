@@ -1,14 +1,16 @@
 # ExploriFe Migration Plan: Flutter/Supabase → Next.js/Prisma/PostgreSQL
 
 Status: **Step 1 (Audit), Step 2 (Foundation), and Step 3 (Database) approved
-and done, with the decisions in §0 below.** `prisma/schema.prisma` was
-hand-built from live-DB SQL introspection (see §7); `prisma generate`/
-`tsc`/`npm run build` all pass against it. The `0_init` baseline and the
-`1_hike_tracks_fields` migration have both been applied against the live
-database (locally, by the user — `prisma migrate status` reports clean, no
-drift) and the `auth.uid()`-trigger protections are live in
-`lib/auth/permissions.ts` with passing unit tests. See §7's Step 3 writeup
-for the full record.
+and done, with the decisions in §0 below. Step 4 (shared layout) is now
+underway.** `prisma/schema.prisma` was hand-built from live-DB SQL
+introspection (see §7); `prisma generate`/`tsc`/`npm run build` all pass
+against it. The regenerated `0_init` baseline (the superseded
+`1_hike_tracks_fields` migration was deleted — see §7's Step 3 writeup) has
+been resolved as applied against the live database (locally, by the user —
+the live `prisma migrate diff` came back empty and `prisma migrate status`
+reports clean, up to date, no drift) and the `auth.uid()`-trigger
+protections are live in `lib/auth/permissions.ts` with passing unit tests.
+See §7's Step 3 writeup for the full record.
 
 This document is the full audit of the existing ExploriFe app (Flutter + Supabase)
 required before any new-stack code is written.
@@ -595,6 +597,15 @@ the resolution is implemented in this plan.
    **Decision: extend the table additively** to add the six missing columns
    matching the Dart model's intent. Additive migration only — no existing
    column renamed or dropped. To be written as a Step 3 migration.
+   **Update 2026-10-29: already resolved directly on the live database,
+   outside Prisma.** Before the `0_init` baseline was ever resolved as
+   applied, the user's own live `prisma db pull --print` / `prisma migrate
+   status` run found all twelve `hike_tracks` columns (the original six plus
+   the six this item describes) already present live, with column comments,
+   and neither `0_init` nor the since-deleted `1_hike_tracks_fields`
+   migration was applied yet. So there was no live write for Prisma to make
+   here — see §7 Step 3 "still open" item 1 for the full account and why
+   `1_hike_tracks_fields` was deleted rather than deployed.
 2. **Dead/duplicate tables** — `user_saved_gems` (duplicates `gem_saves`) and
    `trip_groups` / `trip_expenses` / `trip_members` / `trip_settlements`
    (superseded by the `split_*` tables), all 0 rows. **Decision: verified and
@@ -709,44 +720,69 @@ in §3/§3a/§6 above.
   `trip_settlements`, `spatial_ref_sys`).
   **Step 3's three "still open" items — all now closed:**
   1. ~~The `hike_tracks` additive migration (Risk #1) — not yet applied as a
-     tracked Prisma migration.~~ **Applied.**
-     `prisma/migrations/1_hike_tracks_fields/migration.sql` (plus
-     `prisma/migrations/migration_lock.toml`, `provider = "postgresql"`,
-     since this was the first migration folder written by hand). Pure
-     `ADD COLUMN` on `hike_tracks` — `activity_type`/`title`/`started_at` as
-     `NOT NULL` with a default (mirroring the Dart model's required fields
-     and `HikeTrack.fromJson`'s fallbacks: `'hiking'`/`'Untitled Hike'`/
-     `now()`), `distance_km`/`duration_seconds`/`elevation_gain_m` nullable
-     (mirroring `logHike()`'s optional params) — exactly the six columns
-     `HikeProvider` already reads/writes but that didn't exist live, matching
-     the `HikeTrack` model already hand-built into `schema.prisma`. No
-     existing column touched. Generated via schema-to-schema
-     `prisma migrate diff --from-schema-datamodel <reverted HikeTrack>
-     --to-schema-datamodel prisma/schema.prisma --script` — diffed against a
-     temp copy of the schema with just this model's 6 new fields removed, so
-     no live DB connection was used or needed to produce it. Deployed by the
-     user locally via `prisma migrate deploy` after the baseline below;
-     `prisma migrate status` now reports clean/up to date. The Flutter app's
+     tracked Prisma migration.~~ **Superseded — resolved directly on the live
+     database, before any Prisma migration was ever applied.**
+     The original plan here was `prisma/migrations/1_hike_tracks_fields/
+     migration.sql`, a pure `ADD COLUMN` adding the six missing columns on
+     top of the original six, generated via schema-to-schema diffing and
+     intended to be deployed after the `0_init` baseline below. It was
+     written and committed, but **never deployed**: before the user ran
+     `prisma migrate resolve --applied 0_init`, they first re-ran the
+     live-diff check and found (2026-10-29) that `prisma migrate status`
+     reported **neither `0_init` nor `1_hike_tracks_fields` as applied yet**,
+     and `prisma db pull --print` showed `hike_tracks` already has all
+     twelve columns live — including column comments — meaning someone (or
+     some process) had already applied the Risk #1 fix directly against the
+     live database, outside Prisma, before this baseline work even started.
+     Since neither migration had been applied, there was no "replay history"
+     to preserve: `1_hike_tracks_fields/` was deleted outright, and `0_init`
+     (see item 2 below) was regenerated from the current `schema.prisma`
+     directly, so it creates `hike_tracks` with all twelve columns in one
+     `CREATE TABLE` instead of needing a second migration layered on top.
+     Net effect is identical to the original two-migration plan — the live
+     table and `schema.prisma`'s `HikeTrack` model were already in agreement
+     — just reached via one migration file instead of two. The Flutter app's
      `HikeProvider.logHike()` (previously failing every insert with Postgres
-     42703, undefined_column) should be unblocked — not yet re-verified live,
-     worth a manual smoke test next time that flow is touched.
+     42703, undefined_column) should already be unblocked given the columns
+     are live — not yet re-verified end-to-end, worth a manual smoke test
+     next time that flow is touched.
   2. ~~The **baseline migration**, marking the introspected live state as
-     already-applied~~ **Done.** Per the explicit decision (option (a)): the
-     user ran every step locally, never the agent, and nothing was written to
-     `_prisma_migrations` via the Supabase MCP or any other indirect channel.
-     Process followed (Prisma 6.19.3): `prisma migrate diff
+     already-applied~~ **Done, and since regenerated once.** Per the explicit
+     decision (option (a)): the user ran every step locally, never the agent,
+     and nothing was written to `_prisma_migrations` via the Supabase MCP or
+     any other indirect channel. Process followed (Prisma 6.19.3): a
+     schema-to-schema/live-datasource `prisma migrate diff
      --from-schema-datasource prisma/schema.prisma --to-schema-datamodel
-     prisma/schema.prisma --script` came back **empty** (confirming
-     `prisma/schema.prisma` matches the live DB exactly — the hand-built
-     introspection in Step 3 was accurate); `prisma migrate resolve --applied
-     0_init` then marked it applied; `prisma migrate status` reported clean.
-     `0_init/migration.sql` has since been generated by the agent (via `prisma
-     migrate diff --from-empty --to-schema-datamodel` against a `schema.prisma`
-     snapshot with `HikeTrack` reverted to its pre-`1_hike_tracks_fields`
-     shape, so the two migrations replay correctly in sequence against a fresh
-     database) and committed to the repo, alongside `1_hike_tracks_fields` and
-     `migration_lock.toml`. Other checkouts now see the real migration history
-     instead of a missing/drifted one.
+     prisma/schema.prisma --script` is run against the live DB and reviewed
+     before `prisma migrate resolve --applied 0_init` marks it applied and
+     `prisma migrate status` is checked for clean. That live diff surfaced
+     two corrections first (both made before resolving anything applied):
+     (a) `gem_guides.location`'s `dbgenerated(...)` default didn't match
+     Postgres's exact stored expression — live `prisma db pull --print`
+     showed `(st_setsrid(st_makepoint(longitude, latitude),
+     4326))::geography` (the `st_setsrid(...)` call wrapped in its own
+     parens before the cast), not the unwrapped form previously in
+     `schema.prisma`/`prisma/db-notes.sql §1` — both fixed to match exactly;
+     (b) the `hike_tracks` finding in item 1 above. `0_init/migration.sql`
+     has been regenerated by the agent (via `prisma migrate diff --from-empty
+     --to-schema-datamodel prisma/schema.prisma --script` against the
+     corrected, current schema — no live DB connection used or needed to
+     produce it) and committed to the repo, alongside `migration_lock.toml`;
+     `1_hike_tracks_fields/` no longer exists (see item 1). `npx prisma
+     validate`/`generate` both pass against the corrected schema. **Closed
+     2026-10-29**: the user re-ran the live diff above against the corrected
+     schema and confirmed it came back empty, then ran `prisma migrate
+     resolve --applied 0_init`; `prisma migrate status` now reports clean,
+     up to date. Step 3 is fully complete on the live database.
+  3. **New caveat added 2026-10-29, not a "still open" item but worth noting
+     here**: `0_init` (and any Prisma baseline in general) is bookkeeping
+     only — it captures tables/columns/defaults/plain indexes/foreign keys,
+     nothing else. It has no check constraints, RLS policies, triggers,
+     stored functions, or the GiST/GIN expression indexes' full definitions
+     beyond what `@@index` can declare. A fresh local/dev database must come
+     from the Supabase CLI (`supabase start` / a real schema dump), never
+     from replaying `prisma migrate deploy` against this migrations folder
+     alone — see the new "Migration safety rules" bullet below.
   3. ~~Re-implementing the three `auth.uid()`-dependent trigger protections
      (`profiles.role` lock, `attractions`/`restaurants` verification-field
      locks — see `prisma/db-notes.sql`) in `lib/auth/permissions.ts`, with
@@ -791,6 +827,18 @@ These apply from Step 3 onward and are also documented in `README.md`:
   — `prisma migrate dev` is safe there (never against the live project).
   Setup steps and a separate local `DATABASE_URL` are documented in
   `README.md`'s "Local development database" section.
+- **`prisma/migrations/0_init` (and any Prisma baseline) is bookkeeping
+  only, not a full schema capture.** It only contains what Prisma's
+  migration engine can express from `schema.prisma` — tables, columns,
+  defaults, plain indexes, foreign keys. It has no check constraints, Row
+  Level Security policies, triggers, stored functions/procedures, or the
+  full definitions behind the GiST/GIN expression indexes beyond what
+  `@@index` can declare (all documented separately in
+  `prisma/db-notes.sql` and §3a/§6 above). **Never provision a fresh
+  local/dev database by replaying `prisma migrate deploy` against this
+  migrations folder alone** — it will be missing RLS/triggers/functions the
+  app actually depends on. Use the Supabase CLI (`supabase start`) or a real
+  schema dump instead, per the bullet above.
 - **The seed script (`prisma/seed.ts`) hard-refuses to run** unless
   `DATABASE_URL` is a `localhost`/`127.0.0.1` host and does not contain the
   production project ref (`yshgjzmyapdepkapodno`). There is no override/

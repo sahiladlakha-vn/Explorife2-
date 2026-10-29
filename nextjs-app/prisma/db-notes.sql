@@ -31,8 +31,16 @@
 --
 --   location geography(Point, 4326)
 --     GENERATED ALWAYS AS (
---       st_setsrid(st_makepoint(longitude, latitude), 4326)::geography
+--       (st_setsrid(st_makepoint(longitude, latitude), 4326))::geography
 --     ) STORED
+--
+-- Confirmed via `prisma db pull --print` (2026-10-29): Postgres stores/emits
+-- the cast with the st_setsrid(...) call wrapped in its own parentheses —
+-- `(st_setsrid(...))::geography`, not `st_setsrid(...)::geography`. The
+-- `dbgenerated(...)` string in schema.prisma must match this exactly
+-- (including that extra parenthesization) for `prisma migrate diff` to see
+-- the column as already matching instead of proposing a cosmetic
+-- ALTER COLUMN ... SET DEFAULT.
 --
 -- `leaderboard.rank_score` is ALSO a STORED GENERATED column (confirmed via
 -- pg_attrdef/generation_expression — a prior pass of this file wrongly

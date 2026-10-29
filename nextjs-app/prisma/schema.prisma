@@ -332,7 +332,7 @@ model GemGuide {
   verified      Boolean          @default(false)
   latitude      Float
   longitude     Float
-  location      Unsupported("geography(Point, 4326)")? @default(dbgenerated("st_setsrid(st_makepoint(longitude, latitude), 4326)::geography"))
+  location      Unsupported("geography(Point, 4326)")? @default(dbgenerated("(st_setsrid(st_makepoint(longitude, latitude), 4326))::geography"))
   available     Boolean          @default(true)
   createdAt     DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt     DateTime         @default(now()) @map("updated_at") @db.Timestamptz(6)

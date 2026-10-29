@@ -5,34 +5,65 @@
 -- Prisma's starting point, so `prisma migrate dev`/`deploy` never try to
 -- recreate tables that already exist on the live database.
 --
--- Applied locally, by the user, never by an agent, per MIGRATION_PLAN.md's
--- "Migration safety rules": `prisma migrate diff --from-schema-datasource
--- prisma/schema.prisma --to-schema-datamodel prisma/schema.prisma --script`
--- against the live DB came back clean (no destructive diff — the hand-built
--- schema matches, net of the `hike_tracks` gap covered by the next
--- migration, see below), then `prisma migrate resolve --applied 0_init`
--- marked this migration applied without actually running it (the schema it
--- describes already existed). No write to `_prisma_migrations` was made by
--- the agent, directly or via the Supabase MCP, at any point.
+-- To be applied locally, by the user, never by an agent, per
+-- MIGRATION_PLAN.md's "Migration safety rules": a schema-to-schema
+-- `prisma migrate diff --from-schema-datamodel prisma/schema.prisma
+-- --to-schema-datamodel prisma/schema.prisma --script` against the live DB
+-- must come back empty before `prisma migrate resolve --applied 0_init`
+-- marks this migration applied without actually running it (the schema it
+-- describes already exists). No write to `_prisma_migrations` is to be made
+-- by an agent, directly or via the Supabase MCP, at any point.
 --
--- IMPORTANT — this file's *content* was generated after the fact, by the
--- agent, from `prisma/schema.prisma`, not captured live from the user's own
--- `prisma migrate diff` run:
---   npx prisma migrate diff --from-empty \
---     --to-schema-datamodel <schema.prisma with HikeTrack reverted to its
---                             pre-"1_hike_tracks_fields" 6-column shape> \
---     --script
--- (schema-to-empty diffing — no live DB connection used or possible here,
--- since the agent deliberately has no DB credentials). The HikeTrack model
--- was reverted before generating this file specifically so this migration
--- and `1_hike_tracks_fields` replay correctly in sequence against a fresh
--- database: `0_init` creates `hike_tracks` with only its original 6 columns
--- (matching what was actually live before that migration), and
--- `1_hike_tracks_fields`'s plain `ADD COLUMN` statements add the other 6 on
--- top — together producing the exact same schema as diffing straight from
--- the current `prisma/schema.prisma` (diffed and confirmed identical byte-
--- for-byte except for those 6 columns before this file was written). Every
--- other table here reflects `schema.prisma` exactly as it stands today.
+-- REGENERATED 2026-10-29 (superseding the version committed alongside
+-- `1_hike_tracks_fields`, before either migration was ever applied):
+--
+--   1. `gem_guides.location`'s STORED GENERATED default didn't match the
+--      live expression's exact parenthesization. Live `prisma db pull
+--      --print` (run by the user, who has DB credentials — the agent does
+--      not) showed `(st_setsrid(st_makepoint(longitude, latitude),
+--      4326))::geography`, i.e. the `st_setsrid(...)` call wrapped in its
+--      own parens before the `::geography` cast — `schema.prisma` and
+--      `prisma/db-notes.sql` previously had it unwrapped. Fixed in both
+--      files; this regenerated baseline reflects the corrected expression.
+--   2. The user's own live diff additionally found that `hike_tracks`
+--      already has all twelve columns live (the original six plus `title`/
+--      `activity_type`/`distance_km`/`duration_seconds`/`elevation_gain_m`/
+--      `started_at`) — someone applied the Risk #1 fix (MIGRATION_PLAN.md
+--      §6 item 1) directly against the live database, outside Prisma,
+--      before this baseline was ever resolved as applied. Since neither
+--      `0_init` nor `1_hike_tracks_fields` had been applied yet (confirmed
+--      via `prisma migrate status` showing both pending), there was no
+--      "already-applied migration" to preserve: `1_hike_tracks_fields` was
+--      deleted outright and `hike_tracks` is created here with all twelve
+--      columns in one `CREATE TABLE`, matching the live table and
+--      `schema.prisma`'s `HikeTrack` model directly, instead of needing a
+--      second migration to layer the extra six on afterward.
+--
+-- Generated via `npx prisma migrate diff --from-empty --to-schema-datamodel
+-- prisma/schema.prisma --script` (schema-to-empty diffing — no live DB
+-- connection used or possible here, since the agent deliberately has no DB
+-- credentials). Every table here reflects `schema.prisma` exactly as it
+-- stands today, confirmed against the two checks the user asked for: no
+-- statement here creates, alters, or drops anything in the `auth` schema
+-- (only `REFERENCES "auth"."users"(...)` foreign keys, which read an
+-- existing external table, never modify it — `auth.*` is in
+-- `prisma.config.ts`'s `externalTables`), and the file contains no `DROP`
+-- statement at all — purely additive `CREATE SCHEMA`/`CREATE TYPE`/
+-- `CREATE TABLE`/`CREATE INDEX`/`ALTER TABLE ... ADD CONSTRAINT`.
+--
+-- IMPORTANT — this baseline is bookkeeping only, not a full schema capture:
+-- it only contains what Prisma's migration engine can express from
+-- `schema.prisma` (tables, columns, defaults it understands, plain indexes,
+-- foreign keys). It does NOT include check constraints, Row Level Security
+-- policies, triggers, stored functions/procedures, or the GiST/GIN
+-- expression indexes' underlying operator classes beyond what `@@index`
+-- can declare — all of that lives only on the real Supabase project and is
+-- documented separately (`prisma/db-notes.sql`, MIGRATION_PLAN.md §3a/§6).
+-- A fresh local/dev database must therefore be provisioned from the
+-- Supabase CLI (`supabase db pull`/a real schema dump) and NOT from
+-- `prisma migrate deploy` against this migrations folder alone — replaying
+-- just `0_init` gives you the tables and columns but none of the RLS/
+-- trigger/function behavior the live app actually depends on.
 --
 -- All 30 in-scope tables plus the Risk #2 dead/legacy ones that are still
 -- physically live but `@@ignore`d from the generated Prisma Client
@@ -176,7 +207,7 @@ CREATE TABLE "gem_guides" (
     "verified" BOOLEAN NOT NULL DEFAULT false,
     "latitude" DOUBLE PRECISION NOT NULL,
     "longitude" DOUBLE PRECISION NOT NULL,
-    "location" geography(Point, 4326) DEFAULT st_setsrid(st_makepoint(longitude, latitude), 4326)::geography,
+    "location" geography(Point, 4326) DEFAULT (st_setsrid(st_makepoint(longitude, latitude), 4326))::geography,
     "available" BOOLEAN NOT NULL DEFAULT true,
     "created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updated_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -217,6 +248,12 @@ CREATE TABLE "hike_tracks" (
     "featured" BOOLEAN DEFAULT false,
     "created_at" TIMESTAMPTZ(6) DEFAULT CURRENT_TIMESTAMP,
     "user_id" UUID NOT NULL,
+    "title" TEXT NOT NULL DEFAULT 'Untitled Hike',
+    "activity_type" TEXT NOT NULL DEFAULT 'hiking',
+    "distance_km" DOUBLE PRECISION,
+    "duration_seconds" INTEGER,
+    "elevation_gain_m" DOUBLE PRECISION,
+    "started_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "hike_tracks_pkey" PRIMARY KEY ("id")
 );
