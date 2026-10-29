@@ -1,10 +1,12 @@
 import "server-only";
 import { prisma } from "@/lib/db";
+import { Prisma } from "@/lib/generated/prisma/client";
 import {
   PROFILE_ROLE_CHANGE_ROLES,
   ForbiddenError,
   assertCanChangeProfileRole,
   getUserRole,
+  isAnonymousGuest,
   requireUser,
   type Role,
 } from "@/lib/auth/permissions";
@@ -105,52 +107,111 @@ export async function updateProfile(targetUserId: string, patch: ProfileWritePat
 }
 
 /**
- * Dedicated role-change path — mirrors `updateUserRole()` from
- * MIGRATION_PLAN.md §3a. Unlike `updateProfile` above, this throws
- * (AuthError/ForbiddenError) when the caller isn't a super_admin, since
- * setting the role is the entire point of calling it — there's no "rest of
- * the patch" to fall back to.
+ * Dedicated role-change path — full TypeScript port of the live
+ * `admin_update_user_role` SECURITY DEFINER RPC (`explorife_schema_export.sql`),
+ * including every guard it has, in the same order:
+ *
+ *   1. `insufficient_privilege` — only a super_admin may call this at all.
+ *      Ported as `assertCanChangeProfileRole()` below (unchanged from before
+ *      this pass).
+ *   2. `profile not found: %` — the target has no `profiles` row.
+ *   3. `cannot assign a role to an anonymous guest session` — the target's
+ *      Supabase Auth user has `is_anonymous = true`. Ported via
+ *      `isAnonymousGuest()`, which (unlike the RPC's single SQL join) needs a
+ *      separate Admin API round-trip — see that function's doc comment in
+ *      `lib/auth/permissions.ts`. Checked before opening the transaction
+ *      (it's a read-only, no-side-effect check) so a rejected guest-target
+ *      call never touches the database at all, matching the RPC's
+ *      no-partial-write behavior.
+ *   4. `if v_old_role = p_new_role then return;` — same-role is a silent
+ *      no-op: no update, no `admin_action_log` row. Ported as an early
+ *      `return` inside the transaction once `oldRole` is known.
+ *   5. `cannot remove the last super_admin account's super_admin role` — the
+ *      RPC's exact condition is `p_target_id = auth.uid() AND p_new_role <>
+ *      'super_admin' AND (select count(*) from profiles where role =
+ *      'super_admin') <= 1`, i.e. this only ever fires on SELF-demotion: if
+ *      there's more than one super_admin, demoting any single one (including
+ *      a different super_admin) is fine, and only a self-targeting demotion
+ *      can ever reduce the super_admin count when there's just one left.
+ *      Ported with the identical condition below.
+ *
+ * `insufficient_privilege` aside, no other guard exists in the live RPC —
+ * this is the complete set.
  *
  * Also writes an `admin_action_log` row in the same transaction as the role
- * update, matching what the live `admin_update_user_role` SECURITY DEFINER
- * RPC recorded (`supabase/migrations/20260925000300_admin_update_user_role_
- * log_columns.sql`): `actor_id` (the acting super_admin), `action_type`
- * (`"assign_role"`), `target_profile_id`, `old_role`/`new_role`, and a
- * `details` jsonb mirroring the old/new role pair. `old_role` is read inside
- * the same transaction as the update to avoid a race against a concurrent
- * role change.
+ * update (added in the hardening pass before this one), matching what the
+ * live RPC records: `actor_id`, `action_type` (`"assign_role"`),
+ * `target_profile_id`, `old_role`/`new_role`, and a `details` jsonb mirroring
+ * the old/new role pair.
  *
- * Scope note: this only ports the log-write behavior, which is what was
- * asked for. The live RPC also has several additional guards this function
- * does NOT reproduce — a target-not-found check, a rejection of
- * anonymous/guest targets, a same-role no-op short-circuit, and a
- * last-super-admin-demotion guard. Flagging these as a gap rather than
- * silently porting or silently omitting them: they're a separate scope
- * decision, not something implied by "write the log row."
+ * Concurrency: guard 5 above has a real race in the *original* SQL RPC too —
+ * if there are exactly two super_admins and both simultaneously self-demote
+ * (two separate calls, each reading `count(*) = 2` before either commits),
+ * neither call's guard fires and both succeed, leaving zero super_admins.
+ * This is the classic Postgres "write skew" anomaly (same shape as the
+ * textbook "two doctors going off call" example). Per your request, this is
+ * closed here — not in the original RPC — by running the whole guard+update
+ * in a `Serializable`-isolation transaction: Postgres's serializable
+ * snapshot isolation detects the overlapping read (the `super_admin` count)
+ * plus overlapping write (both transactions touching rows matching that same
+ * predicate) and aborts one of the two with a serialization-failure error
+ * (Prisma surfaces this as `P2034`) rather than letting both commit. An
+ * explicit `SELECT ... FOR UPDATE` row lock was the other option you
+ * mentioned, but it wouldn't actually close this specific race: the two
+ * conflicting transactions target two DIFFERENT profile rows (each
+ * self-demoting a different super_admin), so a lock scoped to "the row being
+ * updated" never overlaps between them. Serializable isolation is the
+ * version of this fix that actually covers the cross-row case.
+ *
+ * This function does not itself catch/retry a `P2034` — it lets it propagate
+ * so the one loser of the race gets an explicit error rather than a silent
+ * partial state. Building automatic retry (re-running the whole guard chain
+ * against fresh data) is a reasonable follow-up but a separate, larger
+ * decision than "port the guards," so it's flagged rather than added here.
  */
 export async function updateUserRole(targetUserId: string, role: Role) {
   const { user: actor } = await assertCanChangeProfileRole();
 
-  return prisma.$transaction(async (tx) => {
-    const target = await tx.profile.findUnique({
-      where: { id: targetUserId },
-      select: { role: true },
-    });
-    const oldRole = target?.role ?? null;
+  if (await isAnonymousGuest(targetUserId)) {
+    throw new ForbiddenError("Cannot assign a role to an anonymous guest session.");
+  }
 
-    const updated = await tx.profile.update({ where: { id: targetUserId }, data: { role } });
+  return prisma.$transaction(
+    async (tx) => {
+      const target = await tx.profile.findUnique({ where: { id: targetUserId } });
+      if (!target) {
+        throw new Error(`Profile ${targetUserId} not found.`);
+      }
 
-    await tx.adminActionLog.create({
-      data: {
-        actorId: actor.id,
-        actionType: "assign_role",
-        targetProfileId: targetUserId,
-        oldRole,
-        newRole: role,
-        details: { old_role: oldRole, new_role: role },
-      },
-    });
+      const oldRole = target.role;
+      if (oldRole === role) {
+        return target;
+      }
 
-    return updated;
-  });
+      if (targetUserId === actor.id && role !== "super_admin") {
+        const superAdminCount = await tx.profile.count({ where: { role: "super_admin" } });
+        if (superAdminCount <= 1) {
+          throw new ForbiddenError(
+            "Cannot remove the last super_admin account's super_admin role.",
+          );
+        }
+      }
+
+      const updated = await tx.profile.update({ where: { id: targetUserId }, data: { role } });
+
+      await tx.adminActionLog.create({
+        data: {
+          actorId: actor.id,
+          actionType: "assign_role",
+          targetProfileId: targetUserId,
+          oldRole,
+          newRole: role,
+          details: { old_role: oldRole, new_role: role },
+        },
+      });
+
+      return updated;
+    },
+    { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+  );
 }

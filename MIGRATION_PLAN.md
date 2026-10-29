@@ -211,6 +211,20 @@ delete/update (toggle packed); `trip_collaborators` insert (add traveler);
 insert/update (owner); RPC `verify_restaurant`, `retract_restaurant`;
 `restaurant_menu_items` select/replace (delete-all + batch insert, owner-only).
 
+**Requirement for the future listing-forms feature** (`/attractions/new`,
+`/restaurants/new` from §1 — not yet built): the Prisma-side `createAttraction()`/
+`createRestaurant()` Server Actions that back those forms must, like
+`updateProfile()`/`updateUserRole()` in `lib/server/profiles.ts`, not just trust
+client input. Specifically they must (1) `requireRole('business_owner')` — reject
+anyone else before touching the DB; (2) set `owner_id` from the authenticated
+session (`requireUser().id`), never accept it as a field on the incoming patch;
+and (3) force `verificationStatus: 'pending'` server-side on every insert,
+ignoring/stripping any `verificationStatus`/`verifiedBy`/`verifiedAt` the client
+sends — mirroring the existing "superseded" guard on those same columns for
+*updates* noted in the `lock_attraction_verification_fields` /
+`lock_restaurant_verification_fields` row of the RPC table below. Not built yet;
+this is a landing requirement for whoever implements those two functions.
+
 **AdminProfileRepository** — `admin_profiles` select by id, upsert, login-record
 update.
 
@@ -518,7 +532,7 @@ always `NULL` in any session Prisma opens. Concretely this means:
 | `is_trip_owner` | `lib/auth/permissions.ts` → `isTripOwner(userId, tripId)` (Prisma lookup against `trips`) | n/a — primitive |
 | `lock_profile_role_field` (trigger) | No TS port — **superseded**: `profiles.role` must only ever be written by `updateUserRole()` above, which already enforces `requireRole('super_admin')`. The trigger itself becomes a correctness hazard once writes move to Prisma (see warning above) — tracked as an open question, not resolved by this table alone. | — |
 | `lock_attraction_verification_fields` / `lock_restaurant_verification_fields` (triggers) | No TS port — **superseded**: the generic "edit my listing" Server Action must never accept `verification_status`/`verified_by`/`verified_at` in its payload; only `verifyAttraction`/`verifyRestaurant` above may set them, and those already gate on role. Same open-question flag as above. | — |
-| `handle_new_user` (trigger on `auth.users`) | No TS port needed — fires inside Supabase Auth's own insert path (guest sign-up, OAuth sign-up), untouched by this migration since Supabase Auth is being kept | — |
+| `handle_new_user` (trigger on `auth.users`) | No TS port needed — fires inside Supabase Auth's own insert path (guest sign-up, OAuth sign-up), untouched by this migration since Supabase Auth is being kept. **Confirmed via `explorife_schema_export.sql`:** it `INSERT ... ON CONFLICT (id) DO UPDATE` into `public.profiles` on every new `auth.users` row, defaulting `role` to the column default (`'traveler'`) — it never sets `role` itself. Because of this, **`lib/server/profiles.ts` needs no `createProfile()` function at all**: a `profiles` row always already exists by the time any app code runs for a signed-in user, so `updateProfile()`/`updateUserRole()` (both already built) are the only writes that module needs to expose. | — |
 | `increment_gems_score`, `increment_journal_score` (triggers) | No TS port needed — don't read `auth.uid()`, fire identically under Prisma-driven writes | — |
 | `upsert_gem_from_sheet`, `upsert_tour_from_sheet`, `upsert_curated_collection_from_sheet` | Out of scope (Risk #10) — Apps Script keeps calling these directly over PostgREST; unaffected since that path never goes through Prisma | — |
 | `st_estimatedextent` (×3 overloads) | PostGIS-internal, not application logic — leave alone | — |

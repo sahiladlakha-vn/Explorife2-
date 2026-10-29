@@ -1,6 +1,7 @@
 import "server-only";
 import type { User } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { prisma } from "@/lib/db";
 
 /**
@@ -217,4 +218,33 @@ export async function assertCanVerifyAttraction(): Promise<{ user: User; role: R
  */
 export async function assertCanVerifyRestaurant(): Promise<{ user: User; role: Role }> {
   return requireRole(VERIFICATION_MODERATOR_ROLES);
+}
+
+/**
+ * Is `userId` an anonymous/guest Supabase Auth session? Used by
+ * `updateUserRole()` (`lib/server/profiles.ts`) to port the live
+ * `admin_update_user_role` RPC's guard against assigning a role to an
+ * anonymous guest session (`explorife_schema_export.sql`: "if v_is_anonymous
+ * then raise exception 'cannot assign a role to an anonymous guest
+ * session';").
+ *
+ * Unlike `requireRealUser()` above (which checks the CALLING session), this
+ * checks an arbitrary TARGET user — something `@supabase/ssr`'s
+ * request-scoped client can't do, since it only ever has the current
+ * request's own session. Goes through the Supabase Admin API
+ * (`lib/supabase/admin.ts`) instead, which is why it's an extra network call
+ * rather than a Prisma lookup — see that file's doc comment for why
+ * `is_anonymous` isn't modeled in Prisma's `User` type.
+ *
+ * Fails open to `false` (not anonymous) if the Admin API call errors or
+ * can't find the user — this only gates the "is this specifically an
+ * anonymous guest" question; a target that doesn't exist at all is still
+ * caught separately by `updateUserRole()`'s own not-found check against
+ * `public.profiles`, which is the authoritative existence check.
+ */
+export async function isAnonymousGuest(userId: string): Promise<boolean> {
+  const admin = createAdminClient();
+  const { data, error } = await admin.auth.admin.getUserById(userId);
+  if (error || !data?.user) return false;
+  return data.user.is_anonymous ?? false;
 }
