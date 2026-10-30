@@ -23,6 +23,8 @@ import {
   AuthError,
   ForbiddenError,
   getUserRole,
+  getOptionalUser,
+  ensureAnonymousSession,
   canChangeProfileRole,
   canSetListingVerification,
   assertCanChangeProfileRole,
@@ -43,12 +45,18 @@ const ALL_ROLES: readonly Role[] = [
   "finance_admin",
 ];
 
-function mockSessionUser(user: Pick<User, "id"> | null) {
+function mockSessionUser(
+  user: Pick<User, "id"> | null,
+  options?: { signInAnonymously?: ReturnType<typeof vi.fn> },
+) {
   vi.mocked(createClient).mockResolvedValue({
     auth: {
       getUser: vi.fn().mockResolvedValue({ data: { user } }),
+      signInAnonymously:
+        options?.signInAnonymously ??
+        vi.fn().mockRejectedValue(new Error("signInAnonymously() not expected to be called")),
     },
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- partial Supabase client stub, only `auth.getUser()` is exercised
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- partial Supabase client stub, only `auth.*` methods under test are exercised
   } as any);
 }
 
@@ -173,4 +181,53 @@ describe.each([
       await expect(assertFn()).resolves.toEqual({ user: { id: "user-1" }, role });
     },
   );
+});
+
+// --- getOptionalUser (Step 5) ----------------------------------------------
+
+describe("getOptionalUser", () => {
+  it("returns the user when a session exists", async () => {
+    mockSessionUser({ id: "user-1" });
+    await expect(getOptionalUser()).resolves.toEqual({ id: "user-1" });
+  });
+
+  it("returns null instead of throwing when there's no session", async () => {
+    mockSessionUser(null);
+    await expect(getOptionalUser()).resolves.toBeNull();
+  });
+});
+
+// --- ensureAnonymousSession (Step 5) ----------------------------------------
+//
+// No call sites exist yet (Step 5 ships no write actions) — these tests pin
+// down the contract for Step 6+: never double-create a session, and surface
+// a clean AuthError rather than a raw Supabase error object on failure.
+
+describe("ensureAnonymousSession", () => {
+  it("returns the existing user unchanged when a session (guest or real) already exists", async () => {
+    mockSessionUser({ id: "existing-user" });
+    await expect(ensureAnonymousSession()).resolves.toEqual({ id: "existing-user" });
+  });
+
+  it("creates and returns a new anonymous user when there's no session", async () => {
+    const signInAnonymously = vi.fn().mockResolvedValue({
+      data: { user: { id: "new-anon-user", is_anonymous: true } },
+      error: null,
+    });
+    mockSessionUser(null, { signInAnonymously });
+    await expect(ensureAnonymousSession()).resolves.toEqual({
+      id: "new-anon-user",
+      is_anonymous: true,
+    });
+    expect(signInAnonymously).toHaveBeenCalledTimes(1);
+  });
+
+  it("throws AuthError if Supabase fails to create the anonymous session", async () => {
+    const signInAnonymously = vi.fn().mockResolvedValue({
+      data: { user: null },
+      error: new Error("network error"),
+    });
+    mockSessionUser(null, { signInAnonymously });
+    await expect(ensureAnonymousSession()).rejects.toBeInstanceOf(AuthError);
+  });
 });

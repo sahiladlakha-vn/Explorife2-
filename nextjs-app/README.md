@@ -148,3 +148,51 @@ a real local `auth` schema (`auth.users` etc.), which the live-only
 4. Now `prisma migrate dev`, `npx prisma db seed`, etc. are safe to run — they
    only ever touch the local stack.
 5. `supabase stop` to tear the local stack down when you're done.
+
+## Run locally against the live project
+
+Auth (`/auth`, `/auth/callback`, `/auth/sign-out`) needs real GoTrue
+endpoints — the local Supabase-CLI stack above has its own isolated `auth`
+schema but isn't wired to the OAuth apps' real client IDs/secrets, so to
+exercise the actual Google/GitHub sign-in flow during local development you
+run `npm run dev` with `DATABASE_URL`/`DIRECT_URL` pointed at the local stack
+(or the live one, per the usual rules above) but `NEXT_PUBLIC_SUPABASE_URL` /
+`NEXT_PUBLIC_SUPABASE_ANON_KEY` pointed at the **live** Supabase project,
+since that's where the OAuth provider apps are actually registered.
+
+1. In `.env.local`, set `NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+   to the live project's values (Supabase dashboard → Settings → API), and
+   leave `NEXT_PUBLIC_SITE_URL="http://localhost:3000"` (the default in
+   `.env.example`) — this is what `lib/auth/site-url.ts` uses to build the
+   OAuth `redirectTo` and what `app/auth/callback/route.ts` redirects back to,
+   so it must match the origin you're actually running `npm run dev` on.
+2. In the live project's dashboard → **Authentication → URL Configuration**,
+   add `http://localhost:3000/auth/callback` to the **Redirect URLs**
+   allowlist (leave the existing production entries in place — this is an
+   allowlist, not a single value). Without this, GoTrue rejects the OAuth
+   callback with a redirect-URL-not-allowed error before it ever reaches our
+   `/auth/callback` route.
+3. Confirm these two project-level Auth toggles are already on (dashboard →
+   Authentication → Providers / Sign In Methods) — both are one-time live
+   project settings, not something to configure per-checkout:
+   - **Allow anonymous sign-ins** — required for the guest session flow
+     (`ensureAnonymousSession()`, Step 6+) and for `/auth/sign-out`'s
+     guest-specific confirmation screen to ever be reachable.
+   - **Allow manual linking of accounts** — required for a guest session to
+     link a real Google/GitHub identity via the "Sign in to keep it" buttons
+     on `/auth/sign-out` and the `identity_already_exists` recovery flow on
+     `/auth`, instead of erroring.
+4. `npm run dev`, then exercise the flows manually:
+   - `/auth?redirect=%2Fprofile%2Foverview` → **Continue with Google/GitHub**
+     → completes the real OAuth round trip → lands back on
+     `/profile/overview` signed in.
+   - `/auth/sign-out` while signed in as a real user → plain "Sign out?"
+     confirmation → **Sign out** → back to `/`.
+   - `/auth/sign-out` while on an anonymous/guest session → the data-loss
+     warning screen → either **Sign in with Google/GitHub to keep it** (links
+     the guest's data to the new identity) or **Sign out and permanently
+     delete my data** (confirmed guest sign-out).
+   - Visiting `/profile/overview` or `/trips/[tripId]` with no session at all
+     renders a guest view (sign-in prompt) instead of crashing or
+     redirecting — no OAuth app config needed for this one, it works against
+     either the local or live `NEXT_PUBLIC_SUPABASE_URL`.

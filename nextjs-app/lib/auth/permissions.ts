@@ -62,6 +62,48 @@ export async function requireRealUser(): Promise<User> {
   return user;
 }
 
+/**
+ * Explicit alias for `getCurrentUser()` for call sites that treat "no
+ * session" as a normal, valid state to render around (a guest view) rather
+ * than an auth failure to throw on — e.g. `ProfileLayoutBody`/`TripLayoutBody`
+ * (Step 5). Named separately from `getCurrentUser` so each call site reads
+ * as a deliberate choice: "optional" (render a guest view) vs. the
+ * throwing `requireUser`/`requireRealUser` guards above.
+ */
+export async function getOptionalUser(): Promise<User | null> {
+  return getCurrentUser();
+}
+
+/**
+ * Creates an anonymous Supabase Auth session for a visitor who doesn't have
+ * one yet, so a write Server Action (save a gem, create a trip, ...) always
+ * has a real `auth.uid()` to attach work to. Returns the existing user
+ * unchanged if a session (guest or real) already exists — never creates a
+ * second session on top of one that's already there.
+ *
+ * Deliberately NOT called from `proxy.ts`/`updateSession()` or from any
+ * Server Component render path: both run on every request/page view
+ * (including `<Link>` prefetches background-loading `/profile/*` from any
+ * page that merely links there), which would fill `auth.users` with
+ * anonymous rows for ordinary visitors and bots alike. The only safe place
+ * to call this is inside a Server Action triggered by an explicit user
+ * action that actually needs an identity — mirrors the Flutter app's
+ * `requireAccount()` trigger point (sign_in_sheet.dart), just lazy instead
+ * of eager. No call sites exist yet (Step 5 ships no write actions) — ready
+ * for Step 6+.
+ */
+export async function ensureAnonymousSession(): Promise<User> {
+  const existing = await getCurrentUser();
+  if (existing) return existing;
+
+  const supabase = await createClient();
+  const { data, error } = await supabase.auth.signInAnonymously();
+  if (error || !data.user) {
+    throw new AuthError("Could not start a guest session.");
+  }
+  return data.user;
+}
+
 // --- Role-based checks ------------------------------------------------
 //
 // `public.profiles.role` is the Prisma `Profile` model (`prisma/schema.prisma`,

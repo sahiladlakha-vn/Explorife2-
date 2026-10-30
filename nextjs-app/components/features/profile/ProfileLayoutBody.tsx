@@ -1,18 +1,45 @@
 import type { ReactNode } from "react";
-import { requireUser } from "@/lib/auth/permissions";
+import Link from "next/link";
+import { getOptionalUser } from "@/lib/auth/permissions";
 import { getProfileHeaderData } from "@/lib/server/profiles";
 import { ProfileHeader } from "./ProfileHeader";
 import { ProfileTabs } from "./ProfileTabs";
 
 /**
- * Isolates the `cookies()`-dependent data fetch (via `requireUser`) behind
- * its own Server Component so `app/profile/layout.tsx` can stay a static
- * shell and wrap just this piece in `<Suspense>`. Keeps the original
+ * Isolates the `cookies()`-dependent data fetch (via `getOptionalUser`)
+ * behind its own Server Component so `app/profile/layout.tsx` can stay a
+ * static shell and wrap just this piece in `<Suspense>`. Keeps the original
  * all-or-nothing behavior: with no profile row, tabs and children are
  * withheld too, not just the header.
+ *
+ * Uses `getOptionalUser()` rather than `requireUser()` (Step 5): a visitor
+ * with no session at all is a normal, expected case here — Next's `<Link>`
+ * prefetching requests `/profile/*` in the background from any page that
+ * merely links there, so throwing/redirecting on "no session" would both
+ * crash on a genuine zero-session visit and create guest work for every
+ * prefetch. Render a guest view instead; `ensureAnonymousSession()` is only
+ * ever called from inside a write Server Action, never here.
  */
 export async function ProfileLayoutBody({ children }: { children: ReactNode }) {
-  const user = await requireUser();
+  const user = await getOptionalUser();
+
+  if (!user) {
+    return (
+      <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 py-16 text-center">
+        <p className="text-text text-lg font-medium">No trips or gems saved yet</p>
+        <p className="text-text-muted max-w-sm text-sm">
+          Sign in to save trips and gems, and pick up right where you left off on any device.
+        </p>
+        <Link
+          href="/auth?redirect=%2Fprofile%2Foverview"
+          className="bg-accent mt-2 rounded-full px-5 py-2 text-sm font-medium text-white"
+        >
+          Sign in
+        </Link>
+      </div>
+    );
+  }
+
   const { profile, leaderboardEntry } = await getProfileHeaderData(user.id);
 
   if (!profile) {
