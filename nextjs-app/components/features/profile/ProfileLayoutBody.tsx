@@ -1,9 +1,11 @@
 import type { ReactNode } from "react";
+import { Suspense } from "react";
 import Link from "next/link";
 import { getOptionalUser } from "@/lib/auth/permissions";
 import { getProfileHeaderData } from "@/lib/server/profiles";
 import { ProfileHeader } from "./ProfileHeader";
 import { ProfileTabs } from "./ProfileTabs";
+import { ProfileTabsSkeleton } from "./ProfileHeaderSkeleton";
 
 /**
  * Isolates the `cookies()`-dependent data fetch (via `getOptionalUser`)
@@ -19,6 +21,14 @@ import { ProfileTabs } from "./ProfileTabs";
  * crash on a genuine zero-session visit and create guest work for every
  * prefetch. Render a guest view instead; `ensureAnonymousSession()` is only
  * ever called from inside a write Server Action, never here.
+ *
+ * `ProfileTabs` gets its own `<Suspense>` boundary here because it calls
+ * `useSelectedLayoutSegment()`: on a `/profile/trips/[tripId]/*` route this
+ * is a dynamic-param segment rendered per-request, which Next 16's
+ * instant-navigation validation flags as URL data read outside Suspense
+ * (docs: https://nextjs.org/docs/messages/blocking-prerender-client-hook).
+ * Scoping the boundary to just the tabs — rather than this whole function's
+ * output — keeps the header and `{children}` independently streamable.
  */
 export async function ProfileLayoutBody({ children }: { children: ReactNode }) {
   const user = await getOptionalUser();
@@ -54,7 +64,9 @@ export async function ProfileLayoutBody({ children }: { children: ReactNode }) {
   return (
     <>
       <ProfileHeader profile={profile} leaderboardEntry={leaderboardEntry} />
-      <ProfileTabs />
+      <Suspense fallback={<ProfileTabsSkeleton />}>
+        <ProfileTabs />
+      </Suspense>
       <div className="flex flex-1 flex-col">{children}</div>
     </>
   );

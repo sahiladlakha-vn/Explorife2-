@@ -8,6 +8,14 @@ import { getActiveTripId } from "@/lib/server/trips";
  * past — see `getActiveTripId`). A user with zero trips sees an empty state
  * here instead of being redirected anywhere.
  */
+/**
+ * `instant = false` — see `app/profile/overview/page.tsx`'s comment:
+ * `ProfileLayoutBody` withholds `{children}` (this page) when there's no
+ * session/profile, which is the documented "slot gated by authentication"
+ * case for this fix rather than rendering the dropped segment.
+ */
+export const instant = false;
+
 export default async function TripsIndexPage() {
   const user = await requireUser();
   const activeTripId = await getActiveTripId(user.id);

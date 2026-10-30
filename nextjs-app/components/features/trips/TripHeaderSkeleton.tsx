@@ -1,4 +1,31 @@
 /**
+ * Mirrors `TripSubTabs`'s exact box structure — four pill buttons, same
+ * height/shape — so its own `<Suspense>` fallback (now wrapping just the
+ * sub-tabs inside `TripHeader`, not the whole header) reserves identical
+ * space. `TripSubTabs` calls `useSelectedLayoutSegment()`, which Next 16's
+ * instant-navigation validation flags as "URL data in a Client Component
+ * outside of Suspense" on this dynamic-param (`[tripId]`) route — see
+ * https://nextjs.org/docs/messages/blocking-prerender-client-hook. Wrapping
+ * just this nav (not the rest of `TripHeader`) keeps the switcher trigger
+ * and action buttons in the static shell per the docs' "push the hook read
+ * down to the leaf" guidance.
+ */
+export function TripSubTabsSkeleton() {
+  return (
+    <nav aria-hidden className="flex animate-pulse shrink-0 gap-1">
+      {["Trip", "Itinerary", "Dashboard", "Bookings"].map((label) => (
+        <div
+          key={label}
+          className="bg-surface-raised h-7 w-20 shrink-0 rounded-full px-3 py-1.5 text-sm font-medium"
+        >
+          &nbsp;
+        </div>
+      ))}
+    </nav>
+  );
+}
+
+/**
  * Mirrors `TripHeader`'s exact container/child classes (same flex-wrap,
  * order, basis, and padding utilities) so the Suspense fallback reserves
  * identical height at every breakpoint — including the <768px wrap onto a
@@ -21,13 +48,7 @@ export function TripHeaderSkeleton() {
         <div className="bg-surface-raised h-9 w-9 shrink-0 rounded-full md:w-24" />
       </div>
       <div className="-mx-4 w-full basis-full overflow-x-auto px-4 md:order-2 md:mx-0 md:w-auto md:flex-1 md:basis-auto md:px-0">
-        <nav className="flex shrink-0 gap-1">
-          {["Trip", "Itinerary", "Dashboard", "Bookings"].map((label) => (
-            <div key={label} className="bg-surface-raised h-7 w-20 shrink-0 rounded-full px-3 py-1.5 text-sm font-medium">
-              &nbsp;
-            </div>
-          ))}
-        </nav>
+        <TripSubTabsSkeleton />
       </div>
     </div>
   );

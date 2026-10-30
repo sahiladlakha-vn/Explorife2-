@@ -8,7 +8,20 @@ import { requireRealUserOrRedirect } from "@/lib/auth/guards";
  * `app/dev-preview/trips/[tripId]/*` (see lib/dev-preview/guard.ts).
  * A no-session (or guest-session) visit redirects to
  * `/auth?redirect=%2Fdev-preview%2Fprotected`; a real session renders the id.
+ *
+ * `instant = false`: `requireRealUserOrRedirect` reads `cookies()` (via
+ * `getCurrentUser`) outside `<Suspense>` to decide whether to redirect or
+ * render the id — Next 16's instant-navigation validation flags this as
+ * "runtime data during prerendering" (docs:
+ * https://nextjs.org/docs/messages/blocking-prerender-runtime). The docs'
+ * own criterion for choosing `instant = false` over wrapping in Suspense is
+ * "the route needs request-time data high in the tree to decide what to
+ * render ... so there is no meaningful static shell worth showing first" —
+ * exactly this page: its entire body is either a redirect or the auth
+ * result, nothing static to show first.
  */
+export const instant = false;
+
 export default async function DevPreviewProtectedPage() {
   assertDevPreviewEnabled();
 

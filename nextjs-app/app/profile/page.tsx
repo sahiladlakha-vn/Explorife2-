@@ -10,6 +10,14 @@ import { getActiveTripId } from "@/lib/server/trips";
  * the Flutter `ProfileDeepLink` object (GoRouter `extra:`), never
  * serialized into a URL, so there's nothing else to parse here.
  */
+/**
+ * `instant = false` — see `app/profile/overview/page.tsx`'s comment:
+ * `ProfileLayoutBody` withholds `{children}` (this page) when there's no
+ * session/profile, which is the documented "slot gated by authentication"
+ * case for this fix rather than rendering the dropped segment.
+ */
+export const instant = false;
+
 export default async function ProfilePage({
   searchParams,
 }: {

@@ -2,6 +2,14 @@ import { requireTripAccess } from "@/lib/server/trips";
 
 const VND_FORMAT = new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 });
 
+/**
+ * `instant = false` — see `app/profile/trips/[tripId]/page.tsx`'s comment:
+ * `TripLayoutBody`'s own independent auth gate withholds `{children}` (this
+ * page) when there's no session, distinct from `ProfileLayoutBody`'s outer
+ * gate already handled on `[tripId]/layout.tsx`.
+ */
+export const instant = false;
+
 export default async function DashboardPage({
   params,
 }: {

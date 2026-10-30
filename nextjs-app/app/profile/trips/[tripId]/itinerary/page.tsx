@@ -1,6 +1,14 @@
 import { requireTripAccess } from "@/lib/server/trips";
 import { ItineraryMapLoader } from "@/components/features/trips/ItineraryMapLoader";
 
+/**
+ * `instant = false` — see `app/profile/trips/[tripId]/page.tsx`'s comment:
+ * `TripLayoutBody`'s own independent auth gate withholds `{children}` (this
+ * page) when there's no session, distinct from `ProfileLayoutBody`'s outer
+ * gate already handled on `[tripId]/layout.tsx`.
+ */
+export const instant = false;
+
 export default async function ItineraryPage({
   params,
 }: {

@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import Link from "next/link";
+import { useSelectedLayoutSegment } from "next/navigation";
 import type { Trip } from "@/lib/generated/prisma/client";
 import { formatTripDateRange } from "@/lib/format/trip-dates";
 import { cn } from "@/lib/utils";
@@ -15,8 +16,6 @@ function budgetLabel(trip: Trip): string {
 interface TripListProps {
   trips: Trip[];
   activeTripId: string;
-  /** Sub-tab segment to land on for the selected trip — preserves "itinerary" etc. across a switch. */
-  segment: string;
   onNavigate?: () => void;
 }
 
@@ -27,8 +26,14 @@ interface TripListProps {
  * mount, and supports arrow-key roving between items (Radix Popover/Dialog
  * already handle Esc-to-close-and-restore-focus and outside-click/Tab
  * trapping; this component only owns up/down navigation between trips).
+ *
+ * Reads `useSelectedLayoutSegment()` itself (rather than taking it as a
+ * `segment` prop from `TripSwitcher`) so the sub-tab to land on for the
+ * selected trip can stay behind its own `<Suspense>` boundary, scoped to
+ * just this list — see `TripSwitcher`'s doc comment for why.
  */
-export function TripList({ trips, activeTripId, segment, onNavigate }: TripListProps) {
+export function TripList({ trips, activeTripId, onNavigate }: TripListProps) {
+  const segment = useSelectedLayoutSegment() ?? "trip";
   const activeRef = useRef<HTMLAnchorElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
 

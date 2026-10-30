@@ -1,9 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { Suspense, useState } from "react";
 import * as Popover from "@radix-ui/react-popover";
 import * as Dialog from "@radix-ui/react-dialog";
-import { useSelectedLayoutSegment } from "next/navigation";
 import type { Trip } from "@/lib/generated/prisma/client";
 import { useMediaQuery } from "@/lib/hooks/use-media-query";
 import { formatTripDateRange } from "@/lib/format/trip-dates";
@@ -20,10 +19,21 @@ interface TripSwitcherProps {
  * via `useMediaQuery` rather than CSS, since Popover and Dialog are different
  * Radix primitives (not a single component with responsive styling) and
  * mounting both would double up on focus-trap/outside-click handling.
+ *
+ * The trigger button never needed `useSelectedLayoutSegment()` — only the
+ * list inside the (initially closed, portal-rendered) Popover/Dialog content
+ * uses it, to build each trip link's href. That hook read now lives in
+ * `TripList` itself, wrapped in its own `<Suspense>`, rather than here: Next
+ * 16's instant-navigation validation flags `useSelectedLayoutSegment()` as
+ * URL data read outside Suspense on this dynamic-param route (docs:
+ * https://nextjs.org/docs/messages/blocking-prerender-client-hook), and
+ * pushing the read down to the leaf that actually needs it keeps the
+ * trigger — the only part visible before the user opens the switcher — in
+ * the static shell. A `null` fallback is correct here since `TripList` isn't
+ * visible until the popover/dialog opens, well after hydration.
  */
 export function TripSwitcher({ trips, activeTrip }: TripSwitcherProps) {
   const isDesktop = useMediaQuery("(min-width: 768px)");
-  const segment = useSelectedLayoutSegment() ?? "trip";
   const [open, setOpen] = useState(false);
 
   const trigger = (
@@ -56,12 +66,13 @@ export function TripSwitcher({ trips, activeTrip }: TripSwitcherProps) {
             sideOffset={8}
             className="bg-surface border-border z-50 w-80 rounded-lg border shadow-lg"
           >
-            <TripList
-              trips={trips}
-              activeTripId={activeTrip.id}
-              segment={segment}
-              onNavigate={() => setOpen(false)}
-            />
+            <Suspense fallback={null}>
+              <TripList
+                trips={trips}
+                activeTripId={activeTrip.id}
+                onNavigate={() => setOpen(false)}
+              />
+            </Suspense>
           </Popover.Content>
         </Popover.Portal>
       </Popover.Root>
@@ -79,12 +90,9 @@ export function TripSwitcher({ trips, activeTrip }: TripSwitcherProps) {
         >
           <Dialog.Title className="sr-only">Switch trip</Dialog.Title>
           <div className="border-border mx-auto mt-2 h-1 w-10 rounded-full border-0 bg-current opacity-20" />
-          <TripList
-            trips={trips}
-            activeTripId={activeTrip.id}
-            segment={segment}
-            onNavigate={() => setOpen(false)}
-          />
+          <Suspense fallback={null}>
+            <TripList trips={trips} activeTripId={activeTrip.id} onNavigate={() => setOpen(false)} />
+          </Suspense>
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>
