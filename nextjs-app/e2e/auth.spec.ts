@@ -29,7 +29,12 @@ test.describe("/auth", () => {
   });
 });
 
-test.describe("requireRealUserOrRedirect", () => {
+// `@live`: `requireRealUserOrRedirect` -> `getCurrentUser` -> `supabase.auth.getUser()`
+// always round-trips to GoTrue to validate (unlike `getSession()`, which only reads the
+// local JWT) — even for a no-session visit, the `ci-placeholder.supabase.co` host used
+// by the always-on fixtures job can't serve that request. Needs a real (test-project)
+// Supabase URL, so it only runs in the `e2e-live` job — see nextjs-ci.yml / README.
+test.describe("requireRealUserOrRedirect @live", () => {
   test("a no-session visit to a protected page redirects to /auth with the right ?redirect=", async ({
     page,
   }) => {

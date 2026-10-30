@@ -24,21 +24,11 @@ concurrency:
   group: nextjs-ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-# Dummy, non-secret values — good enough for `prisma generate` (which only
-# needs DATABASE_URL/DIRECT_URL to be *set*, not a working connection, per
-# prisma.config.ts's comment), `next build` (which only embeds these into
-# the client bundle / reads them lazily per-request, never during the
-# build's static-shell prerendering — see the Suspense boundaries added in
-# the instant-navigation fix), and vitest (fully mocked, needs none of
-# this). None of these touch the real Supabase project.
+# Pinned to the exact version used for local development/verification
+# (`node --version` → v24.19.0) rather than the floating "24" tag, so CI
+# can't silently drift onto a newer 24.x than what's actually been tested.
 env:
-  DATABASE_URL: "postgresql://postgres:postgres@localhost:5432/postgres"
-  DIRECT_URL: "postgresql://postgres:postgres@localhost:5432/postgres"
-  NEXT_PUBLIC_SUPABASE_URL: "https://ci-placeholder.supabase.co"
-  NEXT_PUBLIC_SUPABASE_ANON_KEY: "ci-placeholder-anon-key"
-  SUPABASE_SERVICE_ROLE_KEY: "ci-placeholder-service-role-key"
-  NEXT_PUBLIC_MAPBOX_TOKEN: "ci-placeholder-mapbox-token"
-  NEXT_PUBLIC_SITE_URL: "http://localhost:3000"
+  NODE_VERSION: "24.19.0"
 
 jobs:
   checks:
@@ -47,12 +37,28 @@ jobs:
     defaults:
       run:
         working-directory: nextjs-app
+    # Dummy, non-secret values — good enough for `prisma generate` (which only
+    # needs DATABASE_URL/DIRECT_URL to be *set*, not a working connection, per
+    # prisma.config.ts's comment), `next build`/`next typegen` (which only
+    # embed these into the client bundle / read them lazily per-request,
+    # never during the build's static-shell prerendering — see the Suspense
+    # boundaries added in the instant-navigation fix), and vitest (fully
+    # mocked, needs none of this). None of these touch the real Supabase
+    # project.
+    env:
+      DATABASE_URL: "postgresql://postgres:postgres@localhost:5432/postgres"
+      DIRECT_URL: "postgresql://postgres:postgres@localhost:5432/postgres"
+      NEXT_PUBLIC_SUPABASE_URL: "https://ci-placeholder.supabase.co"
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: "ci-placeholder-anon-key"
+      SUPABASE_SERVICE_ROLE_KEY: "ci-placeholder-service-role-key"
+      NEXT_PUBLIC_MAPBOX_TOKEN: "ci-placeholder-mapbox-token"
+      NEXT_PUBLIC_SITE_URL: "http://localhost:3000"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
-          node-version: "24"
+          node-version: ${{ env.NODE_VERSION }}
           cache: npm
           cache-dependency-path: nextjs-app/package-lock.json
 
@@ -65,20 +71,25 @@ jobs:
       - name: Unit tests
         run: npm run test
 
-      # Build before typecheck: Next.js writes ambient route types
-      # (`LayoutProps`, `PageProps`, etc.) to `.next/types` as part of
-      # `next build`. A standalone `tsc --noEmit` on a fresh checkout, run
-      # before anything has generated that directory, fails with "Cannot
-      # find name 'LayoutProps'" — confirmed locally by removing `.next`
-      # and reproducing the exact CI failure. `next build` already runs its
-      # own internal type-check too, so this ordering means a type error
-      # fails here first either way; the explicit step after just gives it
-      # its own clearly-labeled, fast (incremental) status in the Checks UI.
+      # `next typegen` (Next 16.4+) generates the ambient route types
+      # (`LayoutProps`, `PageProps`, etc.) into `.next/types` without doing a
+      # full build, so typecheck no longer has to wait on — or be ordered
+      # around — the Build step below. This also makes it fail faster: on a
+      # type error, this step reports failure well before a full `next
+      # build` would've gotten there anyway. Confirmed locally with `rm -rf
+      # .next && npx next typegen && npx tsc --noEmit` (exit 0) against a
+      # fresh checkout — the previous "Cannot find name 'LayoutProps'"
+      # failure (from running bare `tsc --noEmit` with no prior build) no
+      # longer reproduces once typegen runs first.
+      - name: Typecheck
+        run: npm run typecheck
+
+      # `next build` already runs its own internal type-check too, so a real
+      # type error would also fail here — this step is mainly about actually
+      # producing a production build (catching bundling/prerendering issues
+      # the standalone typecheck above can't see), not a second typecheck.
       - name: Build
         run: npm run build
-
-      - name: Typecheck
-        run: npx tsc --noEmit
 
   detect-e2e-secrets:
     name: Check for e2e test-project secrets
@@ -90,7 +101,7 @@ jobs:
       # (actionlint: "context 'secrets' is not allowed here" — only github,
       # inputs, needs, vars are permitted there). Read it inside a `run:`
       # step instead and expose a plain boolean via `needs.*.outputs`, which
-      # *is* allowed in the `e2e` job's `if:` below.
+      # *is* allowed in the `e2e-live` job's `if:` below.
       - id: check
         run: |
           if [ -n "$SECRET_VALUE" ]; then
@@ -101,33 +112,35 @@ jobs:
         env:
           SECRET_VALUE: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
 
-  e2e:
-    name: Playwright e2e
-    needs: detect-e2e-secrets
+  e2e-fixtures:
+    name: Playwright e2e (fixtures)
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: nextjs-app
-    # Only runs once real test-project credentials are added as repo
-    # secrets (Settings → Secrets and variables → Actions), using the same
-    # names as .env.example. Without them this job is skipped rather than
-    # failing — the placeholder values above are enough for a build, but
-    # these specs boot a real `next dev` server (see playwright.config.ts)
-    # and exercise real Supabase Auth calls (guest sessions, redirects),
-    # which need a reachable project. Point these secrets at a disposable
-    # test Supabase project, never the production one.
-    if: ${{ needs.detect-e2e-secrets.outputs.ready == 'true' }}
+    # Runs on every PR, no secrets required — these specs only ever drive
+    # `/dev-preview/*` fixture routes (lib/dev-preview/fixtures.ts) or
+    # genuinely session-less pages, so the `ci-placeholder.supabase.co`
+    # placeholder below is enough (nothing here calls out to a real Supabase
+    # project). See nextjs-app/README.md's "Testing" section for the
+    # fixtures/live split and the `@live` tag convention. Includes
+    # trip-header-layout.spec.ts, the regression guard for the original
+    # TripHeader layout-shift bug — it must always run here, never be
+    # gated behind secrets or skipped.
     env:
-      NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
-      NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
-      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-      NEXT_PUBLIC_MAPBOX_TOKEN: ${{ secrets.NEXT_PUBLIC_MAPBOX_TOKEN }}
+      DATABASE_URL: "postgresql://postgres:postgres@localhost:5432/postgres"
+      DIRECT_URL: "postgresql://postgres:postgres@localhost:5432/postgres"
+      NEXT_PUBLIC_SUPABASE_URL: "https://ci-placeholder.supabase.co"
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: "ci-placeholder-anon-key"
+      SUPABASE_SERVICE_ROLE_KEY: "ci-placeholder-service-role-key"
+      NEXT_PUBLIC_MAPBOX_TOKEN: "ci-placeholder-mapbox-token"
+      NEXT_PUBLIC_SITE_URL: "http://localhost:3000"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
-          node-version: "24"
+          node-version: ${{ env.NODE_VERSION }}
           cache: npm
           cache-dependency-path: nextjs-app/package-lock.json
 
@@ -137,12 +150,59 @@ jobs:
       - name: Install Playwright browsers
         run: npx playwright install --with-deps chromium
 
-      - name: Run e2e tests
-        run: npm run test:e2e
+      - name: Run fixture e2e tests
+        run: npm run test:e2e:fixtures
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: ${{ !cancelled() }}
         with:
-          name: playwright-report
+          name: playwright-report-fixtures
+          path: nextjs-app/playwright-report/
+          retention-days: 7
+
+  e2e-live:
+    name: Playwright e2e (live, @live-tagged)
+    needs: detect-e2e-secrets
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: nextjs-app
+    # Only runs once real test-project credentials are added as repo
+    # secrets (Settings → Secrets and variables → Actions), using the same
+    # names as .env.example. Without them this job is skipped rather than
+    # failing. These are only the specs tagged `@live` (currently just
+    # `requireRealUserOrRedirect` in e2e/auth.spec.ts) — they boot a real
+    # `next dev` server (see playwright.config.ts) and need a reachable
+    # Supabase project. Point these secrets at a disposable **test**
+    # Supabase project — never the production project
+    # (yshgjzmyapdepkapodno) — see nextjs-app/README.md's "Testing" section.
+    if: ${{ needs.detect-e2e-secrets.outputs.ready == 'true' }}
+    env:
+      NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      NEXT_PUBLIC_MAPBOX_TOKEN: ${{ secrets.NEXT_PUBLIC_MAPBOX_TOKEN }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: nextjs-app/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Run live e2e tests
+        run: npm run test:e2e:live
+
+      - uses: actions/upload-artifact@v7
+        if: ${{ !cancelled() }}
+        with:
+          name: playwright-report-live
           path: nextjs-app/playwright-report/
           retention-days: 7

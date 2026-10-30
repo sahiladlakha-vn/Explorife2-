@@ -13,9 +13,12 @@
     "db:generate": "prisma generate",
     "db:pull": "prisma db pull",
     "db:migrate": "prisma migrate dev",
+    "typecheck": "next typegen && tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "test:e2e:fixtures": "playwright test --grep-invert @live",
+    "test:e2e:live": "playwright test --grep @live"
   },
   "dependencies": {
     "@prisma/client": "6.19.3",

@@ -53,20 +53,46 @@ npm run dev
 
 - `npm run test` (or `npm run test:watch`) — Vitest unit tests for
   `lib/server/`, `lib/auth/`, `lib/format/`.
-- `npm run test:e2e` — Playwright end-to-end tests (`e2e/`) covering the
-  trip routing shell: `TripHeader` renders at an identical position/size
-  across the trip/itinerary/dashboard/bookings tabs at 1440/1024/768/375px
-  (no layout shift when switching tabs — the original bug this feature was
-  built to fix), `TripSwitcher` opens as a popover at >=768px and a bottom
-  sheet at <768px, and `Escape` closes either and returns focus to the
-  trigger button. First run `npx playwright install chromium` to download
-  the browser binary. These tests drive `/dev-preview/trips/[tripId]/*` —
-  fixture-data routes (`lib/dev-preview/fixtures.ts`) that bypass auth/DB
-  entirely and 404 outside `NODE_ENV=development`/`test` (see
-  `lib/dev-preview/guard.ts`) — so they never touch the live database and
-  never ship in a production build. The suite drives `next dev` directly
-  (`playwright.config.ts`'s `webServer`), reusing an already-running dev
-  server on port 3000 if one exists.
+- `npm run typecheck` — `next typegen && tsc --noEmit`. `next typegen`
+  (Next 16.4+) generates the ambient route types (`LayoutProps`,
+  `PageProps`, etc.) into `.next/types` without doing a full build, so this
+  works standalone on a fresh checkout and fails fast on a real type error
+  without waiting on `npm run build` first.
+- `npm run test:e2e` — all Playwright end-to-end tests (`e2e/`). First run
+  `npx playwright install chromium` to download the browser binary. The
+  suite drives `next dev` directly (`playwright.config.ts`'s `webServer`),
+  reusing an already-running dev server on port 3000 if one exists.
+
+  The suite is split into two tiers, matched by CI (`.github/workflows/nextjs-ci.yml`)
+  to two separate jobs:
+
+  - **Fixtures (default, no `@live` tag)** — `npm run test:e2e:fixtures`.
+    Covers `TripHeader` layout stability (identical position/size across the
+    trip/itinerary/dashboard/bookings tabs at 1440/1024/768/375px — no
+    layout shift when switching tabs, the original bug this feature was
+    built to fix), `TripSwitcher`'s popover/bottom-sheet responsive variants
+    and `Escape` handling, `/auth` page rendering, and the `/profile/overview`
+    guest view. These either drive `/dev-preview/trips/[tripId]/*` —
+    fixture-data routes (`lib/dev-preview/fixtures.ts`) that bypass auth/DB
+    entirely and 404 outside `NODE_ENV=development`/`test`, see
+    `lib/dev-preview/guard.ts` — or hit routes that, for a session-less
+    visit, never make a network call to Supabase (`supabase.auth.getUser()`
+    returns `AuthSessionMissingError` locally with no session cookie to
+    validate, verified directly against `@supabase/ssr`'s `createServerClient`).
+    So this tier runs on **every PR** with the non-secret placeholder env vars
+    already in the workflow — no Supabase project, real or test, required —
+    and must never be skipped: it's the regression guard for the TripHeader
+    layout bug and the primary signal most PRs will see.
+  - **Live (tagged `@live`)** — `npm run test:e2e:live`. Currently just
+    `requireRealUserOrRedirect` in `e2e/auth.spec.ts`. Gated in CI behind
+    real Supabase credentials being present as repo secrets (Settings →
+    Secrets and variables → Actions, same names as `.env.example`); skipped
+    (not failed) otherwise. **Point these secrets at a separate, disposable
+    test Supabase project — never the production project
+    (`yshgjzmyapdepkapodno`, see `prisma/seed.ts`).** Tag any new spec that
+    needs a real, reachable Supabase project (not just a session-less
+    `getUser()` call) with `@live` in its `test.describe`/`test` title so it
+    lands in this tier, e.g. `test.describe("my feature @live", ...)`.
 
 Other scripts: `npm run lint`, `npm run format`, `npm run db:pull`,
 `npm run db:generate`, `npm run db:migrate`.
