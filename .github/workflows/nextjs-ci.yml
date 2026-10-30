@@ -67,8 +67,30 @@ jobs:
       - name: Build
         run: npm run build
 
+  detect-e2e-secrets:
+    name: Check for e2e test-project secrets
+    runs-on: ubuntu-latest
+    outputs:
+      ready: ${{ steps.check.outputs.ready }}
+    steps:
+      # The `secrets` context can't be read directly in a job/step `if:`
+      # (actionlint: "context 'secrets' is not allowed here" — only github,
+      # inputs, needs, vars are permitted there). Read it inside a `run:`
+      # step instead and expose a plain boolean via `needs.*.outputs`, which
+      # *is* allowed in the `e2e` job's `if:` below.
+      - id: check
+        run: |
+          if [ -n "$SECRET_VALUE" ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          SECRET_VALUE: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+
   e2e:
     name: Playwright e2e
+    needs: detect-e2e-secrets
     runs-on: ubuntu-latest
     # Only runs once real test-project credentials are added as repo
     # secrets (Settings → Secrets and variables → Actions), using the same
@@ -78,7 +100,7 @@ jobs:
     # and exercise real Supabase Auth calls (guest sessions, redirects),
     # which need a reachable project. Point these secrets at a disposable
     # test Supabase project, never the production one.
-    if: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL != '' }}
+    if: ${{ needs.detect-e2e-secrets.outputs.ready == 'true' }}
     env:
       NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
       NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
