@@ -1,0 +1,110 @@
+name: Next.js CI
+
+# Scoped to nextjs-app/ only — this repo also contains the (separately
+# maintained) Flutter app, which has its own build/release process and
+# shouldn't trigger or be gated by these checks.
+on:
+  pull_request:
+    paths:
+      - "nextjs-app/**"
+      - ".github/workflows/nextjs-ci.yml"
+  push:
+    branches: [main]
+    paths:
+      - "nextjs-app/**"
+      - ".github/workflows/nextjs-ci.yml"
+
+defaults:
+  run:
+    working-directory: nextjs-app
+
+# Cancel superseded runs on the same branch/PR so pushes don't queue up.
+concurrency:
+  group: nextjs-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Dummy, non-secret values — good enough for `prisma generate` (which only
+# needs DATABASE_URL/DIRECT_URL to be *set*, not a working connection, per
+# prisma.config.ts's comment), `next build` (which only embeds these into
+# the client bundle / reads them lazily per-request, never during the
+# build's static-shell prerendering — see the Suspense boundaries added in
+# the instant-navigation fix), and vitest (fully mocked, needs none of
+# this). None of these touch the real Supabase project.
+env:
+  DATABASE_URL: "postgresql://postgres:postgres@localhost:5432/postgres"
+  DIRECT_URL: "postgresql://postgres:postgres@localhost:5432/postgres"
+  NEXT_PUBLIC_SUPABASE_URL: "https://ci-placeholder.supabase.co"
+  NEXT_PUBLIC_SUPABASE_ANON_KEY: "ci-placeholder-anon-key"
+  SUPABASE_SERVICE_ROLE_KEY: "ci-placeholder-service-role-key"
+  NEXT_PUBLIC_MAPBOX_TOKEN: "ci-placeholder-mapbox-token"
+  NEXT_PUBLIC_SITE_URL: "http://localhost:3000"
+
+jobs:
+  checks:
+    name: Typecheck, lint, unit tests, build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: nextjs-app/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Unit tests
+        run: npm run test
+
+      - name: Build
+        run: npm run build
+
+  e2e:
+    name: Playwright e2e
+    runs-on: ubuntu-latest
+    # Only runs once real test-project credentials are added as repo
+    # secrets (Settings → Secrets and variables → Actions), using the same
+    # names as .env.example. Without them this job is skipped rather than
+    # failing — the placeholder values above are enough for a build, but
+    # these specs boot a real `next dev` server (see playwright.config.ts)
+    # and exercise real Supabase Auth calls (guest sessions, redirects),
+    # which need a reachable project. Point these secrets at a disposable
+    # test Supabase project, never the production one.
+    if: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL != '' }}
+    env:
+      NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      NEXT_PUBLIC_MAPBOX_TOKEN: ${{ secrets.NEXT_PUBLIC_MAPBOX_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: nextjs-app/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Run e2e tests
+        run: npm run test:e2e
+
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: playwright-report
+          path: nextjs-app/playwright-report/
+          retention-days: 7
