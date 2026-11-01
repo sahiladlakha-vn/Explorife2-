@@ -1,0 +1,154 @@
+-- Live-database behavior that Prisma's schema language cannot express.
+--
+-- This file is a REFERENCE ONLY — it documents DB-side objects that already
+-- exist on the live Supabase Postgres instance (confirmed via SQL
+-- introspection through the Supabase MCP `execute_sql` tool while hand-
+-- building prisma/schema.prisma for Step 3, see MIGRATION_PLAN.md §3/§7).
+-- Nothing here should be (re-)applied by `prisma migrate` — nothing in this
+-- file is owned by Prisma. It exists so engineers reading schema.prisma
+-- understand behavior that happens underneath the Prisma Client calls.
+--
+-- Pulled with:
+--   select event_object_table, trigger_name, action_timing,
+--          event_manipulation, action_statement
+--   from information_schema.triggers where trigger_schema = 'public';
+--
+--   select p.proname, pg_get_functiondef(p.oid)
+--   from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+--   where n.nspname = 'public' and p.proname in (...);
+
+-- -----------------------------------------------------------------------
+-- 1. STORED GENERATED columns — gem_guides.location, leaderboard.rank_score
+-- -----------------------------------------------------------------------
+-- `gem_guides.location` is a STORED GENERATED column computed from
+-- latitude/longitude. It cannot be written via Prisma Client (modeled as
+-- `Unsupported("geography(Point, 4326)")?` in schema.prisma) and is only
+-- reachable via `$queryRaw`/`$executeRaw`. Its generated-column status is
+-- declared in schema.prisma via `@default(dbgenerated("<expr>"))` on that
+-- field so `prisma migrate diff` stops proposing to drop it.
+--
+-- Live definition (from information_schema.columns.generation_expression):
+--
+--   location geography(Point, 4326)
+--     GENERATED ALWAYS AS (
+--       (st_setsrid(st_makepoint(longitude, latitude), 4326))::geography
+--     ) STORED
+--
+-- Confirmed via `prisma db pull --print` (2026-10-29): Postgres stores/emits
+-- the cast with the st_setsrid(...) call wrapped in its own parentheses —
+-- `(st_setsrid(...))::geography`, not `st_setsrid(...)::geography`. The
+-- `dbgenerated(...)` string in schema.prisma must match this exactly
+-- (including that extra parenthesization) for `prisma migrate diff` to see
+-- the column as already matching instead of proposing a cosmetic
+-- ALTER COLUMN ... SET DEFAULT.
+--
+-- `leaderboard.rank_score` is ALSO a STORED GENERATED column (confirmed via
+-- pg_attrdef/generation_expression — a prior pass of this file wrongly
+-- guessed it was "computed by a scheduled job"; it is not). Declared the
+-- same way in schema.prisma via `@default(dbgenerated("<expr>"))` on
+-- `Leaderboard.rankScore`:
+--
+--   rank_score integer
+--     GENERATED ALWAYS AS (
+--       (((gems_discovered * 3) + (journals_written * 5)) +
+--        (countries_visited * 10)) + total_saves
+--     ) STORED
+
+-- -----------------------------------------------------------------------
+-- 2. auth.uid()-dependent triggers (role/verification "lock" pattern)
+-- -----------------------------------------------------------------------
+-- These three BEFORE UPDATE triggers silently revert privileged-field
+-- changes unless the acting Postgres role (via RLS's `auth.uid()`) is an
+-- authorized profile. Because Prisma's client in this app runs with an
+-- elevated/RLS-bypassing connection (see MIGRATION_PLAN.md §0), `auth.uid()`
+-- evaluates to NULL for Prisma-issued writes, so each trigger's own
+-- `exists(...)` authorization check deterministically fails.
+--
+-- IMPORTANT — this is the OPPOSITE of a permissive bypass: `exists(...)`
+-- failing makes `not exists(...)` TRUE, so the silent-revert branch
+-- unconditionally fires on every Prisma-issued UPDATE that touches these
+-- columns — REGARDLESS of whether the acting user was actually authorized.
+-- In other words, once writes move off `@supabase/ssr`'s RLS-scoped
+-- Postgres role and onto Prisma's connection, role assignment and listing
+-- verification silently stop working entirely (even for a real
+-- super_admin/moderator), not "become unprotected." See MIGRATION_PLAN.md
+-- §3a for the full derivation.
+--
+-- `lib/auth/permissions.ts` (`assertCanChangeProfileRole`,
+-- `assertCanVerifyAttraction`, `assertCanVerifyRestaurant`, plus their pure
+-- `canChangeProfileRole`/`canSetListingVerification` predicates, with unit
+-- tests in `lib/auth/permissions.test.ts`) re-implements these same checks
+-- in application code, so Step 3a's Server Actions fail fast with a clean
+-- 403 instead of silently sending a doomed write to Postgres. That restores
+-- the user-facing security property (unauthorized requests never reach the
+-- DB) but does NOT, on its own, make legitimate/authorized writes actually
+-- take effect — the live triggers still revert those too. Making real role
+-- changes and listing verification work again requires altering/dropping
+-- these three triggers on the live DB, which is a separate, approval-gated
+-- schema change tracked as an open question in MIGRATION_PLAN.md §6 Risk #3,
+-- not performed by this module or by this file.
+--
+-- profiles_lock_role_field  (BEFORE UPDATE ON profiles)
+--   function public.lock_profile_role_field():
+--     if new.role <> old.role and not exists (
+--       select 1 from public.profiles
+--       where id = auth.uid() and role = 'super_admin'::user_role
+--     ) then
+--       new.role := old.role;  -- silently revert
+--     end if;
+--     return new;
+--
+-- attractions_lock_verification_fields  (BEFORE UPDATE ON attractions)
+-- restaurants_lock_verification_fields  (BEFORE UPDATE ON restaurants)
+--   function public.lock_{attraction,restaurant}_verification_fields():
+--     if not exists (
+--       select 1 from public.profiles
+--       where profiles.id = auth.uid()
+--         and profiles.role in ('content_moderator', 'regional_admin', 'super_admin')
+--     ) then
+--       new.verification_status := old.verification_status;
+--       new.verified_by := old.verified_by;
+--       new.verified_at := old.verified_at;
+--     end if;
+--     new.updated_at := now();
+--     return new;
+
+-- -----------------------------------------------------------------------
+-- 3. Other triggers (not auth.uid()-dependent, listed for completeness)
+-- -----------------------------------------------------------------------
+-- These run unconditionally regardless of which Postgres role issues the
+-- write, so they keep working unchanged once writes move to Prisma:
+--
+--   profiles_updated_at, gem_guides_updated_at, hosting_offers_updated_at
+--     -> set_updated_at(): sets NEW.updated_at = now() on every UPDATE.
+--
+--   split_groups_updated_at -> handle_updated_at(): same pattern, different
+--     function name (legacy duplication, not consolidated on the live DB).
+--
+--   set_split_expenses_updated_at, set_trip_category_budgets_updated_at,
+--   set_trip_checklist_updated_at -> moddatetime('updated_at'): pg_cron/
+--     postgres `moddatetime` extension trigger, same effect.
+--
+--   trip_checklist_items_sort_order (BEFORE INSERT)
+--     -> set_trip_checklist_sort_order(): if NEW.sort_order = 0, assigns
+--        max(sort_order)+1 scoped to (trip_id, section).
+--
+--   on_profile_update (AFTER UPDATE ON profiles)
+--     -> sync_leaderboard_name(): mirrors profiles.name/avatar_url into
+--        leaderboard.display_name/avatar_url for the same user_id.
+--
+--   on_gem_saved (AFTER INSERT ON saved_gems, and identically on the
+--   excluded dead table user_saved_gems)
+--     -> increment_gems_score(): upserts leaderboard.gems_discovered += 1
+--        (ON CONFLICT (user_id)) for NEW.user_id.
+--
+--   on_story_approved (AFTER INSERT OR UPDATE ON stories)
+--     -> increment_journal_score(): when status transitions to 'approved',
+--        upserts leaderboard.journals_written += 1 for NEW.user_id.
+--
+-- NOTE: `leaderboard.rank_score` (see Leaderboard model in schema.prisma) is
+-- NOT touched by any of the triggers above — see section 1 above: it's a
+-- STORED GENERATED column, not trigger- or job-maintained. It updates
+-- automatically whenever gems_discovered/journals_written/countries_visited/
+-- total_saves change on the same row (e.g. via increment_gems_score() /
+-- increment_journal_score() above). Never write it directly from the app.

@@ -81,7 +81,7 @@ class _BadgeTile extends StatelessWidget {
             badge.def.label,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: GoogleFonts.fredoka(
+            style: GoogleFonts.inter(
               fontSize: 13,
               fontWeight: FontWeight.w800,
               color: earned ? _kInk : _kMute,
@@ -90,7 +90,7 @@ class _BadgeTile extends StatelessWidget {
           const SizedBox(height: 3),
           Text(
             earned ? 'EARNED' : '${badge.current}/${badge.def.threshold}',
-            style: GoogleFonts.jetBrainsMono(
+            style: GoogleFonts.inter(
               fontSize: 10,
               fontWeight: FontWeight.w700,
               color: accent,

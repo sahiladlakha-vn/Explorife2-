@@ -90,7 +90,7 @@ class _SavedGemCard extends StatelessWidget {
                 gem.gemName,
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
-                style: GoogleFonts.fredoka(
+                style: GoogleFonts.inter(
                     color: Colors.white,
                     fontWeight: FontWeight.w700,
                     fontSize: 13),

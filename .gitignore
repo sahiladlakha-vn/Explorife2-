@@ -54,3 +54,6 @@ app.*.map.json
 
 # Claude Code session / worktree artifacts (never commit)
 .claude/
+
+# Ad-hoc DB schema export scratch file (not a tracked migration artifact)
+/explorife_schema_export.sql

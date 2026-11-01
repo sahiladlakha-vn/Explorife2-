@@ -1,0 +1,247 @@
+name: Next.js CI
+
+# Scoped to nextjs-app/ only — this repo also contains the (separately
+# maintained) Flutter app, which has its own build/release process and
+# shouldn't trigger or be gated by these checks.
+on:
+  pull_request:
+    paths:
+      - "nextjs-app/**"
+      - ".github/workflows/nextjs-ci.yml"
+  push:
+    branches: [main]
+    paths:
+      - "nextjs-app/**"
+      - ".github/workflows/nextjs-ci.yml"
+
+# `working-directory: nextjs-app` is set per-job below (not here at the
+# workflow level) — `detect-e2e-secrets` never checks out the repo, so a
+# global default would point bash at a directory that doesn't exist on that
+# runner and fail immediately.
+
+# Cancel superseded runs on the same branch/PR so pushes don't queue up.
+concurrency:
+  group: nextjs-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    name: Typecheck, lint, unit tests, build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: nextjs-app
+    # Dummy, non-secret values — good enough for `prisma generate` (which only
+    # needs DATABASE_URL/DIRECT_URL to be *set*, not a working connection, per
+    # prisma.config.ts's comment), `next build`/`next typegen` (which only
+    # embed these into the client bundle / read them lazily per-request,
+    # never during the build's static-shell prerendering — see the Suspense
+    # boundaries added in the instant-navigation fix), and vitest (fully
+    # mocked, needs none of this). None of these touch the real Supabase
+    # project.
+    env:
+      DATABASE_URL: "postgresql://postgres:postgres@localhost:5432/postgres"
+      DIRECT_URL: "postgresql://postgres:postgres@localhost:5432/postgres"
+      NEXT_PUBLIC_SUPABASE_URL: "https://ci-placeholder.supabase.co"
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: "ci-placeholder-anon-key"
+      SUPABASE_SERVICE_ROLE_KEY: "ci-placeholder-service-role-key"
+      NEXT_PUBLIC_MAPBOX_TOKEN: "ci-placeholder-mapbox-token"
+      NEXT_PUBLIC_SITE_URL: "http://localhost:3000"
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          # `nextjs-app/.nvmrc` is the single source of truth for the Node version
+          # (also read by `nvm use` locally, and matches `package.json`'s "engines"),
+          # so CI can't silently drift onto a newer version than what's actually
+          # been tested. Path is relative to the repo root (checkout root), not to
+          # this job's `working-directory: nextjs-app` default, which only applies
+          # to `run:` steps.
+          node-version-file: nextjs-app/.nvmrc
+          cache: npm
+          cache-dependency-path: nextjs-app/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Unit tests
+        run: npm run test
+
+      # `next typegen` (Next 16.4+) generates the ambient route types
+      # (`LayoutProps`, `PageProps`, etc.) into `.next/types` without doing a
+      # full build, so typecheck no longer has to wait on — or be ordered
+      # around — the Build step below. This also makes it fail faster: on a
+      # type error, this step reports failure well before a full `next
+      # build` would've gotten there anyway. Confirmed locally with `rm -rf
+      # .next && npx next typegen && npx tsc --noEmit` (exit 0) against a
+      # fresh checkout — the previous "Cannot find name 'LayoutProps'"
+      # failure (from running bare `tsc --noEmit` with no prior build) no
+      # longer reproduces once typegen runs first.
+      - name: Typecheck
+        run: npm run typecheck
+
+      # `next build` already runs its own internal type-check too, so a real
+      # type error would also fail here — this step is mainly about actually
+      # producing a production build (catching bundling/prerendering issues
+      # the standalone typecheck above can't see), not a second typecheck.
+      - name: Build
+        run: npm run build
+
+  detect-e2e-secrets:
+    name: Check for e2e test-project secrets
+    runs-on: ubuntu-latest
+    outputs:
+      ready: ${{ steps.check.outputs.ready }}
+    steps:
+      # The `secrets` context can't be read directly in a job/step `if:`
+      # (actionlint: "context 'secrets' is not allowed here" — only github,
+      # inputs, needs, vars are permitted there). Read it inside a `run:`
+      # step instead and expose a plain boolean via `needs.*.outputs`, which
+      # *is* allowed in the `e2e-live` job's `if:` below.
+      - id: check
+        run: |
+          if [ -n "$SECRET_VALUE" ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          SECRET_VALUE: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+
+  e2e-fixtures:
+    name: Playwright e2e (fixtures)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: nextjs-app
+    # Runs on every PR, no secrets required — these specs only ever drive
+    # `/dev-preview/*` fixture routes (lib/dev-preview/fixtures.ts) or
+    # genuinely session-less pages, so the `ci-placeholder.supabase.co`
+    # placeholder below is enough (nothing here calls out to a real Supabase
+    # project). See nextjs-app/README.md's "Testing" section for the
+    # fixtures/live split and the `@live` tag convention. Includes
+    # trip-header-layout.spec.ts, the regression guard for the original
+    # TripHeader layout-shift bug — it must always run here, never be
+    # gated behind secrets or skipped.
+    env:
+      DATABASE_URL: "postgresql://postgres:postgres@localhost:5432/postgres"
+      DIRECT_URL: "postgresql://postgres:postgres@localhost:5432/postgres"
+      NEXT_PUBLIC_SUPABASE_URL: "https://ci-placeholder.supabase.co"
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: "ci-placeholder-anon-key"
+      SUPABASE_SERVICE_ROLE_KEY: "ci-placeholder-service-role-key"
+      NEXT_PUBLIC_MAPBOX_TOKEN: "ci-placeholder-mapbox-token"
+      NEXT_PUBLIC_SITE_URL: "http://localhost:3000"
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          # `nextjs-app/.nvmrc` is the single source of truth for the Node version
+          # (also read by `nvm use` locally, and matches `package.json`'s "engines"),
+          # so CI can't silently drift onto a newer version than what's actually
+          # been tested. Path is relative to the repo root (checkout root), not to
+          # this job's `working-directory: nextjs-app` default, which only applies
+          # to `run:` steps.
+          node-version-file: nextjs-app/.nvmrc
+          cache: npm
+          cache-dependency-path: nextjs-app/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Run fixture e2e tests
+        run: npm run test:e2e:fixtures
+
+      - uses: actions/upload-artifact@v7
+        if: ${{ !cancelled() }}
+        with:
+          name: playwright-report-fixtures
+          path: nextjs-app/playwright-report/
+          retention-days: 7
+
+      # Only uploaded on failure: this is raw per-test output (traces, screenshots,
+      # videos keyed by test title) that's redundant with the HTML report above when
+      # everything passes. `trace: 'on-first-retry'` in playwright.config.ts means a
+      # trace only exists here if a test actually failed and was retried.
+      - name: Upload test-results (fixtures)
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-results-fixtures
+          path: nextjs-app/test-results/
+          retention-days: 7
+
+  e2e-live:
+    name: Playwright e2e (live, @live-tagged)
+    needs: detect-e2e-secrets
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: nextjs-app
+    # Only runs once real test-project credentials are added as repo
+    # secrets (Settings → Secrets and variables → Actions), using the same
+    # names as .env.example. Without them this job is skipped rather than
+    # failing. These are only the specs tagged `@live` — currently none (see
+    # nextjs-app/README.md's "Testing" section for why `requireRealUserOrRedirect`
+    # doesn't need this tier after all) — so `test:e2e:live` runs with
+    # `--pass-with-no-tests` to keep this job green rather than failing on "no
+    # tests found" once secrets exist. Any future `@live` spec boots a real
+    # `next dev` server (see playwright.config.ts) and needs a reachable
+    # Supabase project. Point these secrets at a disposable **test**
+    # Supabase project — never the production project
+    # (yshgjzmyapdepkapodno) — see nextjs-app/README.md's "Testing" section.
+    if: ${{ needs.detect-e2e-secrets.outputs.ready == 'true' }}
+    env:
+      NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      NEXT_PUBLIC_MAPBOX_TOKEN: ${{ secrets.NEXT_PUBLIC_MAPBOX_TOKEN }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          # `nextjs-app/.nvmrc` is the single source of truth for the Node version
+          # (also read by `nvm use` locally, and matches `package.json`'s "engines"),
+          # so CI can't silently drift onto a newer version than what's actually
+          # been tested. Path is relative to the repo root (checkout root), not to
+          # this job's `working-directory: nextjs-app` default, which only applies
+          # to `run:` steps.
+          node-version-file: nextjs-app/.nvmrc
+          cache: npm
+          cache-dependency-path: nextjs-app/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Run live e2e tests
+        run: npm run test:e2e:live
+
+      - uses: actions/upload-artifact@v7
+        if: ${{ !cancelled() }}
+        with:
+          name: playwright-report-live
+          path: nextjs-app/playwright-report/
+          retention-days: 7
+
+      # Only uploaded on failure: this is raw per-test output (traces, screenshots,
+      # videos keyed by test title) that's redundant with the HTML report above when
+      # everything passes. `trace: 'on-first-retry'` in playwright.config.ts means a
+      # trace only exists here if a test actually failed and was retried.
+      - name: Upload test-results (live)
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-results-live
+          path: nextjs-app/test-results/
+          retention-days: 7
