@@ -166,6 +166,18 @@ jobs:
           path: nextjs-app/playwright-report/
           retention-days: 7
 
+      # Only uploaded on failure: this is raw per-test output (traces, screenshots,
+      # videos keyed by test title) that's redundant with the HTML report above when
+      # everything passes. `trace: 'on-first-retry'` in playwright.config.ts means a
+      # trace only exists here if a test actually failed and was retried.
+      - name: Upload test-results (fixtures)
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-results-fixtures
+          path: nextjs-app/test-results/
+          retention-days: 7
+
   e2e-live:
     name: Playwright e2e (live, @live-tagged)
     needs: detect-e2e-secrets
@@ -220,4 +232,16 @@ jobs:
         with:
           name: playwright-report-live
           path: nextjs-app/playwright-report/
+          retention-days: 7
+
+      # Only uploaded on failure: this is raw per-test output (traces, screenshots,
+      # videos keyed by test title) that's redundant with the HTML report above when
+      # everything passes. `trace: 'on-first-retry'` in playwright.config.ts means a
+      # trace only exists here if a test actually failed and was retried.
+      - name: Upload test-results (live)
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-results-live
+          path: nextjs-app/test-results/
           retention-days: 7
