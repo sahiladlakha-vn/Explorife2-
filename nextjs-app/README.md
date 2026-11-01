@@ -71,28 +71,35 @@ npm run dev
     trip/itinerary/dashboard/bookings tabs at 1440/1024/768/375px — no
     layout shift when switching tabs, the original bug this feature was
     built to fix), `TripSwitcher`'s popover/bottom-sheet responsive variants
-    and `Escape` handling, `/auth` page rendering, and the `/profile/overview`
+    and `Escape` handling, `/auth` page rendering, `requireRealUserOrRedirect`
+    (the no-session-protected-page-redirect test), and the `/profile/overview`
     guest view. These either drive `/dev-preview/trips/[tripId]/*` —
     fixture-data routes (`lib/dev-preview/fixtures.ts`) that bypass auth/DB
     entirely and 404 outside `NODE_ENV=development`/`test`, see
     `lib/dev-preview/guard.ts` — or hit routes that, for a session-less
-    visit, never make a network call to Supabase (`supabase.auth.getUser()`
-    returns `AuthSessionMissingError` locally with no session cookie to
-    validate, verified directly against `@supabase/ssr`'s `createServerClient`).
-    So this tier runs on **every PR** with the non-secret placeholder env vars
-    already in the workflow — no Supabase project, real or test, required —
-    and must never be skipped: it's the regression guard for the TripHeader
-    layout bug and the primary signal most PRs will see.
-  - **Live (tagged `@live`)** — `npm run test:e2e:live`. Currently just
-    `requireRealUserOrRedirect` in `e2e/auth.spec.ts`. Gated in CI behind
-    real Supabase credentials being present as repo secrets (Settings →
-    Secrets and variables → Actions, same names as `.env.example`); skipped
-    (not failed) otherwise. **Point these secrets at a separate, disposable
-    test Supabase project — never the production project
-    (`yshgjzmyapdepkapodno`, see `prisma/seed.ts`).** Tag any new spec that
-    needs a real, reachable Supabase project (not just a session-less
-    `getUser()` call) with `@live` in its `test.describe`/`test` title so it
-    lands in this tier, e.g. `test.describe("my feature @live", ...)`.
+    visit, never make a network call to Supabase at all (`supabase.auth.getUser()`
+    returns `AuthSessionMissingError` synchronously with no session cookie to
+    validate, empirically confirmed — elapsed ms: 0-1 against an unreachable
+    placeholder host — for both `@supabase/supabase-js` and `@supabase/ssr`'s
+    `createServerClient`). So this tier runs on **every PR** with the
+    non-secret placeholder env vars already in the workflow — no Supabase
+    project, real or test, required — and must never be skipped: it's the
+    regression guard for the TripHeader layout bug and the primary signal
+    most PRs will see.
+  - **Live (tagged `@live`)** — `npm run test:e2e:live`. No specs currently
+    need this tier — `requireRealUserOrRedirect` moved to fixtures above once
+    proven it never touches the network for a session-less visit — so the
+    script runs with `--pass-with-no-tests` to keep an empty tier green
+    rather than failing on "no tests found". Gated in CI behind real
+    Supabase credentials being present as repo secrets (Settings → Secrets
+    and variables → Actions, same names as `.env.example`); skipped (not
+    failed) otherwise. **Point these secrets at a separate, disposable test
+    Supabase project — never the production project (`yshgjzmyapdepkapodno`,
+    see `prisma/seed.ts`).** Tag any new spec that needs a real, reachable
+    Supabase project (e.g. validating an actual authenticated session, not
+    just a session-less `getUser()` call) with `@live` in its
+    `test.describe`/`test` title so it lands in this tier, e.g.
+    `test.describe("my feature @live", ...)`.
 
 Other scripts: `npm run lint`, `npm run format`, `npm run db:pull`,
 `npm run db:generate`, `npm run db:migrate`.

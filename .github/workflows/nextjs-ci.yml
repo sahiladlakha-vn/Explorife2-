@@ -24,12 +24,6 @@ concurrency:
   group: nextjs-ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-# Pinned to the exact version used for local development/verification
-# (`node --version` → v24.19.0) rather than the floating "24" tag, so CI
-# can't silently drift onto a newer 24.x than what's actually been tested.
-env:
-  NODE_VERSION: "24.19.0"
-
 jobs:
   checks:
     name: Typecheck, lint, unit tests, build
@@ -58,7 +52,13 @@ jobs:
 
       - uses: actions/setup-node@v7
         with:
-          node-version: ${{ env.NODE_VERSION }}
+          # `nextjs-app/.nvmrc` is the single source of truth for the Node version
+          # (also read by `nvm use` locally, and matches `package.json`'s "engines"),
+          # so CI can't silently drift onto a newer version than what's actually
+          # been tested. Path is relative to the repo root (checkout root), not to
+          # this job's `working-directory: nextjs-app` default, which only applies
+          # to `run:` steps.
+          node-version-file: nextjs-app/.nvmrc
           cache: npm
           cache-dependency-path: nextjs-app/package-lock.json
 
@@ -140,7 +140,13 @@ jobs:
 
       - uses: actions/setup-node@v7
         with:
-          node-version: ${{ env.NODE_VERSION }}
+          # `nextjs-app/.nvmrc` is the single source of truth for the Node version
+          # (also read by `nvm use` locally, and matches `package.json`'s "engines"),
+          # so CI can't silently drift onto a newer version than what's actually
+          # been tested. Path is relative to the repo root (checkout root), not to
+          # this job's `working-directory: nextjs-app` default, which only applies
+          # to `run:` steps.
+          node-version-file: nextjs-app/.nvmrc
           cache: npm
           cache-dependency-path: nextjs-app/package-lock.json
 
@@ -170,9 +176,12 @@ jobs:
     # Only runs once real test-project credentials are added as repo
     # secrets (Settings → Secrets and variables → Actions), using the same
     # names as .env.example. Without them this job is skipped rather than
-    # failing. These are only the specs tagged `@live` (currently just
-    # `requireRealUserOrRedirect` in e2e/auth.spec.ts) — they boot a real
-    # `next dev` server (see playwright.config.ts) and need a reachable
+    # failing. These are only the specs tagged `@live` — currently none (see
+    # nextjs-app/README.md's "Testing" section for why `requireRealUserOrRedirect`
+    # doesn't need this tier after all) — so `test:e2e:live` runs with
+    # `--pass-with-no-tests` to keep this job green rather than failing on "no
+    # tests found" once secrets exist. Any future `@live` spec boots a real
+    # `next dev` server (see playwright.config.ts) and needs a reachable
     # Supabase project. Point these secrets at a disposable **test**
     # Supabase project — never the production project
     # (yshgjzmyapdepkapodno) — see nextjs-app/README.md's "Testing" section.
@@ -187,7 +196,13 @@ jobs:
 
       - uses: actions/setup-node@v7
         with:
-          node-version: ${{ env.NODE_VERSION }}
+          # `nextjs-app/.nvmrc` is the single source of truth for the Node version
+          # (also read by `nvm use` locally, and matches `package.json`'s "engines"),
+          # so CI can't silently drift onto a newer version than what's actually
+          # been tested. Path is relative to the repo root (checkout root), not to
+          # this job's `working-directory: nextjs-app` default, which only applies
+          # to `run:` steps.
+          node-version-file: nextjs-app/.nvmrc
           cache: npm
           cache-dependency-path: nextjs-app/package-lock.json
 

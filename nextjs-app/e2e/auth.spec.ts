@@ -29,12 +29,15 @@ test.describe("/auth", () => {
   });
 });
 
-// `@live`: `requireRealUserOrRedirect` -> `getCurrentUser` -> `supabase.auth.getUser()`
-// always round-trips to GoTrue to validate (unlike `getSession()`, which only reads the
-// local JWT) — even for a no-session visit, the `ci-placeholder.supabase.co` host used
-// by the always-on fixtures job can't serve that request. Needs a real (test-project)
-// Supabase URL, so it only runs in the `e2e-live` job — see nextjs-ci.yml / README.
-test.describe("requireRealUserOrRedirect @live", () => {
+// Not `@live`: `requireRealUserOrRedirect` -> `getCurrentUser` -> `supabase.auth.getUser()`
+// does round-trip to GoTrue to validate a *real* session (unlike `getSession()`, which only
+// reads the local JWT) — but for a genuinely session-less visit (no cookie at all) it returns
+// `AuthSessionMissingError` synchronously with no network call at all, empirically confirmed
+// against both `@supabase/supabase-js` and `@supabase/ssr`'s `createServerClient` (elapsed ms:
+// 0-1 against the unreachable `ci-placeholder.supabase.co` host). Same reasoning as the
+// `/profile/overview` guest-view test below, so this belongs in the always-on fixtures tier,
+// not gated behind real test-project secrets. See nextjs-ci.yml / README's "Testing" section.
+test.describe("requireRealUserOrRedirect", () => {
   test("a no-session visit to a protected page redirects to /auth with the right ?redirect=", async ({
     page,
   }) => {
