@@ -65,6 +65,15 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # Fails if any prisma/migrations/*/migration.sql file's contents changed
+      # without prisma/migration-checksums.json being updated to match in the
+      # same PR — catches a silent edit to an already-applied migration (the
+      # 2026-11-02 `0_init` incident this check exists because of: see
+      # scripts/check-migration-checksums.ts's own header comment and
+      # MIGRATION_PLAN.md's "Migration safety rules"). No database involved.
+      - name: Verify migration checksums
+        run: npm run db:check-migration-checksums
+
       - name: Lint
         run: npm run lint
 

@@ -871,6 +871,40 @@ These apply from Step 3 onward and are also documented in `README.md`:
   migrations folder alone** — it will be missing RLS/triggers/functions the
   app actually depends on. Use the Supabase CLI (`supabase start`) or a real
   schema dump instead, per the bullet above.
+- **Never edit a migration that has been applied to the live DB.** Once a
+  migration is `resolve --applied` against the live project, its row in
+  `_prisma_migrations` records a SHA-256 checksum of the migration.sql file
+  as it existed at that moment (Prisma's schema-engine computes this —
+  `schema-engine/connectors/schema-connector/src/checksum.rs` in
+  prisma/prisma-engines — as a plain SHA-256 hex digest of the file's raw
+  bytes). Editing the file afterwards changes that checksum without the live
+  DB's stored value knowing, which makes `prisma migrate status`/`deploy`
+  report the migration as modified. **If one must change** — e.g. to fix
+  invalid SQL discovered only because CI now literally executes `0_init`
+  (see that file's "REGENERATED 2026-11-02" comment for a real example, where
+  two `dbgenerated()` columns used a plain `DEFAULT (...)` referencing
+  sibling columns, which Postgres rejects outright) — update its stored
+  checksum **deliberately, with a recorded reason**: recompute the new
+  checksum, run a guarded, reviewed update against the live DB inside
+  `begin`/`commit`, with a `returning` clause (the Supabase SQL editor
+  doesn't surface a row count the way `psql` does, so `returning` is the only
+  way to confirm exactly one row changed):
+  ```sql
+  begin;
+  update _prisma_migrations set checksum = '<new>'
+    where migration_name = '<name>' and checksum = '<old>'
+  returning migration_name, checksum;
+  -- must return exactly one row, otherwise rollback
+  commit;
+  ```
+  and record why in the commit that changed the migration file.
+  `nextjs-app/scripts/check-migration-checksums.ts` (wired into CI via `npm
+  run db:check-migration-checksums`) enforces the "deliberately" part
+  in-repo: it fails the build if any `prisma/migrations/*/migration.sql`
+  changes without `prisma/migration-checksums.json` — a manifest kept
+  outside `prisma/migrations/` itself, since that directory is Prisma's own
+  and should contain only migration folders and `migration_lock.toml` — being
+  updated to match in the same PR.
 - **The seed script (`prisma/seed.ts`) hard-refuses to run** unless
   `DATABASE_URL` is a `localhost`/`127.0.0.1` host and does not contain the
   production project ref (`yshgjzmyapdepkapodno`). There is no override/
