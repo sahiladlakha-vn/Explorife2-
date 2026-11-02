@@ -108,7 +108,18 @@ jobs:
     # trigger silently reverting a write). Runs on every PR, same as `checks`.
     services:
       postgres:
-        image: postgres:16
+        # `postgis/postgis` (built FROM the official `postgres` image, same
+        # major version, with the PostGIS extension's shared libraries
+        # pre-installed) rather than plain `postgres:16` — `0_init`'s
+        # migration creates a `geography(Point, 4326)` column
+        # (`GemGuide.location`), which plain `postgres:16` can't satisfy no
+        # matter what `CREATE EXTENSION` statement runs against it; the
+        # extension's underlying library has to be on the image already. See
+        # prisma/test-support/bootstrap-extensions.sql, which actually
+        # enables `postgis` (and `uuid-ossp`, which IS bundled with plain
+        # `postgres` images and needs no image change) once the container is
+        # up.
+        image: postgis/postgis:16-3.4
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
@@ -138,6 +149,16 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      # `0_init`'s migration uses `uuid_generate_v4()` and a
+      # `geography(Point, 4326)` column, which need the `uuid-ossp`/`postgis`
+      # extensions enabled before `CREATE TABLE` can succeed. Must run
+      # BEFORE `prisma migrate deploy`. See bootstrap-extensions.sql's own
+      # header comment for why the service image above also had to change
+      # (`postgis` needs its shared library on the image, not just the SQL
+      # statement).
+      - name: Enable required Postgres extensions
+        run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f prisma/test-support/bootstrap-extensions.sql
 
       # `auth.*` is marked `externalTables` in prisma.config.ts, so
       # `prisma/migrations/0_init/migration.sql` contains no
