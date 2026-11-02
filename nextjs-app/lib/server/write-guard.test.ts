@@ -61,6 +61,17 @@ const ALLOWED_RELATIVE_PATHS = new Set([
   // any of this executes. See that file's own header comment for the full
   // rationale.
   "lib/server/integration/fixtures.ts",
+  // Defense-in-depth test that deliberately calls `runAsUser()` directly for
+  // a non-admin/non-moderator actor, bypassing `assertCanChangeProfileRole()`/
+  // `assertCanVerifyAttraction()` entirely, to prove the live trigger + the
+  // re-read-and-throw guard (not just the TypeScript permission check) is
+  // what actually stops an unauthorized write from sticking. Its direct
+  // `tx.profile.update(...)`/`tx.attraction.update(...)` calls are the
+  // intentional subject under test, not an accidental write path — and, like
+  // `fixtures.ts` above, it can only ever run against a disposable
+  // loopback/CI database (`assertIntegrationTestDatabaseIsSafe()`). See that
+  // file's own header comment for the full rationale.
+  "lib/server/integration/trigger-bypass.integration.test.ts",
 ]);
 
 const SCAN_DIRS = ["app", "components", "lib", "test"];
