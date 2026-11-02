@@ -79,14 +79,43 @@
 -- `canChangeProfileRole`/`canSetListingVerification` predicates, with unit
 -- tests in `lib/auth/permissions.test.ts`) re-implements these same checks
 -- in application code, so Step 3a's Server Actions fail fast with a clean
--- 403 instead of silently sending a doomed write to Postgres. That restores
--- the user-facing security property (unauthorized requests never reach the
--- DB) but does NOT, on its own, make legitimate/authorized writes actually
--- take effect — the live triggers still revert those too. Making real role
--- changes and listing verification work again requires altering/dropping
--- these three triggers on the live DB, which is a separate, approval-gated
--- schema change tracked as an open question in MIGRATION_PLAN.md §6 Risk #3,
--- not performed by this module or by this file.
+-- 403 instead of sending a doomed write to Postgres. That restores the
+-- user-facing security property (unauthorized requests never reach the DB),
+-- but on its own it does NOT make legitimate/authorized writes actually take
+-- effect — the live triggers still revert those too, since the app-level
+-- check passing says nothing about what `auth.uid()` resolves to inside the
+-- trigger. Worse, for `updateUserRole` specifically, the silent revert
+-- previously happened *underneath* a transaction that still committed and
+-- still wrote an `admin_action_log` row describing a role change that never
+-- actually took effect — a false audit entry, not just a no-op.
+--
+-- Fixed (this is no longer an open question): `lib/server/db-as-user.ts`'s
+-- `runAsUser()` runs the write inside a Prisma interactive transaction that
+-- first calls `select set_config('request.jwt.claims', '{"sub": "<actingUserId>",
+-- "role": "authenticated"}', true)` — transaction-local (`true` = `SET LOCAL`
+-- semantics, auto-reset at COMMIT/ROLLBACK, and safe through Supabase's
+-- transaction-mode pooler since one logical transaction exclusively owns its
+-- physical backend connection for its duration) — so `auth.uid()` resolves to
+-- the real acting user inside the trigger, same as it would through
+-- `@supabase/ssr`'s RLS-scoped connection. `updateUserRole` (lib/server/profiles.ts),
+-- `setAttractionVerification` (lib/server/attractions.ts), and
+-- `setRestaurantVerification` (lib/server/restaurants.ts) all call it, each
+-- then re-reading the written row inside the SAME transaction and throwing
+-- (before any audit-log write) if the locked field didn't actually change —
+-- so a silent revert can never again produce a false success or a false
+-- `admin_action_log` entry. Regression-covered by
+-- `lib/server/integration/trigger-behavior.integration.test.ts`, which runs
+-- these functions against a real Postgres with the actual trigger SQL
+-- installed (see prisma/test-support/*.sql) rather than a mocked Prisma
+-- client, specifically so a reintroduced auth-context bug is caught instead
+-- of silently passing the (necessarily mocked) unit tests in
+-- `lib/server/{profiles,attractions,restaurants}.test.ts`.
+--
+-- None of this alters or drops the triggers themselves — they remain
+-- defense-in-depth against any future write path that forgets to route
+-- through `runAsUser` (see `lib/server/write-guard.test.ts`'s static scan,
+-- which restricts direct writes to these three tables to exactly the three
+-- modules above).
 --
 -- profiles_lock_role_field  (BEFORE UPDATE ON profiles)
 --   function public.lock_profile_role_field():

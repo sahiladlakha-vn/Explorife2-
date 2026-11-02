@@ -509,11 +509,23 @@ always `NULL` in any session Prisma opens. Concretely this means:
   `NULL` under Prisma they will deterministically **revert** `profiles.role`,
   and `attractions`/`restaurants`' `verification_status`/`verified_by`/
   `verified_at` back to their old values on every Prisma-driven UPDATE that
-  touches those columns — i.e. without a code change, role assignment and
-  listing verification would silently stop working the moment writes move to
-  Prisma. This is flagged as an open question in §6 (Risk #3) rather than
-  fixed here, since altering/dropping a trigger on a live table needs the same
-  approval as any other schema change.
+  touches those columns. This is not a harmless no-op: it **blocks every
+  legitimate Prisma-issued write to these fields**, including from a
+  genuinely authorized super_admin/moderator, while the surrounding
+  transaction still reports success — and for `updateUserRole` specifically,
+  still writes an `admin_action_log` row describing a role change that never
+  actually took effect. Altering/dropping the triggers themselves would need
+  the same live-schema-change approval as any other DDL and was out of scope
+  here; instead this is fixed entirely in application code: every write to
+  these fields runs through `lib/server/db-as-user.ts`'s `runAsUser()`, which
+  sets `request.jwt.claims` for the duration of the transaction so
+  `auth.uid()` resolves to the real acting user inside the trigger (same as
+  it would through PostgREST), then re-reads the row in the same transaction
+  and throws before any audit-log write if the locked field didn't actually
+  change. See `prisma/db-notes.sql` §2 for the full writeup and
+  `lib/server/integration/trigger-behavior.integration.test.ts` for the
+  real-Postgres regression coverage (a mocked-Prisma unit test can't observe
+  a trigger reverting a write).
 
 | Postgres function | New TypeScript home | Permission check (`lib/auth/permissions.ts`) |
 |---|---|---|
@@ -625,8 +637,15 @@ the resolution is implemented in this plan.
    independently-discovered `auth.uid()`/PostgREST-session-GUC finding that
    makes 3 triggers (`lock_profile_role_field`,
    `lock_attraction_verification_fields`, `lock_restaurant_verification_fields`)
-   an active correctness hazard under Prisma writes unless superseded by
-   equivalent TypeScript checks (flagged in §3a, not yet resolved in code).
+   an active correctness hazard under Prisma writes — not just unauthorized
+   writes reaching the DB (closed by `lib/auth/permissions.ts`'s guards), but
+   legitimate authorized writes being silently blocked by the trigger itself.
+   **Resolved in code**: `lib/server/db-as-user.ts`'s `runAsUser()` (used by
+   `updateUserRole`/`setAttractionVerification`/`setRestaurantVerification` in
+   `lib/server/`) establishes the same `auth.uid()` the trigger expects for
+   the duration of the write's transaction, with a post-write re-read guard
+   against silent reverts and real-Postgres integration test coverage — see
+   §3a and `prisma/db-notes.sql` §2 for the full writeup.
 4. **4 deployed Edge Functions have no source in the repo**
    (`qa-role-check-harness`, `qa-username-gen-harness`,
    `qa-traveler-session-harness`, `qa-username-taken-check`). **Decision: out
@@ -707,9 +726,11 @@ in §3/§3a/§6 above.
   pass against it. DB-side behavior Prisma can't express (the PostGIS
   generated column, and three `auth.uid()`-dependent "lock" triggers on
   `profiles.role` and `attractions`/`restaurants` verification fields that
-  silently no-op once writes move to Prisma's elevated connection — these
-  need to be re-implemented in `lib/auth/permissions.ts`) is documented in
-  `prisma/db-notes.sql`. A local/dev-only seed script exists at
+  **block** legitimate writes — not silently no-op as harmless — once writes
+  move to Prisma's elevated connection unless the acting user's `auth.uid()`
+  is restored for the write, which `lib/server/db-as-user.ts`'s `runAsUser()`
+  now does) is documented in `prisma/db-notes.sql`. A local/dev-only seed
+  script exists at
   `prisma/seed.ts` (wired via `prisma.config.ts`'s `migrations.seed`, run
   with `npx prisma db seed`), hard-guarded (no bypass env var) against ever
   running except against a `localhost`/`127.0.0.1` `DATABASE_URL` that does
@@ -800,15 +821,26 @@ in §3/§3a/§6 above.
      the assert-guards' Auth/Forbidden/success paths. `npx vitest run`,
      `npx tsc --noEmit`, and `npx eslint` all pass clean. Per the module's
      own doc comment, this stops *unauthorized* writes from ever reaching
-     Postgres (clean 403 instead of a silent trigger-revert) but does not by
-     itself make *authorized* writes stick — the live triggers still revert
-     those until they're altered/dropped on the live DB, which stays the
-     separate, approval-gated Risk #3 item. Not yet wired into any Server
-     Action (`lib/server/` is still just the placeholder README) — that
-     lands with the actual `updateUserRole()`/`verifyAttraction()`/
-     `verifyRestaurant()` ports in Step 3a/Step 4. This item was done ahead
-     of item 1 (`hike_tracks` migration) and item 2 (baseline), both still
-     pending, since it's pure application code with no live-DB write.
+     Postgres (clean 403 instead of a silent trigger-revert) but on its own
+     does not make *authorized* writes stick — the live triggers still
+     revert those too, since passing the app-level check says nothing about
+     what `auth.uid()` resolves to inside the trigger.
+     **Update: this half of Risk #3 is now also closed, without altering or
+     dropping any trigger.** `lib/server/db-as-user.ts`'s `runAsUser()`
+     wraps the write in a transaction that first restores the acting user's
+     `auth.uid()` via `set_config('request.jwt.claims', ..., true)`, then
+     re-reads the written row in the same transaction and throws (before any
+     audit-log write) if the locked field didn't actually change.
+     `updateUserRole()`/`setAttractionVerification()`/
+     `setRestaurantVerification()` in `lib/server/{profiles,attractions,
+     restaurants}.ts` all route through it, with real-Postgres integration
+     test coverage in `lib/server/integration/trigger-behavior.integration.test.ts`
+     (run in CI's `db-trigger-integration` job on every PR) proving both that
+     an authorized write now sticks and that a reverted write is reported as
+     an error rather than a false success. This item was done ahead of item 1
+     (`hike_tracks` migration) and item 2 (baseline), both still pending at
+     the time, since it's pure application code with no live-DB schema
+     change.
 
 ### Migration safety rules
 

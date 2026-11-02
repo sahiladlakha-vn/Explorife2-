@@ -51,6 +51,16 @@ const ALLOWED_RELATIVE_PATHS = new Set([
   "lib/server/profiles.ts",
   "lib/server/attractions.ts",
   "lib/server/restaurants.ts",
+  // Seeding helper for lib/server/integration/*.integration.test.ts (the
+  // real-Postgres trigger-behavior suite). Its prisma.profile/attraction/
+  // restaurant.create(...) calls build known-good fixture rows for a test to
+  // then exercise through the real, guarded write paths above — not a write
+  // path of their own the guard needs to catch — and it can only ever run
+  // against a disposable loopback/CI database, since every integration test
+  // file calls assertIntegrationTestDatabaseIsSafe() (./db-guard.ts) before
+  // any of this executes. See that file's own header comment for the full
+  // rationale.
+  "lib/server/integration/fixtures.ts",
 ]);
 
 const SCAN_DIRS = ["app", "components", "lib", "test"];

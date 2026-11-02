@@ -19,6 +19,7 @@
     "typecheck": "next typegen && tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
     "test:e2e": "playwright test",
     "test:e2e:fixtures": "playwright test --grep-invert @live",
     "test:e2e:live": "playwright test --grep @live --pass-with-no-tests"

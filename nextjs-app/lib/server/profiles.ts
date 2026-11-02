@@ -11,6 +11,20 @@ import {
   type Role,
 } from "@/lib/auth/permissions";
 import { warnStrippedFields } from "./audit-log";
+import { runAsUser } from "./db-as-user";
+
+/** Thrown when `lock_profile_role_field` reverts a role change that an
+ * `assertCanChangeProfileRole()`-gated caller should have been authorized to
+ * make. Should only ever fire if `runAsUser`'s claim-setting didn't take
+ * effect (pooler misconfiguration, GUC not propagated, etc.) — a bug in our
+ * own plumbing, never an expected outcome for a real super_admin caller. See
+ * `lib/server/db-as-user.ts` for why this guard exists at all. */
+export class RoleChangeRevertedError extends Error {
+  constructor(message = "Role change was silently reverted by the database; this is a bug, please report it.") {
+    super(message);
+    this.name = "RoleChangeRevertedError";
+  }
+}
 
 /**
  * The ONLY module allowed to call `prisma.profile.create/update/updateMany/
@@ -185,7 +199,8 @@ export async function updateUserRole(targetUserId: string, role: Role) {
   const { user: actor } = await assertCanChangeProfileRole();
 
   try {
-    return await prisma.$transaction(
+    return await runAsUser(
+      actor.id,
       async (tx) => {
         const target = await tx.profile.findUnique({
           where: { id: targetUserId },
@@ -213,7 +228,21 @@ export async function updateUserRole(targetUserId: string, role: Role) {
           }
         }
 
-        const updated = await tx.profile.update({ where: { id: targetUserId }, data: { role } });
+        await tx.profile.update({ where: { id: targetUserId }, data: { role } });
+
+        // `lock_profile_role_field` is a BEFORE UPDATE trigger gated on
+        // `auth.uid()` belonging to a super_admin profile. `runAsUser` makes
+        // the real actor visible to it via `request.jwt.claims`, so this
+        // should always stick for a caller who passed
+        // `assertCanChangeProfileRole()` above — but re-reading the row
+        // (rather than trusting the UPDATE's own return value) is the only
+        // way to be certain the trigger didn't revert it, and to guarantee
+        // we never write an `admin_action_log` row for a change that didn't
+        // actually happen. See `lib/server/db-as-user.ts`'s doc comment.
+        const reread = await tx.profile.findUnique({ where: { id: targetUserId } });
+        if (!reread || reread.role !== role) {
+          throw new RoleChangeRevertedError();
+        }
 
         await tx.adminActionLog.create({
           data: {
@@ -226,7 +255,7 @@ export async function updateUserRole(targetUserId: string, role: Role) {
           },
         });
 
-        return updated;
+        return reread;
       },
       { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
     );

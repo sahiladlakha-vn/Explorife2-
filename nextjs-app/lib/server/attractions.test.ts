@@ -5,8 +5,9 @@ import type { User } from "@supabase/supabase-js";
 vi.mock("@/lib/supabase/server", () => ({
   createClient: vi.fn(),
 }));
-vi.mock("@/lib/db", () => ({
-  prisma: {
+vi.mock("@/lib/db", () => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- test double, shape mirrors the real PrismaClient subset this module uses
+  const prismaMock: any = {
     profile: {
       findUnique: vi.fn(),
     },
@@ -14,13 +15,23 @@ vi.mock("@/lib/db", () => ({
       findUnique: vi.fn(),
       update: vi.fn(),
     },
-  },
-}));
+    // `runAsUser` (lib/server/db-as-user.ts) issues this as the first
+    // statement inside the transaction, before any `tx.attraction.*` calls.
+    $executeRaw: vi.fn(),
+  };
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- test double
+  prismaMock.$transaction = vi.fn((callback: (tx: any) => unknown) => callback(prismaMock));
+  return { prisma: prismaMock };
+});
 
 import { createClient } from "@/lib/supabase/server";
 import { prisma } from "@/lib/db";
 import { AuthError, ForbiddenError, type Role } from "@/lib/auth/permissions";
-import { updateAttraction, setAttractionVerification } from "./attractions";
+import {
+  AttractionVerificationRevertedError,
+  updateAttraction,
+  setAttractionVerification,
+} from "./attractions";
 
 function mockSessionUser(user: Pick<User, "id"> | null) {
   vi.mocked(createClient).mockResolvedValue({
@@ -172,7 +183,18 @@ describe("setAttractionVerification", () => {
     mockActorRole("content_moderator");
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
+    // Post-write re-read inside the same `runAsUser` transaction — confirms
+    // `lock_attraction_verification_fields` didn't revert the write.
+    vi.mocked(prisma.attraction.findUnique).mockResolvedValue({
+      verificationStatus: "verified",
+      verifiedBy: "mod-1",
+      verifiedAt: new Date("2026-01-01T00:00:00.000Z"),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- test double, only the verification columns are read back
+    } as any);
+
     await setAttractionVerification("attr-1", "verified");
+
+    expect(prisma.$executeRaw).toHaveBeenCalled();
     expect(prisma.attraction.update).toHaveBeenCalledWith({
       where: { id: "attr-1" },
       data: {
@@ -182,6 +204,26 @@ describe("setAttractionVerification", () => {
       },
     });
     vi.useRealTimers();
+  });
+
+  // `runAsUser` guard: if the trigger reverts the write anyway (e.g. the
+  // transaction-local claim didn't take effect), the re-read must catch it
+  // and the function must throw rather than report success.
+  it("throws AttractionVerificationRevertedError when the re-read shows the trigger reverted the write", async () => {
+    mockSessionUser({ id: "mod-1" });
+    mockActorRole("content_moderator");
+    // Re-read shows the old (unverified) values — the trigger fired as if
+    // the caller weren't a moderator.
+    vi.mocked(prisma.attraction.findUnique).mockResolvedValue({
+      verificationStatus: "pending",
+      verifiedBy: null,
+      verifiedAt: null,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- test double
+    } as any);
+
+    await expect(setAttractionVerification("attr-1", "verified")).rejects.toBeInstanceOf(
+      AttractionVerificationRevertedError,
+    );
   });
 
   // The whole point of computing these server-side: a caller can't pass a

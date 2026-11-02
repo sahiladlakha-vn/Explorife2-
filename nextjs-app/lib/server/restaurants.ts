@@ -8,6 +8,23 @@ import {
   requireUser,
 } from "@/lib/auth/permissions";
 import { warnStrippedFields } from "./audit-log";
+import { runAsUser } from "./db-as-user";
+
+/** Thrown when `lock_restaurant_verification_fields` reverts a verification
+ * write that an `assertCanVerifyRestaurant()`-gated caller should have been
+ * authorized to make. Should only ever fire if `runAsUser`'s claim-setting
+ * didn't take effect — a bug in our own plumbing, not an expected outcome for
+ * a real moderator caller. See `lib/server/db-as-user.ts`, and
+ * `lib/server/attractions.ts`'s `AttractionVerificationRevertedError` (same
+ * shape, restaurants variant). */
+export class RestaurantVerificationRevertedError extends Error {
+  constructor(
+    message = "Verification update was silently reverted by the database; this is a bug, please report it.",
+  ) {
+    super(message);
+    this.name = "RestaurantVerificationRevertedError";
+  }
+}
 
 /**
  * The ONLY module allowed to call `prisma.restaurant.create/update/
@@ -126,8 +143,33 @@ export async function updateRestaurant(restaurantId: string, patch: RestaurantWr
  */
 export async function setRestaurantVerification(restaurantId: string, status: string) {
   const { user } = await assertCanVerifyRestaurant();
-  return prisma.restaurant.update({
-    where: { id: restaurantId },
-    data: { verificationStatus: status, verifiedBy: user.id, verifiedAt: new Date() },
+  const verifiedAt = new Date();
+
+  return runAsUser(user.id, async (tx) => {
+    await tx.restaurant.update({
+      where: { id: restaurantId },
+      data: { verificationStatus: status, verifiedBy: user.id, verifiedAt },
+    });
+
+    // `lock_restaurant_verification_fields` reverts all three verification
+    // columns as a group when `auth.uid()` isn't a
+    // content_moderator/regional_admin/super_admin. `runAsUser` makes this
+    // caller (already gated by `assertCanVerifyRestaurant()` above) visible
+    // to the trigger, so this should always stick — but re-reading rather
+    // than trusting the UPDATE's own return value is the only way to be
+    // certain, matching the same guard in `updateUserRole`
+    // (`lib/server/profiles.ts`) and `setAttractionVerification`
+    // (`lib/server/attractions.ts`). See `lib/server/db-as-user.ts`.
+    const reread = await tx.restaurant.findUnique({ where: { id: restaurantId } });
+    if (
+      !reread ||
+      reread.verificationStatus !== status ||
+      reread.verifiedBy !== user.id ||
+      reread.verifiedAt?.getTime() !== verifiedAt.getTime()
+    ) {
+      throw new RestaurantVerificationRevertedError();
+    }
+
+    return reread;
   });
 }

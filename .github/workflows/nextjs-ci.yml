@@ -91,6 +91,76 @@ jobs:
       - name: Build
         run: npm run build
 
+  db-trigger-integration:
+    name: DB trigger integration tests (real Postgres)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: nextjs-app
+    # Runs lib/server/integration/*.integration.test.ts against a real,
+    # disposable Postgres service container with the live project's actual
+    # `lock_profile_role_field` / `lock_attraction_verification_fields` /
+    # `lock_restaurant_verification_fields` triggers installed (see
+    # prisma/test-support/*.sql) — these are the only place that trigger SQL
+    # is exercised anywhere outside the live project, and the only tests that
+    # can catch a regression of lib/server/db-as-user.ts's `runAsUser` (the
+    # unit tests in `checks` above mock Prisma entirely, so they can't see a
+    # trigger silently reverting a write). Runs on every PR, same as `checks`.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    # Plain `localhost` (no pgbouncer/pooler in front of this disposable
+    # container) for both — db-guard.ts's assertIntegrationTestDatabaseIsSafe()
+    # requires a loopback hostname, and there's no separate pooler service
+    # here for migrations to need a different port for.
+    env:
+      DATABASE_URL: "postgresql://postgres:postgres@localhost:5432/postgres"
+      DIRECT_URL: "postgresql://postgres:postgres@localhost:5432/postgres"
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: nextjs-app/.nvmrc
+          cache: npm
+          cache-dependency-path: nextjs-app/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      # `auth.*` is marked `externalTables` in prisma.config.ts, so
+      # `prisma/migrations/0_init/migration.sql` contains no
+      # `CREATE SCHEMA/TABLE "auth"` of its own (see that file's comment) —
+      # this fresh container needs a hand-bootstrapped minimal `auth` schema
+      # before the real migration's `REFERENCES "auth"."users"("id")` FK
+      # constraints can apply. Must run BEFORE `prisma migrate deploy`.
+      - name: Bootstrap minimal auth schema
+        run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f prisma/test-support/bootstrap-auth.sql
+
+      - name: Apply Prisma migrations
+        run: npx prisma migrate deploy
+
+      # The three lock triggers have no Prisma migration of their own — they
+      # were never created by `prisma migrate`, only documented (see
+      # prisma/db-notes.sql §2) and now reproduced verbatim here. Must run
+      # AFTER `prisma migrate deploy` (references tables that step creates).
+      - name: Install lock triggers
+        run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f prisma/test-support/lock-triggers.sql
+
+      - name: Run DB trigger integration tests
+        run: npm run test:integration
+
   detect-e2e-secrets:
     name: Check for e2e test-project secrets
     runs-on: ubuntu-latest

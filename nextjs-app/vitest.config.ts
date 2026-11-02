@@ -18,6 +18,13 @@ export default defineConfig({
   test: {
     environment: "node",
     include: ["**/*.test.ts"],
-    exclude: ["node_modules", ".next", "lib/generated/**"],
+    // `*.integration.test.ts` files (lib/server/integration/) run real writes
+    // against a real Postgres with the live trigger SQL installed — they
+    // have their own config (vitest.integration.config.ts) and npm script
+    // (`test:integration`) and must never be picked up by the default
+    // `vitest run`/`npm test`, which has no database available and whose
+    // placeholder DATABASE_URL would fail assertIntegrationTestDatabaseIsSafe()
+    // anyway.
+    exclude: ["node_modules", ".next", "lib/generated/**", "**/*.integration.test.ts"],
   },
 });

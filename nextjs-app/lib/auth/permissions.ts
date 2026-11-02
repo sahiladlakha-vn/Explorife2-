@@ -172,8 +172,7 @@ export async function requireRole(
 // `lock_attraction_verification_fields` (on `attractions`), and
 // `lock_restaurant_verification_fields` (on `restaurants`).
 //
-// IMPORTANT — what this section does NOT fix (see MIGRATION_PLAN.md §3a /
-// Risk #3, still an open question, not resolved here): those triggers key
+// IMPORTANT — what this section does NOT fix on its own: those triggers key
 // off `auth.uid()`, which Postgres's session-local `request.jwt.claims`
 // setting only has a value when PostgREST sets it per-request. Prisma's
 // direct connection never goes through PostgREST, so `auth.uid()` is always
@@ -182,13 +181,30 @@ export async function requireRole(
 // unconditionally REVERTS `profiles.role` / the verification fields back to
 // their old values on every Prisma-issued UPDATE that touches them,
 // regardless of whether the acting user was actually authorized. In other
-// words: the functions below stop *unauthorized* requests from ever
-// reaching Postgres (preserving the user-facing security property and
-// failing fast with a clean 403), but they cannot make the live triggers let
-// an *authorized* write through — that still silently reverts until the
-// triggers themselves are altered/dropped on the live DB, which is a
-// separate, approval-gated schema change tracked in MIGRATION_PLAN.md §6
-// Risk #3, not performed by this module.
+// words: the guards below stop *unauthorized* requests from ever reaching
+// Postgres (preserving the user-facing security property and failing fast
+// with a clean 403), but on their own they do NOT make the live triggers let
+// an *authorized* write through — that's a separate problem, since passing
+// the check below says nothing about what `auth.uid()` resolves to inside
+// the trigger. It is NOT a harmless no-op: without further handling, it
+// silently BLOCKS every legitimate write to these fields, even from a
+// genuinely authorized super_admin/moderator, while the surrounding
+// transaction still reports success.
+//
+// That second problem is fixed — without altering or dropping any
+// trigger — by `lib/server/db-as-user.ts`'s `runAsUser()`, which every
+// caller of these guards (`updateUserRole()` in `lib/server/profiles.ts`,
+// `setAttractionVerification()`/`setRestaurantVerification()` in
+// `lib/server/attractions.ts`/`restaurants.ts`) runs its write through: it
+// restores the acting user's `auth.uid()` for the duration of the write's
+// transaction via `set_config('request.jwt.claims', ..., true)`, then
+// re-reads the written row in that same transaction and throws (before any
+// audit-log write) if the locked field didn't actually change, so a silent
+// revert can never again produce a false success. See `prisma/db-notes.sql`
+// §2 and MIGRATION_PLAN.md §3a for the full writeup, and
+// `lib/server/integration/trigger-behavior.integration.test.ts` for the
+// real-Postgres regression coverage this module's own (necessarily mocked)
+// unit tests can't provide.
 //
 // Per the "No TS port — superseded" rows in MIGRATION_PLAN.md §3a: these
 // three fields must only ever be written by the dedicated Server Actions

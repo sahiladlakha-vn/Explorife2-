@@ -8,6 +8,21 @@ import {
   requireUser,
 } from "@/lib/auth/permissions";
 import { warnStrippedFields } from "./audit-log";
+import { runAsUser } from "./db-as-user";
+
+/** Thrown when `lock_attraction_verification_fields` reverts a verification
+ * write that an `assertCanVerifyAttraction()`-gated caller should have been
+ * authorized to make. Should only ever fire if `runAsUser`'s claim-setting
+ * didn't take effect — a bug in our own plumbing, not an expected outcome for
+ * a real moderator caller. See `lib/server/db-as-user.ts`. */
+export class AttractionVerificationRevertedError extends Error {
+  constructor(
+    message = "Verification update was silently reverted by the database; this is a bug, please report it.",
+  ) {
+    super(message);
+    this.name = "AttractionVerificationRevertedError";
+  }
+}
 
 /**
  * The ONLY module allowed to call `prisma.attraction.create/update/
@@ -144,8 +159,32 @@ export async function updateAttraction(attractionId: string, patch: AttractionWr
  */
 export async function setAttractionVerification(attractionId: string, status: string) {
   const { user } = await assertCanVerifyAttraction();
-  return prisma.attraction.update({
-    where: { id: attractionId },
-    data: { verificationStatus: status, verifiedBy: user.id, verifiedAt: new Date() },
+  const verifiedAt = new Date();
+
+  return runAsUser(user.id, async (tx) => {
+    await tx.attraction.update({
+      where: { id: attractionId },
+      data: { verificationStatus: status, verifiedBy: user.id, verifiedAt },
+    });
+
+    // `lock_attraction_verification_fields` reverts all three verification
+    // columns as a group when `auth.uid()` isn't a
+    // content_moderator/regional_admin/super_admin. `runAsUser` makes this
+    // caller (already gated by `assertCanVerifyAttraction()` above) visible
+    // to the trigger, so this should always stick — but re-reading rather
+    // than trusting the UPDATE's own return value is the only way to be
+    // certain, matching the same guard in `updateUserRole`
+    // (`lib/server/profiles.ts`). See `lib/server/db-as-user.ts`.
+    const reread = await tx.attraction.findUnique({ where: { id: attractionId } });
+    if (
+      !reread ||
+      reread.verificationStatus !== status ||
+      reread.verifiedBy !== user.id ||
+      reread.verifiedAt?.getTime() !== verifiedAt.getTime()
+    ) {
+      throw new AttractionVerificationRevertedError();
+    }
+
+    return reread;
   });
 }
