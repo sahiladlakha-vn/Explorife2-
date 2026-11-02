@@ -39,6 +39,31 @@
 --      `schema.prisma`'s `HikeTrack` model directly, instead of needing a
 --      second migration to layer the extra six on afterward.
 --
+-- REGENERATED 2026-11-02: `prisma migrate diff`'s `--script` output for a
+-- `@default(dbgenerated(...))` field is always a plain Postgres `DEFAULT
+-- (...)` clause — it has no way to know (or express) that a field is
+-- actually a `GENERATED ALWAYS AS (...) STORED` column on the live
+-- database, which is the only reason `gem_guides.location` and
+-- `leaderboard.rank_score` were declared with `dbgenerated()` in the first
+-- place (see schema.prisma's doc comments on both). That's harmless for
+-- this baseline's actual purpose against the LIVE database (resolved
+-- `--applied`, never literally run — the live columns already exist, and
+-- `migrate diff`'s empty-diff check doesn't re-execute this file's DDL), but
+-- this file is ALSO replayed for real against a from-scratch database by
+-- `.github/workflows/nextjs-ci.yml`'s `db-trigger-integration` job — and a
+-- plain `DEFAULT` expression that references sibling columns
+-- (`gems_discovered`/`journals_written`/`countries_visited`/`total_saves`
+-- for `rank_score`; `longitude`/`latitude` for `location`) is simply invalid
+-- Postgres (`ERROR: cannot use column reference in DEFAULT expression`,
+-- code `0A000`) — column references are only legal inside a `GENERATED
+-- ALWAYS AS (...)` expression, never a `DEFAULT`. First caught here because
+-- that CI job's very first real run (this branch) was also the first time
+-- `0_init` was ever literally executed anywhere. Both lines rewritten from
+-- `DEFAULT (<expr>)` to `GENERATED ALWAYS AS (<expr>) STORED`, same
+-- expression text, no other change — this now matches what the live
+-- database's columns actually are, not just what the comments said they
+-- were.
+--
 -- Generated via `npx prisma migrate diff --from-empty --to-schema-datamodel
 -- prisma/schema.prisma --script` (schema-to-empty diffing — no live DB
 -- connection used or possible here, since the agent deliberately has no DB
@@ -167,7 +192,7 @@ CREATE TABLE "leaderboard" (
     "journals_written" INTEGER DEFAULT 0,
     "countries_visited" INTEGER DEFAULT 0,
     "total_saves" INTEGER DEFAULT 0,
-    "rank_score" INTEGER DEFAULT ((((gems_discovered * 3) + (journals_written * 5)) + (countries_visited * 10)) + total_saves),
+    "rank_score" INTEGER GENERATED ALWAYS AS ((((gems_discovered * 3) + (journals_written * 5)) + (countries_visited * 10)) + total_saves) STORED,
     "updated_at" TIMESTAMPTZ(6) DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "leaderboard_pkey" PRIMARY KEY ("id")
@@ -207,7 +232,7 @@ CREATE TABLE "gem_guides" (
     "verified" BOOLEAN NOT NULL DEFAULT false,
     "latitude" DOUBLE PRECISION NOT NULL,
     "longitude" DOUBLE PRECISION NOT NULL,
-    "location" geography(Point, 4326) DEFAULT (st_setsrid(st_makepoint(longitude, latitude), 4326))::geography,
+    "location" geography(Point, 4326) GENERATED ALWAYS AS ((st_setsrid(st_makepoint(longitude, latitude), 4326))::geography) STORED,
     "available" BOOLEAN NOT NULL DEFAULT true,
     "created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updated_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
