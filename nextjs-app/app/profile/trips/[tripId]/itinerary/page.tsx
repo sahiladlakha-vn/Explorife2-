@@ -1,5 +1,6 @@
-import { requireTripAccess } from "@/lib/server/trips";
-import { ItineraryMapLoader } from "@/components/features/trips/ItineraryMapLoader";
+import { getTripStops, requireTripAccess } from "@/lib/server/trips";
+import { buildItinerary } from "@/lib/trips/itinerary";
+import { ItineraryView } from "@/components/features/trips/ItineraryView";
 
 /**
  * `instant = false` — see `app/profile/trips/[tripId]/page.tsx`'s comment:
@@ -15,11 +16,13 @@ export default async function ItineraryPage({
   params: Promise<{ tripId: string }>;
 }) {
   const { tripId } = await params;
-  await requireTripAccess(tripId);
+  const { trip } = await requireTripAccess(tripId);
+  const stops = await getTripStops(tripId);
+  const days = buildItinerary(trip, stops);
 
   return (
     <div className="flex flex-1 flex-col gap-4 px-4 py-6 md:px-6 lg:px-8">
-      <ItineraryMapLoader />
+      <ItineraryView days={days} currency={trip.currency} />
     </div>
   );
 }

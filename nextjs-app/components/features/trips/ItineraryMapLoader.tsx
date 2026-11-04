@@ -1,6 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
+import type { PlottedStopView } from "@/lib/trips/itinerary";
 
 /**
  * `ssr: false` is only allowed in Client Components — this wrapper exists
@@ -12,6 +13,11 @@ const ItineraryMap = dynamic(
   { ssr: false },
 );
 
-export function ItineraryMapLoader() {
-  return <ItineraryMap />;
+interface ItineraryMapLoaderProps {
+  stops: PlottedStopView[];
+  color: string;
+}
+
+export function ItineraryMapLoader({ stops, color }: ItineraryMapLoaderProps) {
+  return <ItineraryMap stops={stops} color={color} />;
 }
