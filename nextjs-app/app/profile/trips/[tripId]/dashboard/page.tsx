@@ -1,6 +1,5 @@
 import { requireTripAccess } from "@/lib/server/trips";
-
-const VND_FORMAT = new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 });
+import { formatCompactMoney } from "@/lib/format/money";
 
 /**
  * `instant = false` — see `app/profile/trips/[tripId]/page.tsx`'s comment:
@@ -18,7 +17,7 @@ export default async function DashboardPage({
   const { tripId } = await params;
   const { trip } = await requireTripAccess(tripId);
 
-  const budget = `${VND_FORMAT.format(Number(trip.budgetVnd))} ${trip.currency}`;
+  const budget = formatCompactMoney(Number(trip.budgetVnd), trip.currency);
 
   return (
     <div className="grid flex-1 grid-cols-2 gap-3 px-4 py-6 md:grid-cols-4 md:px-6 lg:px-8">
