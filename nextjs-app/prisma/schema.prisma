@@ -1,0 +1,964 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+//
+// Step 3 (Database) — hand-built from live-database SQL introspection run via
+// the Supabase MCP `execute_sql` tool (information_schema.columns,
+// table_constraints/key_column_usage/constraint_column_usage,
+// referential_constraints, pg_type/pg_enum, pg_indexes), NOT via
+// `prisma db pull` — this project has no direct Postgres password available
+// to the agent, and Supabase's Management API does not expose it. See
+// MIGRATION_PLAN.md §3 and §7 for the full rationale and data model.
+//
+// Conventions used throughout this file:
+// - Table/column names are unchanged on the live DB (`@@map`/`@map` give
+//   Prisma clean PascalCase/camelCase names without any live rename).
+// - Every relation includes `onDelete`/`onUpdate` matching the live FK
+//   constraint exactly. 100% of live FKs use `ON UPDATE NO ACTION`.
+// - Money: `BigInt` for `*_vnd` bigint columns, `Decimal @db.Decimal(p, s)`
+//   for numeric columns with declared precision/scale, plain `Decimal` for
+//   numeric columns without one. Never `Float` for money.
+// - `dbgenerated(...)` is used where the live default isn't one of Prisma's
+//   built-ins (e.g. `uuid_generate_v4()` vs `gen_random_uuid()`,
+//   `CURRENT_DATE` vs `now()`).
+// - A few dead/legacy tables confirmed to exist on the live DB are modeled
+//   with `@@ignore` so `prisma migrate diff`/`deploy` never try to drop them,
+//   but they're excluded from the generated Prisma Client (no app code may
+//   use them — see MIGRATION_PLAN.md §3): `user_saved_gems` (superseded by
+//   `saved_gems`/`gem_saves`), `trip_groups`, `trip_expenses`, `trip_members`,
+//   `trip_settlements` (superseded by the `split_*` tables). `spatial_ref_sys`
+//   (a PostGIS system table, not application data) is left unmodeled — it is
+//   owned by the `postgis` extension, not application code, and is never a
+//   migration-diff target the same way app tables are.
+//
+// - The `auth` schema (Supabase Auth's internal tables/enums — sessions,
+//   identities, MFA, SSO, OAuth, etc.) is marked `tables.external`/
+//   `enums.external` in prisma.config.ts, NOT hand-modeled here beyond the
+//   minimal `User` model below. See prisma.config.ts's comment for why.
+//
+// `directUrl` (DIRECT_URL) is the non-pooled connection used only by
+// `prisma migrate`; `url` (DATABASE_URL) is the pooled PgBouncer connection
+// used by the generated client at runtime. See MIGRATION_PLAN.md §0 and §5.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../lib/generated/prisma"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+  schemas   = ["public", "auth"]
+}
+
+// ---------------------------------------------------------------------------
+// Enums (public schema, live Postgres enum types)
+// ---------------------------------------------------------------------------
+
+enum UserRole {
+  traveler
+  guide
+  business_owner
+  content_moderator
+  regional_admin
+  super_admin
+  finance_admin
+
+  @@map("user_role")
+  @@schema("public")
+}
+
+enum GuideSpecialty {
+  hidden_gems
+  food_tour
+  city_walk
+  coffee_chat
+  night_life
+  street_art
+  nature
+  photography
+
+  @@map("guide_specialty")
+  @@schema("public")
+}
+
+// ---------------------------------------------------------------------------
+// auth schema — owned by Supabase Auth, not Prisma. Only the primary key and
+// `isAnonymous` are modeled; every other Auth-internal column (email,
+// encrypted_password, etc.) is accessed exclusively via @supabase/ssr, never
+// through Prisma. `auth.users` is listed in `prisma.config.ts`'s
+// `tables.external`, so adding `isAnonymous` here changes nothing about how
+// `prisma migrate`/`db push` treats this table — external tables are never
+// diffed/created/altered/dropped regardless of what's declared about them in
+// this file; see that config's comment.
+// ---------------------------------------------------------------------------
+
+model User {
+  id String @id @db.Uuid
+
+  /// Read-only from app code — Supabase Auth owns this column exclusively
+  /// (set on anonymous sign-in, cleared on guest→real upgrade via
+  /// `linkIdentity`). No Prisma write path may ever target it: it exists here
+  /// solely so `updateUserRole()` (`lib/server/profiles.ts`) can read a
+  /// role-change target's anonymous status via a plain join, inside the same
+  /// Serializable transaction as the rest of its guards, instead of a
+  /// separate pre-transaction Supabase Admin API round-trip. Modeled as
+  /// nullable (`Boolean?`) rather than trusting NOT NULL, matching the live
+  /// `admin_update_user_role` RPC's own defensive
+  /// `coalesce(au.is_anonymous, false)` — see `isAnonymousGuest` usage in
+  /// `updateUserRole` for the equivalent `?? false` fallback.
+  isAnonymous Boolean? @map("is_anonymous")
+
+  profile              Profile?
+  travellerProfile     TravellerProfile?
+  adminProfile         AdminProfile?
+  actionLogsAsActor    AdminActionLog[]     @relation("ActionLogActor")
+  leaderboardEntry     Leaderboard?
+  savedGemsAsUser      SavedGem[]           @relation("SavedGemsUser")
+  gemSaves             GemSave[]
+  hikeTracks           HikeTrack[]
+  stories              Story[]
+  tripsOwned           Trip[]               @relation("TripOwner")
+  tripCollaborations   TripCollaborator[]
+  tripBookingsCreated  TripBooking[]        @relation("TripBookingCreatedBy")
+  splitGroupsCreated   SplitGroup[]         @relation("SplitGroupCreatedBy")
+  splitGroupMembers    SplitGroupMember[]
+  splitExpensesPaid    SplitExpense[]       @relation("SplitExpensePaidBy")
+  splitExpensesCreated SplitExpense[]       @relation("SplitExpenseCreatedBy")
+  splitExpenseShares   SplitExpenseShare[]
+  splitSettlementsFrom     SplitSettlement[] @relation("SplitSettlementFrom")
+  splitSettlementsTo       SplitSettlement[] @relation("SplitSettlementTo")
+  splitSettlementsRecorded SplitSettlement[] @relation("SplitSettlementRecordedBy")
+  attractionsOwned     Attraction[]         @relation("AttractionOwner")
+  attractionsVerified  Attraction[]         @relation("AttractionVerifiedBy")
+  restaurantsOwned     Restaurant[]         @relation("RestaurantOwner")
+  restaurantsVerified  Restaurant[]         @relation("RestaurantVerifiedBy")
+
+  // Back-relations into the dead/legacy `@@ignore`d tables below (see their
+  // doc comments). `@ignore` on these fields is required because their
+  // target models are `@@ignore`d — otherwise Prisma Client generation would
+  // try to expose a relation to a model with no client delegate.
+  tripGroupsCreatedDead TripGroup[]      @ignore
+  tripExpensesPaidDead  TripExpense[]    @ignore
+  tripMembersDead       TripMember[]     @ignore
+  tripSettlementsDead   TripSettlement[] @ignore
+  userSavedGemsDead     UserSavedGem[]   @ignore
+
+  @@map("users")
+  @@schema("auth")
+}
+
+// ---------------------------------------------------------------------------
+// People / profiles
+// ---------------------------------------------------------------------------
+
+/// NOTE: `username` has a case-insensitive unique constraint on the live DB
+/// (`CREATE UNIQUE INDEX profiles_username_lower_idx ON profiles
+/// (lower(username))`), which Prisma's `@unique` cannot express (it only
+/// supports plain columns, not expressions). Do NOT mark `username` as
+/// `@unique` here — it would misrepresent the real constraint as
+/// case-sensitive. Any code enforcing/looking up by username must either use
+/// `$queryRaw` or lowercase the value itself before `findFirst`.
+model Profile {
+  id              String   @id @db.Uuid
+  name            String   @default("")
+  avatarUrl       String?  @map("avatar_url")
+  bio             String   @default("")
+  city            String   @default("")
+  country         String   @default("")
+  languages       String[] @default([])
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+  displayName     String?  @map("display_name")
+  privacyShowGps  Boolean  @default(false) @map("privacy_show_gps")
+  privacyBlurMaps Boolean  @default(true) @map("privacy_blur_maps")
+  username        String?
+  role            UserRole @default(traveler)
+
+  user     User      @relation(fields: [id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  gemGuide GemGuide?
+
+  // NOTE: `saved_gems.user_id` carries a second, independent FK pointing at
+  // this table (in addition to its FK to auth.users) — see `SavedGem` below.
+  savedGemsAsProfile SavedGem[] @relation("SavedGemsProfile")
+
+  @@map("profiles")
+  @@schema("public")
+}
+
+model TravellerProfile {
+  userId             String    @id @map("user_id") @db.Uuid
+  dateOfBirth        DateTime? @map("date_of_birth") @db.Date
+  gender             String?
+  nationality        String?
+  phone              String?
+  loginMethod        String?   @map("login_method")
+  preferredLanguage  String?   @map("preferred_language")
+  accountStatus      String    @default("active") @map("account_status")
+  interests          String[]  @default([])
+  travelStyle        String?   @map("travel_style")
+  budgetRange        String?   @map("budget_range")
+  homeLocation       String?   @map("home_location")
+  verificationStatus String    @default("unverified") @map("verification_status")
+  emergencyContact   String?   @map("emergency_contact")
+  createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@map("traveller_profiles")
+  @@schema("public")
+}
+
+model AdminProfile {
+  userId              String    @id @map("user_id") @db.Uuid
+  roleTitle           String    @map("role_title")
+  managedProfileTypes String[]  @default([]) @map("managed_profile_types")
+  assignedRegion      String?   @map("assigned_region")
+  accountStatus       String    @default("active") @map("account_status")
+  twoFactorEnabled    Boolean   @default(false) @map("two_factor_enabled")
+  lastLogin           DateTime? @map("last_login") @db.Timestamptz(6)
+  lastLoginIp         String?   @map("last_login_ip")
+  notes               String?
+  createdAt           DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt           DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@map("admin_profiles")
+  @@schema("public")
+}
+
+model AdminActionLog {
+  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  actorId         String?   @map("actor_id") @db.Uuid
+  actionType      String    @map("action_type")
+  targetProfileId String?   @map("target_profile_id") @db.Uuid
+  details         Json?
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  oldRole         UserRole? @map("old_role")
+  newRole         UserRole? @map("new_role")
+
+  actor User? @relation("ActionLogActor", fields: [actorId], references: [id], onDelete: SetNull, onUpdate: NoAction)
+
+  @@map("admin_action_log")
+  @@schema("public")
+}
+
+/// `rank_score` is a `GENERATED ALWAYS AS (...) STORED` column (confirmed via
+/// `pg_attrdef`/`information_schema.columns.generation_expression` — NOT "an
+/// external scheduled job" as originally assumed before that check), computed
+/// from this row's own `gems_discovered`/`journals_written`/
+/// `countries_visited`/`total_saves`. Declared the same way as
+/// `GemGuide.location`: a plain `Int?` with `@default(dbgenerated(<exact live
+/// expression>))` so `prisma migrate diff` doesn't propose dropping it. See
+/// prisma/db-notes.sql §1a.
+model Leaderboard {
+  id               String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId           String?   @unique @map("user_id") @db.Uuid
+  displayName      String?   @map("display_name")
+  avatarUrl        String?   @map("avatar_url")
+  gemsDiscovered   Int?      @default(0) @map("gems_discovered")
+  journalsWritten  Int?      @default(0) @map("journals_written")
+  countriesVisited Int?      @default(0) @map("countries_visited")
+  totalSaves       Int?      @default(0) @map("total_saves")
+  rankScore        Int?      @default(dbgenerated("((((gems_discovered * 3) + (journals_written * 5)) + (countries_visited * 10)) + total_saves)")) @map("rank_score")
+  updatedAt        DateTime? @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  user User? @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@map("leaderboard")
+  @@schema("public")
+}
+
+// ---------------------------------------------------------------------------
+// Gems / content
+// ---------------------------------------------------------------------------
+
+/// `user_id` carries TWO independent live FK constraints: one to
+/// `auth.users` (CASCADE) and one to `profiles.id` (NO ACTION). Both are
+/// modeled as separate named relations sharing the same `fields: [userId]`.
+model SavedGem {
+  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId          String?   @map("user_id") @db.Uuid
+  gemName         String    @map("gem_name")
+  gemLocation     String?   @map("gem_location")
+  category        String?
+  gemCoords       Json?     @map("gem_coords")
+  savedAt         DateTime? @default(now()) @map("saved_at") @db.Timestamptz(6)
+  bestTimeToVisit String?   @map("best_time_to_visit")
+  difficulty      String?
+  description     String?
+  photoUrl        String?   @map("photo_url")
+  gemType         String?   @default("gem") @map("gem_type")
+  tagline         String?
+  estDurationMin  Int?      @map("est_duration_min")
+  photoUrls       String[]  @default([]) @map("photo_urls")
+  photoCaptions   Json      @default("{}") @map("photo_captions")
+  goodToKnow      String[]  @default([]) @map("good_to_know")
+  source          String    @default("app")
+
+  userAsAuth    User?    @relation("SavedGemsUser", fields: [userId], references: [id], map: "saved_gems_user_id_fkey", onDelete: Cascade, onUpdate: NoAction)
+  userAsProfile Profile? @relation("SavedGemsProfile", fields: [userId], references: [id], map: "saved_gems_profiles_fkey", onDelete: NoAction, onUpdate: NoAction)
+
+  gemSaves    GemSave[]
+  attractions Attraction[]
+  restaurants Restaurant[]
+  tripStops   TripStop[]
+
+  // Back-relation into the dead/legacy `user_saved_gems` table (see
+  // `UserSavedGem` below) — `@ignore`d because that model is `@@ignore`d.
+  userSavedGemsDead UserSavedGem[] @ignore
+
+  @@index([userId], map: "saved_gems_user_id_idx")
+  @@map("saved_gems")
+  @@schema("public")
+}
+
+/// `location` is a `GENERATED ALWAYS AS (...) STORED` PostGIS column derived
+/// from latitude/longitude — not writable via Prisma Client, only queryable
+/// via `$queryRaw`. Prisma has no first-class syntax for STORED GENERATED
+/// columns, so (matching how `prisma db pull` itself introspects them) it's
+/// declared as `Unsupported(...)` with `@default(dbgenerated(<exact live
+/// expression>))` — this makes `prisma migrate diff` see it as already
+/// matching the live column instead of proposing to drop its default. See
+/// prisma/db-notes.sql §1.
+model GemGuide {
+  id            String           @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  userId        String           @unique @map("user_id") @db.Uuid
+  specialties   GuideSpecialty[] @default([])
+  rating        Decimal          @default(0.00) @db.Decimal(3, 2)
+  totalHosted   Int              @default(0) @map("total_hosted")
+  verified      Boolean          @default(false)
+  latitude      Float
+  longitude     Float
+  location      Unsupported("geography(Point, 4326)")? @default(dbgenerated("(st_setsrid(st_makepoint(longitude, latitude), 4326))::geography"))
+  available     Boolean          @default(true)
+  createdAt     DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime         @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  profile       Profile        @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  hostingOffers HostingOffer[]
+
+  // `location` (GiST) and `specialties` (GIN) both have live indexes that
+  // Prisma's `@@index` can declare directly — no need to fall back to
+  // db-notes.sql / tables.external for either. See prisma/db-notes.sql §1
+  // for why `location` itself still needs the dbgenerated workaround above.
+  @@index([location], map: "gem_guides_location_idx", type: Gist)
+  @@index([specialties], map: "gem_guides_specialties_idx", type: Gin)
+  @@map("gem_guides")
+  @@schema("public")
+}
+
+model HostingOffer {
+  id            String         @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  guideId       String         @map("guide_id") @db.Uuid
+  title         String
+  type          GuideSpecialty
+  description   String         @default("")
+  capacity      Int            @default(2)
+  durationHours Decimal        @default(2.0) @map("duration_hours") @db.Decimal(4, 1)
+  isActive      Boolean        @default(true) @map("is_active")
+  createdAt     DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime       @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  guide GemGuide @relation(fields: [guideId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([guideId], map: "hosting_offers_guide_idx")
+  @@index([type], map: "hosting_offers_type_idx")
+  @@map("hosting_offers")
+  @@schema("public")
+}
+
+model GemSave {
+  userId  String   @map("user_id") @db.Uuid
+  gemId   String   @map("gem_id") @db.Uuid
+  savedAt DateTime @default(now()) @map("saved_at") @db.Timestamptz(6)
+
+  user User     @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  gem  SavedGem @relation(fields: [gemId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@id([userId, gemId])
+  @@index([userId], map: "gem_saves_user_id_idx")
+  @@map("gem_saves")
+  @@schema("public")
+}
+
+model HikeTrack {
+  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name            String?
+  route           Json?
+  featured        Boolean?  @default(false)
+  createdAt       DateTime? @default(now()) @map("created_at") @db.Timestamptz(6)
+  userId          String    @map("user_id") @db.Uuid
+  title           String    @default("Untitled Hike")
+  activityType    String    @default("hiking") @map("activity_type")
+  distanceKm      Float?    @map("distance_km")
+  durationSeconds Int?      @map("duration_seconds")
+  elevationGainM  Float?    @map("elevation_gain_m")
+  startedAt       DateTime  @default(now()) @map("started_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([userId], map: "hike_tracks_user_id_idx")
+  @@map("hike_tracks")
+  @@schema("public")
+}
+
+/// `tags` is a nullable array with no default — Prisma requires plain
+/// `String[]` (no `?`) for scalar list fields even when the live column is
+/// nullable; Prisma represents "no array" as an empty array, not null.
+model Story {
+  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId          String?   @map("user_id") @db.Uuid
+  title           String
+  content         String?
+  excerpt         String?
+  location        String?
+  country         String?
+  coverImage      String?   @map("cover_image")
+  tags            String[]
+  status          String?   @default("pending")
+  featured        Boolean?  @default(false)
+  authorName      String?   @map("author_name")
+  authorAvatar    String?   @map("author_avatar")
+  readTime        String?   @map("read_time")
+  createdAt       DateTime? @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime? @default(now()) @map("updated_at") @db.Timestamptz(6)
+  email           String?
+  adventureType   String?   @map("adventure_type")
+  difficulty      String?
+  storyContent    String?   @map("story_content")
+  lonelinessLevel Int?      @map("loneliness_level")
+  safetyLevel     String?   @map("safety_level")
+  connectivity    String?
+  aftermath       String?
+
+  user User? @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@map("stories")
+  @@schema("public")
+}
+
+model Tour {
+  id                 String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name               String
+  photos             String[] @default([])
+  category           String?
+  priceFrom          Int      @default(0) @map("price_from")
+  currency           String   @default("VND")
+  durationLabel      String?  @map("duration_label")
+  cancellationPolicy String?  @map("cancellation_policy")
+  pickupIncluded     Boolean  @default(false) @map("pickup_included")
+  pickupDetail       String?  @map("pickup_detail")
+  guideLanguages     String[] @default([]) @map("guide_languages")
+  includes           String[] @default([])
+  itinerary          Json     @default("[]")
+  highlights         String[] @default([])
+  fullDescription    String?  @map("full_description")
+  isCurated          Boolean  @default(false) @map("is_curated")
+  createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  excludes           String[] @default([])
+  groupSizeLabel     String?  @map("group_size_label")
+
+  @@map("tours")
+  @@schema("public")
+}
+
+model CuratedCollection {
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  title           String
+  subtitle        String?
+  coverImageUrl   String?  @map("cover_image_url")
+  isDestination   Boolean  @default(true) @map("is_destination")
+  scopeValue      String   @map("scope_value")
+  rating          Decimal? @db.Decimal
+  bestTimeToVisit String?  @map("best_time_to_visit")
+  sortOrder       Int      @default(0) @map("sort_order")
+  source          String   @default("app")
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@map("curated_collections")
+  @@schema("public")
+}
+
+// ---------------------------------------------------------------------------
+// Trips
+// ---------------------------------------------------------------------------
+
+model Trip {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  ownerId       String   @map("owner_id") @db.Uuid
+  name          String
+  location      String
+  startDate     DateTime @map("start_date") @db.Date
+  endDate       DateTime @map("end_date") @db.Date
+  budgetVnd     BigInt   @default(0) @map("budget_vnd")
+  currency      String   @default("VND")
+  vibe          String?
+  templateId    String?  @map("template_id") @db.Uuid
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  locationLat   Float?   @map("location_lat")
+  locationLng   Float?   @map("location_lng")
+  description   String?
+  coverImageUrl String?  @map("cover_image_url")
+
+  owner           User                 @relation("TripOwner", fields: [ownerId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  stops           TripStop[]
+  collaborators   TripCollaborator[]
+  checklistItems  TripChecklistItem[]
+  categoryBudgets TripCategoryBudget[]
+  bookings        TripBooking[]
+  documents       TripDocument[]
+  packingItems    TripPackingItem[]
+  splitGroup      SplitGroup?
+  splitExpenses   SplitExpense[]
+
+  @@map("trips")
+  @@schema("public")
+}
+
+model TripStop {
+  id                 String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tripId             String    @map("trip_id") @db.Uuid
+  day                Int
+  slot               String
+  gemId              String?   @map("gem_id") @db.Uuid
+  customPayload      Json?     @map("custom_payload")
+  priceVnd           BigInt?   @map("price_vnd")
+  sortOrder          Int       @default(0) @map("sort_order")
+  transitMode        String?   @map("transit_mode")
+  transitLine        String?   @map("transit_line")
+  transitDurationMin Int?      @map("transit_duration_min")
+  transitCostVnd     BigInt?   @map("transit_cost_vnd")
+  startTime          DateTime? @map("start_time") @db.Time
+  notes              String?
+  bookingId          String?   @map("booking_id") @db.Uuid
+
+  trip    Trip         @relation(fields: [tripId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  gem     SavedGem?    @relation(fields: [gemId], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  booking TripBooking? @relation("StopBooking", fields: [bookingId], references: [id], onDelete: SetNull, onUpdate: NoAction)
+
+  bookingsAtStop TripBooking[] @relation("BookingStop")
+
+  @@index([bookingId], map: "trip_stops_booking_id_idx")
+  @@map("trip_stops")
+  @@schema("public")
+}
+
+model TripCollaborator {
+  tripId     String @map("trip_id") @db.Uuid
+  userId     String @map("user_id") @db.Uuid
+  permission String
+  status     String @default("confirmed")
+  id         String @unique @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  trip Trip @relation(fields: [tripId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  ownedDocuments  TripDocument[]
+  assignedPacking TripPackingItem[]
+
+  @@id([tripId, userId])
+  @@map("trip_collaborators")
+  @@schema("public")
+}
+
+model TripBlueprint {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  location  String
+  title     String
+  meta      String?
+  itemsJson Json     @map("items_json")
+  saveCount Int?     @default(0) @map("save_count")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@map("trip_blueprints")
+  @@schema("public")
+}
+
+model TripChecklistItem {
+  id                String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tripId            String   @map("trip_id") @db.Uuid
+  section           String
+  title             String
+  isChecked         Boolean  @default(false) @map("is_checked")
+  sortOrder         Int      @default(0) @map("sort_order")
+  dueDateOffsetDays Int?     @map("due_date_offset_days")
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  trip Trip @relation(fields: [tripId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([tripId], map: "trip_checklist_items_trip_id_idx")
+  @@map("trip_checklist_items")
+  @@schema("public")
+}
+
+model TripCategoryBudget {
+  id         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tripId     String    @map("trip_id") @db.Uuid
+  category   String
+  plannedVnd BigInt    @default(0) @map("planned_vnd")
+  updatedAt  DateTime? @map("updated_at") @db.Timestamptz(6)
+
+  trip Trip @relation(fields: [tripId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([tripId, category])
+  @@index([tripId], map: "trip_category_budgets_trip_id_idx")
+  @@map("trip_category_budgets")
+  @@schema("public")
+}
+
+/// `stop_id` and `trip_stops.booking_id` form a two-way nullable relationship
+/// between TripBooking and TripStop (two independent FK constraints),
+/// modeled via two distinct relation names on each side. `trip_stops
+/// .booking_id` has a plain (non-unique) index on the live DB — NOT a unique
+/// constraint — so multiple stops may reference the same booking; the
+/// `"StopBooking"` relation is one-to-many (`TripBooking.stopsUsingThisBooking
+/// TripStop[]`), not one-to-one.
+model TripBooking {
+  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tripId          String    @map("trip_id") @db.Uuid
+  stopId          String?   @map("stop_id") @db.Uuid
+  bookingType     String    @map("booking_type")
+  title           String
+  confirmationRef String?   @map("confirmation_ref")
+  provider        String?
+  startAt         DateTime? @map("start_at") @db.Timestamptz(6)
+  endAt           DateTime? @map("end_at") @db.Timestamptz(6)
+  amountVnd       BigInt?   @map("amount_vnd")
+  status          String    @default("to_book")
+  createdBy       String?   @map("created_by") @db.Uuid
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  trip          Trip      @relation(fields: [tripId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  stop          TripStop? @relation("BookingStop", fields: [stopId], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  createdByUser User?     @relation("TripBookingCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull, onUpdate: NoAction)
+
+  stopsUsingThisBooking TripStop[] @relation("StopBooking")
+
+  @@index([stopId], map: "trip_bookings_stop_id_idx")
+  @@index([tripId], map: "trip_bookings_trip_id_idx")
+  @@map("trip_bookings")
+  @@schema("public")
+}
+
+model TripDocument {
+  id                  String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tripId              String    @map("trip_id") @db.Uuid
+  ownerCollaboratorId String?   @map("owner_collaborator_id") @db.Uuid
+  type                String
+  title               String
+  fileUrl             String?   @map("file_url")
+  expiresOn           DateTime? @map("expires_on") @db.Date
+  createdAt           DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  trip              Trip              @relation(fields: [tripId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  ownerCollaborator TripCollaborator? @relation(fields: [ownerCollaboratorId], references: [id], onDelete: SetNull, onUpdate: NoAction)
+
+  @@index([tripId], map: "trip_documents_trip_id_idx")
+  @@map("trip_documents")
+  @@schema("public")
+}
+
+model TripPackingItem {
+  id                     String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tripId                 String   @map("trip_id") @db.Uuid
+  assigneeCollaboratorId String?  @map("assignee_collaborator_id") @db.Uuid
+  label                  String
+  category               String?
+  quantity               Int      @default(1)
+  isPacked               Boolean  @default(false) @map("is_packed")
+  sortOrder              Int      @default(0) @map("sort_order")
+  createdAt              DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  trip                 Trip              @relation(fields: [tripId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  assigneeCollaborator TripCollaborator? @relation(fields: [assigneeCollaboratorId], references: [id], onDelete: SetNull, onUpdate: NoAction)
+
+  @@index([tripId], map: "trip_packing_items_trip_id_idx")
+  @@map("trip_packing_items")
+  @@schema("public")
+}
+
+// ---------------------------------------------------------------------------
+// Splits (group expense-splitting)
+// ---------------------------------------------------------------------------
+
+model SplitGroup {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name        String
+  description String?
+  currency    String    @default("USD")
+  createdBy   String?   @map("created_by") @db.Uuid
+  createdAt   DateTime? @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime? @default(now()) @map("updated_at") @db.Timestamptz(6)
+  tripId      String?   @unique @map("trip_id") @db.Uuid
+
+  creator     User?               @relation("SplitGroupCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  trip        Trip?               @relation(fields: [tripId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  members     SplitGroupMember[]
+  expenses    SplitExpense[]
+  settlements SplitSettlement[]
+
+  @@map("split_groups")
+  @@schema("public")
+}
+
+model SplitGroupMember {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  groupId     String?   @map("group_id") @db.Uuid
+  userId      String?   @map("user_id") @db.Uuid
+  displayName String?   @map("display_name")
+  avatarUrl   String?   @map("avatar_url")
+  joinedAt    DateTime? @default(now()) @map("joined_at") @db.Timestamptz(6)
+
+  group SplitGroup? @relation(fields: [groupId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  user  User?       @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([groupId, userId])
+  @@index([groupId], map: "split_group_members_group_id_idx")
+  @@index([userId], map: "split_group_members_user_id_idx")
+  @@map("split_group_members")
+  @@schema("public")
+}
+
+model SplitExpense {
+  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  groupId      String?   @map("group_id") @db.Uuid
+  title        String
+  amount       Decimal   @db.Decimal(12, 2)
+  currency     String    @default("USD")
+  category     String?   @default("general")
+  paidBy       String?   @map("paid_by") @db.Uuid
+  splitType    String    @default("equal") @map("split_type")
+  notes        String?
+  expenseDate  DateTime? @default(dbgenerated("CURRENT_DATE")) @map("expense_date") @db.Date
+  createdBy    String?   @map("created_by") @db.Uuid
+  createdAt    DateTime? @default(now()) @map("created_at") @db.Timestamptz(6)
+  tripId       String?   @map("trip_id") @db.Uuid
+  receiptUrl   String?   @map("receipt_url")
+  isSettlement Boolean   @default(false) @map("is_settlement")
+  updatedAt    DateTime? @map("updated_at") @db.Timestamptz(6)
+
+  group   SplitGroup?          @relation(fields: [groupId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  payer   User?                @relation("SplitExpensePaidBy", fields: [paidBy], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  creator User?                @relation("SplitExpenseCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  trip    Trip?                @relation(fields: [tripId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  shares  SplitExpenseShare[]
+
+  @@index([groupId], map: "split_expenses_group_id_idx")
+  @@index([tripId], map: "split_expenses_trip_id_idx")
+  @@map("split_expenses")
+  @@schema("public")
+}
+
+model SplitExpenseShare {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  expenseId String?  @map("expense_id") @db.Uuid
+  userId    String?  @map("user_id") @db.Uuid
+  amount    Decimal  @db.Decimal(12, 2)
+  isSettled Boolean? @default(false) @map("is_settled")
+
+  expense SplitExpense? @relation(fields: [expenseId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  user    User?         @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([expenseId, userId])
+  @@index([expenseId], map: "split_expense_shares_expense_id_idx")
+  @@index([userId], map: "split_expense_shares_user_id_idx")
+  @@map("split_expense_shares")
+  @@schema("public")
+}
+
+model SplitSettlement {
+  id         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  groupId    String?   @map("group_id") @db.Uuid
+  fromUser   String?   @map("from_user") @db.Uuid
+  toUser     String?   @map("to_user") @db.Uuid
+  amount     Decimal   @db.Decimal(12, 2)
+  note       String?
+  settledAt  DateTime? @default(now()) @map("settled_at") @db.Timestamptz(6)
+  recordedBy String?   @map("recorded_by") @db.Uuid
+
+  group    SplitGroup? @relation(fields: [groupId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  from     User?       @relation("SplitSettlementFrom", fields: [fromUser], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  to       User?       @relation("SplitSettlementTo", fields: [toUser], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  recorder User?       @relation("SplitSettlementRecordedBy", fields: [recordedBy], references: [id], onDelete: SetNull, onUpdate: NoAction)
+
+  @@index([groupId], map: "split_settlements_group_id_idx")
+  @@map("split_settlements")
+  @@schema("public")
+}
+
+// ---------------------------------------------------------------------------
+// Local business (attractions, restaurants)
+// ---------------------------------------------------------------------------
+
+model Attraction {
+  id                  String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  ownerId             String    @map("owner_id") @db.Uuid
+  gemId               String?   @map("gem_id") @db.Uuid
+  name                String
+  category            String
+  gallery             String[]  @default([])
+  address             String
+  latitude            Float
+  longitude           Float
+  openingHours        String    @map("opening_hours")
+  entryFeeType        String    @map("entry_fee_type")
+  entryFeeAmount      Int?      @map("entry_fee_amount")
+  currency            String    @default("VND")
+  description         String
+  certificationUrls   String[]  @default([]) @map("certification_urls")
+  recommendedDuration String?   @map("recommended_duration")
+  verificationStatus  String    @default("pending") @map("verification_status")
+  verifiedBy          String?   @map("verified_by") @db.Uuid
+  verifiedAt          DateTime? @map("verified_at") @db.Timestamptz(6)
+  createdAt           DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt           DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
+  deletedAt           DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  owner    User      @relation("AttractionOwner", fields: [ownerId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  gem      SavedGem? @relation(fields: [gemId], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  verifier User?     @relation("AttractionVerifiedBy", fields: [verifiedBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@map("attractions")
+  @@schema("public")
+}
+
+model Restaurant {
+  id                 String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  ownerId            String    @map("owner_id") @db.Uuid
+  gemId              String?   @map("gem_id") @db.Uuid
+  name               String
+  category           String    @default("food")
+  cuisineType        String[]  @default([]) @map("cuisine_type")
+  priceRange         String    @map("price_range")
+  gallery            String[]  @default([])
+  address            String
+  latitude           Float
+  longitude          Float
+  phone              String
+  openingHours       String    @map("opening_hours")
+  dietaryOptions     String[]  @default([]) @map("dietary_options")
+  reservationOption  Boolean   @default(false) @map("reservation_option")
+  businessLicenseUrl String?   @map("business_license_url")
+  verificationStatus String    @default("pending") @map("verification_status")
+  verifiedBy         String?   @map("verified_by") @db.Uuid
+  verifiedAt         DateTime? @map("verified_at") @db.Timestamptz(6)
+  createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
+  deletedAt          DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  owner     User                 @relation("RestaurantOwner", fields: [ownerId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  gem       SavedGem?            @relation(fields: [gemId], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  verifier  User?                @relation("RestaurantVerifiedBy", fields: [verifiedBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  menuItems RestaurantMenuItem[]
+
+  @@map("restaurants")
+  @@schema("public")
+}
+
+model RestaurantMenuItem {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  restaurantId String   @map("restaurant_id") @db.Uuid
+  dishName     String   @map("dish_name")
+  priceAmount  Int      @map("price_amount")
+  currency     String   @default("VND")
+  photoUrl     String?  @map("photo_url")
+  displayOrder Int      @default(0) @map("display_order")
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  restaurant Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@map("restaurant_menu_items")
+  @@schema("public")
+}
+
+// ---------------------------------------------------------------------------
+// Dead/legacy tables — superseded by the `split_*` tables (trip_groups,
+// trip_expenses, trip_members, trip_settlements) and by `saved_gems`/
+// `gem_saves` (user_saved_gems). Confirmed to still exist on the live DB via
+// `migrate diff`, so they're modeled here with exact column/constraint data
+// (via Supabase MCP SQL introspection) purely so `prisma migrate
+// diff`/`deploy` never try to drop them — `@@ignore` keeps them out of the
+// generated Prisma Client entirely. No application code may read or write
+// these models. See MIGRATION_PLAN.md §3.
+// ---------------------------------------------------------------------------
+
+model TripGroup {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name        String
+  description String?
+  currency    String?   @default("USD")
+  createdBy   String?   @map("created_by") @db.Uuid
+  createdAt   DateTime? @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  creator     User?            @relation(fields: [createdBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  expenses    TripExpense[]
+  members     TripMember[]
+  settlements TripSettlement[]
+
+  @@ignore
+  @@map("trip_groups")
+  @@schema("public")
+}
+
+model TripExpense {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  groupId     String?   @map("group_id") @db.Uuid
+  amount      Decimal   @db.Decimal(10, 2)
+  description String?
+  paidBy      String?   @map("paid_by") @db.Uuid
+  createdAt   DateTime? @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  group TripGroup? @relation(fields: [groupId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  payer User?      @relation(fields: [paidBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@ignore
+  @@map("trip_expenses")
+  @@schema("public")
+}
+
+model TripMember {
+  id       String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  groupId  String?   @map("group_id") @db.Uuid
+  userId   String?   @map("user_id") @db.Uuid
+  joinedAt DateTime? @default(now()) @map("joined_at") @db.Timestamptz(6)
+
+  group TripGroup? @relation(fields: [groupId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  user  User?      @relation(fields: [userId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([groupId, userId])
+  @@ignore
+  @@map("trip_members")
+  @@schema("public")
+}
+
+model TripSettlement {
+  id        String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  groupId   String?   @map("group_id") @db.Uuid
+  settledBy String?   @map("settled_by") @db.Uuid
+  settledAt DateTime? @default(now()) @map("settled_at") @db.Timestamptz(6)
+
+  group   TripGroup? @relation(fields: [groupId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  settler User?      @relation(fields: [settledBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@ignore
+  @@map("trip_settlements")
+  @@schema("public")
+}
+
+model UserSavedGem {
+  id      String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId  String   @map("user_id") @db.Uuid
+  gemId   String   @map("gem_id") @db.Uuid
+  savedAt DateTime @default(now()) @map("saved_at") @db.Timestamptz(6)
+
+  user User     @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  gem  SavedGem @relation(fields: [gemId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([userId, gemId])
+  @@ignore
+  @@map("user_saved_gems")
+  @@schema("public")
+}

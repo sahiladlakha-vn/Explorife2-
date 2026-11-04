@@ -37,15 +37,24 @@ class AppNetworkImage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    Widget image = CachedNetworkImage(
-      imageUrl: url,
-      fit: fit,
-      width: width,
-      height: height,
-      fadeInDuration: const Duration(milliseconds: 250),
-      placeholder: (_, __) => ImageShimmer(width: width, height: height),
-      errorWidget: (_, __, ___) => ImageFallback(width: width, height: height),
-    );
+    // A blank url (every caller's `photoUrl ?? ''` for a record with no photo)
+    // is not a load failure CachedNetworkImage reliably reports through its
+    // own errorWidget — an empty imageUrl isn't a real HTTP request, so
+    // there's nothing for it to fail on. Handle it up front instead of
+    // depending on that callback, so a missing photo always renders the same
+    // fallback rather than sometimes rendering nothing.
+    Widget image = url.trim().isEmpty
+        ? ImageFallback(width: width, height: height)
+        : CachedNetworkImage(
+            imageUrl: url,
+            fit: fit,
+            width: width,
+            height: height,
+            fadeInDuration: const Duration(milliseconds: 250),
+            placeholder: (_, __) => ImageShimmer(width: width, height: height),
+            errorWidget: (_, __, ___) =>
+                ImageFallback(width: width, height: height),
+          );
 
     if (borderRadius != null) {
       image = ClipRRect(borderRadius: borderRadius!, child: image);

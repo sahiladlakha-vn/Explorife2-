@@ -1,0 +1,88 @@
+@import "tailwindcss";
+
+/*
+ * Design tokens ported from the Flutter app's lib/core/theme/app_theme.dart.
+ * Tailwind v4 is CSS-first — tokens declared in `@theme` below become real
+ * utility classes automatically (e.g. `--color-primary` -> `bg-primary`,
+ * `text-primary`, `border-primary`, etc.), so no tailwind.config.js is
+ * needed just to wire these up.
+ *
+ * Naming note: Dart's `textPrimary`/`textSecondary` are renamed to `ink`/
+ * `ink-muted` here so they don't collide with Tailwind's own `text-{color}`
+ * utility convention (`text-primary` already means "orange accent text").
+ *
+ * Only one palette exists in the source app today: app_theme.dart's
+ * `lightTheme` getter is currently just an alias of `darkTheme` (no real
+ * light-mode styling has shipped), so this port keeps a single dark palette
+ * as the default (`bg`/`surface`/`surface2`/`ink`) plus the two *named*
+ * secondary palettes the Flutter app already keeps separate from the main
+ * dark theme:
+ *   - "sheet" tokens — the discovery map's bottom-sheet palette
+ *   - "light" tokens — the warm light palette used across Profile/My Trip
+ * Both are additive utilities (`bg-sheet-surface`, `text-light-ink`, ...),
+ * not a `dark:`/`light:` variant pair, mirroring how the Dart constants are
+ * organized as separate named groups rather than a single ColorScheme.
+ */
+@theme inline {
+  --font-sans: var(--font-fredoka);
+  --font-display: var(--font-bebas-neue);
+
+  /* Core dark theme (app_theme.dart: bg, surface, surface2, textPrimary) */
+  --color-bg: #0c0c0c;
+  --color-surface: #111111;
+  --color-surface-2: #1a1a1a;
+  --color-ink: #f5f5f0;
+  /* textSecondary = textPrimary @ ~55% alpha in Dart; use text-ink/55 instead
+     of a separate token so the relationship to --color-ink stays explicit. */
+  --color-divider: color-mix(in srgb, white 8%, transparent);
+
+  /* Accent palette */
+  --color-primary: #ff6b2b;
+  --color-primary-dark: #e55a1f;
+  --color-primary-light: #ff9166;
+  --color-lime: #baff29;
+  --color-teal: #5dcaa5;
+  --color-purple: #afa9ec;
+  --color-pink: #ed93b1;
+  --color-warn: #fac775;
+  --color-danger: #e24b4a;
+
+  /* Discovery-map bottom sheet palette (app_theme.dart "sheet*" constants) */
+  --color-sheet-surface: #ffffff;
+  --color-sheet-ink: #111111;
+  --color-sheet-sub-ink: #8a8a8a;
+  --color-sheet-border: #ededed;
+  --color-sheet-chip-idle: #f2f2f2;
+  --color-sheet-chip-border: #e2e2e2;
+  --color-sheet-handle: #d9d9d9;
+
+  /* Warm light palette (Profile / My Trip — app_theme.dart "light*" constants) */
+  --color-light-surface: #ffffff;
+  --color-light-card: #f5f3ef;
+  --color-light-border: #e7e2d9;
+  --color-light-ink: #1a1a1a;
+  --color-light-mute: #8a8a8a;
+
+  /*
+   * Semantic aliases for Step 4 (app shell / My Trip layout, see
+   * MIGRATION_PLAN.md §7). New components (profile header, trip header,
+   * trip switcher, dashboard cards, etc.) should use ONLY these semantic
+   * names — never raw `neutral-*`/`gray-*` Tailwind colors — so the whole
+   * shell reads from one palette.
+   *
+   * `surface` and `danger` above already ARE the semantic names (no alias
+   * needed — use `bg-surface`/`text-danger` directly). The four below are
+   * new aliases for tokens that existed under a different, Dart-theme-
+   * derived name; `--color-text-muted` is the one genuinely new value,
+   * replacing the ad hoc `text-ink/55` opacity trick used before this pass.
+   */
+  --color-surface-raised: var(--color-surface-2);
+  --color-border: var(--color-divider);
+  --color-text: var(--color-ink);
+  --color-text-muted: color-mix(in srgb, var(--color-ink) 55%, transparent);
+  --color-accent: var(--color-primary);
+}
+
+body {
+  font-family: var(--font-sans), sans-serif;
+}

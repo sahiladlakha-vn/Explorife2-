@@ -1,45 +1,14 @@
 part of '../profile_screen.dart';
 
 // Fixed chrome above the tab body: header, avatar, stats bar, tab bar.
-
-/// Two soft accent blobs behind the header/stats block — pure decoration,
-/// giving the glass stats bar something colourful to actually reveal (a
-/// blur over a flat fill just looks like a flat fill). Cheap: a RadialGradient
-/// already fades to nothing on its own, no BackdropFilter needed here.
-class _ChromeGlow extends StatelessWidget {
-  const _ChromeGlow();
-
-  @override
-  Widget build(BuildContext context) {
-    return Positioned.fill(
-      child: Stack(
-        children: [
-          Positioned(
-            left: -50,
-            top: -70,
-            child: _blob(220, AppTheme.primary),
-          ),
-          Positioned(
-            right: -60,
-            top: -80,
-            child: _blob(210, _kGreen),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _blob(double size, Color color) => Container(
-        width: size,
-        height: size,
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          gradient: RadialGradient(
-            colors: [color.withValues(alpha: 0.28), color.withValues(alpha: 0)],
-          ),
-        ),
-      );
-}
+//
+// This block used to also render `_ChromeGlow` — two soft RadialGradient
+// blobs positioned behind the header/stats — as pure decoration. Removed:
+// it was the only gradient-blob decoration anywhere in the app (every other
+// "glass" surface uses a flat frosted blur, no colored glow) and conveyed no
+// information, per the redesign brief's "decorative, adds visual noise"
+// call. If `_kGreen` (profile_palette.dart) is now unused elsewhere, that's
+// expected — it was introduced for this blob.
 
 // ─────────────────────────────────────────
 // HEADER
@@ -50,19 +19,32 @@ class _Header extends StatelessWidget {
   final VoidCallback onSettings;
   final VoidCallback onSignOut;
   final String? memberSince;
+  // Desktop-only (item 7 of the 2026-09-18 full-viewport redesign): the
+  // stats bar rendered inline next to the name/handle instead of
+  // ProfileScreen stacking a separate full-width _StatsBar row beneath this
+  // header. Null on mobile, where that separate row is kept unchanged.
+  final Widget? stats;
   const _Header({
     required this.user,
     required this.onMenu,
     required this.onSettings,
     required this.onSignOut,
     required this.memberSince,
+    this.stats,
   });
 
-  String get _handle {
-    if (user.email != null && user.email!.contains('@')) {
-      return '@${user.email!.split('@').first}';
-    }
-    return '@${user.name.toLowerCase().replaceAll(RegExp(r"\s+"), '.')}';
+  // Real handle, straight from `profiles.username` (same field the admin
+  // Profiles/Users table's HANDLE column reads — see AdminUserRow/_UserRow
+  // in settings_tab.dart) — NOT derived from the email address. A guest
+  // session carries no username (and no real identity behind it at all),
+  // so it keeps the fixed '@guest' label; a real account with no username
+  // set yet returns null so the caller hides the handle entirely instead
+  // of falling back to something misleading like the email prefix.
+  String? get _handle {
+    if (user.isGuest) return '@guest';
+    final username = user.username;
+    if (username == null || username.isEmpty) return null;
+    return '@$username';
   }
 
   @override
@@ -104,56 +86,82 @@ class _Header extends StatelessWidget {
                               user.name,
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
-                              style: GoogleFonts.bebasNeue(
-                                fontSize: 22,
-                                color: AppTheme.lightInk,
-                                letterSpacing: 0.3,
+                              style: GoogleFonts.inter(
+                                fontSize: 20,
+                                fontWeight: FontWeight.w700,
+                                color: _kInk,
                                 height: 1,
                               ),
                             ),
                           ),
                           const SizedBox(width: 7),
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 8, vertical: 3),
-                            decoration: BoxDecoration(
-                              color: AppTheme.primary.withValues(alpha: 0.13),
-                              border: Border.all(
-                                  color: AppTheme.primary.withValues(alpha: 0.3)),
-                              borderRadius: BorderRadius.circular(999),
-                            ),
-                            child: Text('MEMBER',
-                                style: GoogleFonts.jetBrainsMono(
-                                    fontSize: 9,
-                                    fontWeight: FontWeight.w700,
-                                    letterSpacing: 0.6,
-                                    color: AppTheme.primary)),
-                          ),
+                          // Role identity pill — shows the account's real
+                          // `profiles.role` (via Role.label), not a static
+                          // "Member" string. Color comes from
+                          // Role.badgeColor (models/role.dart), the same
+                          // shared config the admin Profiles/Users table's
+                          // ROLE column uses (settings_tab.dart's
+                          // _UserRow), so the two surfaces can't disagree
+                          // on a role's color or label. Admin-tier roles
+                          // (Role.isAdminTier) get a bolder/bordered
+                          // treatment so Super Admin/Admin genuinely stand
+                          // out; Guide/Traveller stay in the original
+                          // subtle low-alpha pill. Guest keeps its own
+                          // fixed neutral-gray "Guest" label — a guest
+                          // session's `role` is just the unset default, not
+                          // a real earned tier.
+                          Builder(builder: (context) {
+                            final prominent =
+                                !user.isGuest && user.role.isAdminTier;
+                            final color =
+                                user.isGuest ? _kMute : user.role.badgeColor;
+                            return Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 8, vertical: 3),
+                              decoration: BoxDecoration(
+                                color: color.withValues(
+                                    alpha: prominent ? 0.22 : 0.16),
+                                borderRadius: BorderRadius.circular(999),
+                                border: prominent
+                                    ? Border.all(
+                                        color: color.withValues(alpha: 0.55))
+                                    : null,
+                              ),
+                              child: Text(
+                                  user.isGuest ? 'Guest' : user.role.label,
+                                  style: GoogleFonts.inter(
+                                      fontSize: 11,
+                                      fontWeight: prominent
+                                          ? FontWeight.w700
+                                          : FontWeight.w600,
+                                      color: color)),
+                            );
+                          }),
                         ],
                       ),
-                      const SizedBox(height: 3),
+                      const SizedBox(height: 4),
+                      // Handle + member-since collapsed onto a single gray
+                      // subtext line (was two stacked lines) — e.g.
+                      // "@sahil.adlakha.vn · Member since Jun 2026".
                       Text(
-                        _handle,
+                        [
+                          if (_handle != null) _handle!,
+                          if (memberSince != null) memberSince!,
+                        ].join(' · '),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: GoogleFonts.jetBrainsMono(
-                          fontSize: 12,
-                          color: AppTheme.lightInk.withValues(alpha: 0.55),
+                        style: GoogleFonts.inter(
+                          fontSize: 12.5,
+                          color: _kMute,
                         ),
                       ),
-                      if (memberSince != null) ...[
-                        const SizedBox(height: 5),
-                        Text(
-                          memberSince!,
-                          style: GoogleFonts.jetBrainsMono(
-                            fontSize: 10.5,
-                            color: AppTheme.lightInk.withValues(alpha: 0.4),
-                          ),
-                        ),
-                      ],
                     ],
                   ),
                 ),
+                if (stats != null) ...[
+                  const SizedBox(width: 12),
+                  stats!,
+                ],
               ],
             ),
           ],
@@ -185,11 +193,11 @@ class _GlassIconButton extends StatelessWidget {
             height: 38,
             alignment: Alignment.center,
             decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.5),
+              color: _kCard.withValues(alpha: 0.7),
               shape: BoxShape.circle,
-              border: Border.all(color: Colors.white.withValues(alpha: 0.7)),
+              border: Border.all(color: _kBorder),
             ),
-            child: Icon(icon, size: 18, color: iconColor ?? AppTheme.lightInk),
+            child: Icon(icon, size: 18, color: iconColor ?? _kInk),
           ),
         ),
       ),
@@ -197,6 +205,13 @@ class _GlassIconButton extends StatelessWidget {
   }
 }
 
+/// Flat, solid mint-teal rounded square — replaces the old photo/illustrated
+/// avatar (network image when [AuthUser.avatarUrl] was set, a gradient
+/// circle otherwise) per the dark-redesign reference, which shows no photo
+/// treatment at all, just a flat identity square + the online dot. This is a
+/// deliberate behavior change: a real OAuth profile photo (when present)
+/// no longer renders here — flagged since it's a visible functionality
+/// change, not just a color swap.
 class _Avatar extends StatelessWidget {
   final AuthUser user;
   const _Avatar({required this.user});
@@ -204,60 +219,29 @@ class _Avatar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      width: 58,
-      height: 58,
+      width: 52,
+      height: 52,
       child: Stack(
         clipBehavior: Clip.none,
         children: [
           Container(
-            width: 58,
-            height: 58,
+            width: 52,
+            height: 52,
             decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              border: Border.all(color: AppTheme.lightSurface, width: 2.5),
-              boxShadow: [
-                BoxShadow(
-                  color: AppTheme.primary.withValues(alpha: 0.35),
-                  blurRadius: 14,
-                  offset: const Offset(0, 6),
-                ),
-              ],
+              color: _kTeal,
+              borderRadius: BorderRadius.circular(14),
             ),
-            clipBehavior: Clip.antiAlias,
-            child: user.avatarUrl != null
-                ? Image.network(user.avatarUrl!, fit: BoxFit.cover)
-                : Container(
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                        colors: [
-                          AppTheme.primary,
-                          Color.lerp(AppTheme.primary, Colors.white, 0.35)!,
-                        ],
-                      ),
-                    ),
-                    child: Center(
-                      child: Text(
-                        user.name.isNotEmpty
-                            ? user.name[0].toUpperCase()
-                            : 'E',
-                        style: GoogleFonts.bebasNeue(
-                            fontSize: 24, color: Colors.white),
-                      ),
-                    ),
-                  ),
           ),
           Positioned(
-            right: 1,
-            bottom: 1,
+            right: -1,
+            bottom: -1,
             child: Container(
               width: 13,
               height: 13,
               decoration: BoxDecoration(
                 color: const Color(0xFF2ECC71),
                 shape: BoxShape.circle,
-                border: Border.all(color: AppTheme.lightSurface, width: 2.5),
+                border: Border.all(color: _kPage, width: 2.5),
               ),
             ),
           ),
@@ -273,70 +257,120 @@ class _Avatar extends StatelessWidget {
 class _StatsBar extends StatelessWidget {
   /// [gems] is the count of SAVED gems (bookmarks), not dropped pins. [alerts]
   /// is the active trip's derived-alert count; null means there is no active
-  /// trip, which renders as an em-dash rather than a misleading "0".
+  /// trip at all — a genuinely different state from "zero alerts on an active
+  /// trip" (which already renders a plain "0" below). Both null and zero are
+  /// rendered as "0" here per the redesign's call for one consistent
+  /// empty-state digit across every cell — the underlying null-vs-zero
+  /// distinction is real, but a bare em-dash next to three all-numeric
+  /// siblings read as broken formatting rather than a meaningful signal, and
+  /// nothing else on this bar explains what a dash would mean.
   final int gems, trips;
   final int? alerts;
   final double spent;
   final bool loading;
+  // False (default): the original full-width row, one Expanded cell each,
+  // stacked below the header — unchanged mobile shape. True: shrink-wrapped
+  // horizontal chips (icon + value, no label, no vertical padding) sized to
+  // sit inline next to the name/handle in _Header's row on desktop (item 7
+  // of the 2026-09-18 redesign) — that row has nowhere near this bar's
+  // native ~600px width to give each cell, so the compact form drops the
+  // label text and stacked layout rather than squeezing the full cell into
+  // a fraction of its size.
+  final bool compact;
   const _StatsBar({
     required this.gems,
     required this.trips,
     required this.alerts,
     required this.spent,
     required this.loading,
+    this.compact = false,
   });
 
   @override
   Widget build(BuildContext context) {
-    final hasAlerts = alerts != null && alerts! > 0;
+    final alertCount = alerts ?? 0;
+    final hasAlerts = alertCount > 0;
+    if (compact) {
+      return Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _compactCell(Icons.card_travel_outlined, '$trips', _kInk),
+          _compactCell(Icons.bookmark_border, '$gems', _kInk),
+          _compactCell(Icons.receipt_long_outlined,
+              loading ? '··' : '\$${spent.toStringAsFixed(0)}', _kInk),
+          _compactCell(Icons.notifications_none_rounded, '$alertCount',
+              hasAlerts ? _kWarn : _kInk, last: true),
+        ],
+      );
+    }
+    // No glass card / border box anymore — the row now blends straight into
+    // the dark page background, separated only by the thin dividers between
+    // cells (item 6 of the dark-redesign pass). More vertical whitespace
+    // than the old boxed version, since it no longer needs to visually
+    // "contain" the row.
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(22),
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 22, sigmaY: 22),
-          child: Container(
-            decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.4),
-              borderRadius: BorderRadius.circular(22),
-              border: Border.all(color: Colors.white.withValues(alpha: 0.65)),
-            ),
-            child: Row(
-              children: [
-                _cell('$trips', 'TRIPS', _kInk),
-                _divider(),
-                _cell('$gems', 'SAVED', AppTheme.primary),
-                _divider(),
-                _cell(loading ? '··' : '\$${spent.toStringAsFixed(0)}',
-                    'SPLIT SPEND', _kTeal),
-                _divider(),
-                _cell(alerts == null ? '–' : '$alerts', 'ALERTS',
-                    hasAlerts ? _kWarn : _kInk),
-              ],
-            ),
-          ),
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 20),
+      child: Row(
+        children: [
+          _cell(Icons.card_travel_outlined, '$trips', 'Trips', _kInk),
+          _divider(),
+          _cell(Icons.bookmark_border, '$gems', 'Saved', _kInk),
+          _divider(),
+          _cell(
+              Icons.receipt_long_outlined,
+              loading ? '··' : '\$${spent.toStringAsFixed(0)}',
+              'Split spend',
+              _kInk),
+          _divider(),
+          _cell(Icons.notifications_none_rounded, '$alertCount', 'Alerts',
+              hasAlerts ? _kWarn : _kInk),
+        ],
+      ),
+    );
+  }
+
+  Widget _divider() => Container(width: 1, height: 34, color: _kBorder);
+
+  // Every cell shares the same neutral ink color/weight regardless of which
+  // stat it is — color is reserved for attention states (currently just
+  // ALERTS turning _kWarn once count > 0), not for decorating each stat with
+  // a different brand hue the way the old cells did.
+  Widget _cell(IconData icon, String value, String label, Color color) {
+    return Expanded(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 10),
+        child: Column(
+          children: [
+            Icon(icon, size: 16, color: color == _kInk ? _kMute : color),
+            const SizedBox(height: 8),
+            Text(label,
+                style: GoogleFonts.inter(fontSize: 11.5, color: _kMute)),
+            const SizedBox(height: 6),
+            Text(value,
+                style: GoogleFonts.inter(
+                    fontSize: 22,
+                    fontWeight: FontWeight.w700,
+                    color: color,
+                    height: 1)),
+          ],
         ),
       ),
     );
   }
 
-  Widget _divider() => Container(width: 1, height: 40, color: _kBorder.withValues(alpha: 0.7));
-
-  Widget _cell(String value, String label, Color color) {
-    return Expanded(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 16),
-        child: Column(
-          children: [
-            Text(value,
-                style: GoogleFonts.bebasNeue(
-                    fontSize: 30, color: color, height: 1)),
-            const SizedBox(height: 2),
-            Text(label,
-                style: GoogleFonts.jetBrainsMono(
-                    fontSize: 10, color: _kMute, letterSpacing: 1)),
-          ],
-        ),
+  Widget _compactCell(IconData icon, String value, Color color,
+      {bool last = false}) {
+    return Padding(
+      padding: EdgeInsets.only(right: last ? 0 : 16),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 15, color: color == _kInk ? _kMute : color),
+          const SizedBox(width: 5),
+          Text(value,
+              style: GoogleFonts.inter(
+                  fontSize: 14, fontWeight: FontWeight.w700, color: color)),
+        ],
       ),
     );
   }
@@ -345,9 +379,12 @@ class _StatsBar extends StatelessWidget {
 // ─────────────────────────────────────────
 // TAB BAR
 // ─────────────────────────────────────────
-/// Floating segmented control — one pill background, a single sliding
-/// highlight behind whichever tab is active (AnimatedPositioned, driven by
-/// [active]'s index), rather than N independently-coloured chips.
+/// Plain text tab row sitting directly on the dark page background — no
+/// wrapping capsule anymore (was a tan/beige `_kStripe` pill). The active
+/// tab gets its own white pill with black text; inactive tabs are bare gray
+/// text. Individually-animated per-tab pills (AnimatedContainer) rather
+/// than one sliding highlight across a shared track, since there's no
+/// shared track to slide within anymore.
 class _TabBar extends StatelessWidget {
   final List<String> tabs;
   final int active;
@@ -359,76 +396,40 @@ class _TabBar extends StatelessWidget {
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
-      child: Container(
-        padding: const EdgeInsets.all(4),
-        decoration: BoxDecoration(
-          color: _kStripe,
-          borderRadius: BorderRadius.circular(999),
-          border: Border.all(color: _kBorder),
-        ),
-        child: LayoutBuilder(
-          builder: (context, constraints) {
-            final tabW = constraints.maxWidth / tabs.length;
-            return Stack(
-              children: [
-                AnimatedPositioned(
-                  duration: const Duration(milliseconds: 280),
-                  curve: Curves.easeOutCubic,
-                  left: tabW * active,
-                  top: 0,
-                  bottom: 0,
-                  width: tabW,
-                  child: Container(
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(999),
-                      gradient: LinearGradient(
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                        colors: [
-                          AppTheme.primary,
-                          Color.lerp(AppTheme.primary, Colors.white, 0.18)!,
-                        ],
-                      ),
-                      boxShadow: [
-                        BoxShadow(
-                          color: AppTheme.primary.withValues(alpha: 0.4),
-                          blurRadius: 14,
-                          offset: const Offset(0, 5),
-                        ),
-                      ],
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Row(
+          children: tabs.asMap().entries.map((e) {
+            final i = e.key;
+            final isActive = i == active;
+            return Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: GestureDetector(
+                onTap: () => onSelect(i),
+                behavior: HitTestBehavior.opaque,
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 200),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
+                  decoration: BoxDecoration(
+                    color: isActive ? Colors.white : Colors.transparent,
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  child: Text(
+                    e.value,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: GoogleFonts.inter(
+                      fontSize: 13,
+                      fontWeight:
+                          isActive ? FontWeight.w600 : FontWeight.w500,
+                      color: isActive ? Colors.black : _kMute,
                     ),
                   ),
                 ),
-                Row(
-                  children: tabs.asMap().entries.map((e) {
-                    final i = e.key;
-                    final isActive = i == active;
-                    return Expanded(
-                      child: GestureDetector(
-                        onTap: () => onSelect(i),
-                        behavior: HitTestBehavior.opaque,
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 9),
-                          child: Text(
-                            e.value,
-                            textAlign: TextAlign.center,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: GoogleFonts.fredoka(
-                              fontSize: 12.5,
-                              fontWeight:
-                                  isActive ? FontWeight.w700 : FontWeight.w500,
-                              color: isActive ? Colors.white : _kMute,
-                            ),
-                          ),
-                        ),
-                      ),
-                    );
-                  }).toList(),
-                ),
-              ],
+              ),
             );
-          },
+          }).toList(),
         ),
       ),
     );

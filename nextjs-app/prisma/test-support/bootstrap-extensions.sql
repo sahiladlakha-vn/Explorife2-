@@ -1,0 +1,26 @@
+-- Enables the Postgres extensions `prisma/migrations/0_init/migration.sql`
+-- depends on, for the CI integration-test database only (see
+-- .github/workflows/nextjs-ci.yml's `db-trigger-integration` job). Must run
+-- BEFORE `prisma migrate deploy` — the migration's `CREATE TABLE` statements
+-- reference both of these directly:
+--
+--   - `uuid-ossp`, for `uuid_generate_v4()` (used as the `@id @default(...)`
+--     on a couple of models — see prisma/schema.prisma's `dbgenerated(...)`
+--     comment at the top explaining why a few ids use this instead of the
+--     built-in `gen_random_uuid()`). Bundled with the standard Postgres
+--     Docker image's contrib modules; just needs `CREATE EXTENSION`.
+--   - `postgis`, for the `geography(Point, 4326)` column type (see
+--     `GemGuide.location` in prisma/schema.prisma). NOT bundled with the
+--     plain `postgres` Docker image at all — this is why
+--     `db-trigger-integration`'s service image is `postgis/postgis:*`
+--     (built FROM the official postgres image, with the PostGIS extension's
+--     shared libraries already installed) rather than plain `postgres`.
+--
+-- Never needed against the live Supabase project — both extensions are
+-- already enabled there (Supabase enables `postgis` by default on every
+-- project, and `uuid-ossp` was enabled at some point in this project's
+-- history; `0_init`'s own header comment is clear that it's never applied
+-- via `migrate deploy` against the live database anyway, only
+-- `migrate resolve --applied`).
+create extension if not exists "uuid-ossp";
+create extension if not exists postgis;
