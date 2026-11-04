@@ -14,16 +14,14 @@
  * Only one palette exists in the source app today: app_theme.dart's
  * `lightTheme` getter is currently just an alias of `darkTheme` (no real
  * light-mode styling has shipped), so this port keeps a single dark palette
- * as the default (`bg`/`surface`/`surface2`/`ink`) plus one *named*
- * secondary palette the Flutter app keeps separate from the main dark
- * theme: "sheet" tokens, the discovery map's bottom-sheet palette (an
- * additive utility group — `bg-sheet-surface`, `text-sheet-ink`, ... — not a
- * `dark:`/`light:` variant pair). Profile/My Trip is NOT a separate warm
- * light palette — `lib/screens/profile/profile_palette.dart`'s 2026-09-13
- * "dark, minimal, editorial" redesign moved it onto the same dark palette as
- * the rest of the app, so new Profile/My Trip components should use the
- * semantic aliases below (`bg-surface`, `bg-surface-raised`, `text-text`,
- * `text-text-muted`, `border-border`), same as the trip header/switcher.
+ * as the default (`bg`/`surface`/`surface2`/`ink`) plus the two *named*
+ * secondary palettes the Flutter app already keeps separate from the main
+ * dark theme:
+ *   - "sheet" tokens — the discovery map's bottom-sheet palette
+ *   - "light" tokens — the warm light palette used across Profile/My Trip
+ * Both are additive utilities (`bg-sheet-surface`, `text-light-ink`, ...),
+ * not a `dark:`/`light:` variant pair, mirroring how the Dart constants are
+ * organized as separate named groups rather than a single ColorScheme.
  */
 @theme inline {
   --font-sans: var(--font-fredoka);
@@ -48,8 +46,6 @@
   --color-pink: #ed93b1;
   --color-warn: #fac775;
   --color-danger: #e24b4a;
-  /* Itinerary "BOOKED" chip (profile_palette.dart's `_kGreen`) — no app_theme.dart equivalent yet. */
-  --color-success: #3c9a5f;
 
   /* Discovery-map bottom sheet palette (app_theme.dart "sheet*" constants) */
   --color-sheet-surface: #ffffff;
@@ -59,6 +55,13 @@
   --color-sheet-chip-idle: #f2f2f2;
   --color-sheet-chip-border: #e2e2e2;
   --color-sheet-handle: #d9d9d9;
+
+  /* Warm light palette (Profile / My Trip — app_theme.dart "light*" constants) */
+  --color-light-surface: #ffffff;
+  --color-light-card: #f5f3ef;
+  --color-light-border: #e7e2d9;
+  --color-light-ink: #1a1a1a;
+  --color-light-mute: #8a8a8a;
 
   /*
    * Semantic aliases for Step 4 (app shell / My Trip layout, see

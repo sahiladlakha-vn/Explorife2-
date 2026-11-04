@@ -1,5 +1,4 @@
 const MONTH = new Intl.DateTimeFormat("en-US", { month: "short", timeZone: "UTC" });
-const WEEKDAY = new Intl.DateTimeFormat("en-US", { weekday: "short", timeZone: "UTC" });
 
 /**
  * "Aug 12 – 22 · 10 nights" (same month), "Aug 28 – Sep 2 · 5 nights" (cross
@@ -29,14 +28,4 @@ export function formatTripDateRange(start: Date, end: Date): string {
   }
 
   return `${range} · ${nightsLabel}`;
-}
-
-/** Day-chip contents for the itinerary day rail — "MON" / 12, both read in UTC per this module's date contract above. */
-export function formatDayChip(date: Date): { weekday: string; dayOfMonth: number } {
-  return { weekday: WEEKDAY.format(date).toUpperCase(), dayOfMonth: date.getUTCDate() };
-}
-
-/** "Day 1 — Nov 3", ported from `trips_tab.dart`'s `_DayPanel` header + `_dateLabel`. */
-export function formatDayHeading(day: number, date: Date): string {
-  return `Day ${day} — ${MONTH.format(date)} ${date.getUTCDate()}`;
 }

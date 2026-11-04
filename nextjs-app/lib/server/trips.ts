@@ -4,7 +4,6 @@ import { notFound } from "next/navigation";
 import { prisma } from "@/lib/db";
 import { requireUser } from "@/lib/auth/permissions";
 import type { Trip } from "@/lib/generated/prisma/client";
-import type { ItineraryStopInput } from "@/lib/trips/itinerary";
 
 /**
  * Step 4 trip-read surface (MIGRATION_PLAN.md §7 Step 4 / §3a). Prisma
@@ -76,51 +75,6 @@ export const listTripsForUser = cache(async function listTripsForUser(
     orderBy: { startDate: "asc" },
   });
 });
-
-/**
- * All of a trip's stops, adapted to `ItineraryStopInput` — `bigint` money
- * fields converted to `number` (unsafe to pass across the RSC boundary as
- * `bigint`), and the booking relation flattened to `isBooked`/
- * `bookingAmountVnd`. The "booking for a stop" relationship the app actually
- * uses is `TripBooking.stopId == TripStop.id` (confirmed in Flutter's
- * `trip_insights.dart`), i.e. Prisma's `bookingsAtStop` relation — *not*
- * `TripStop.bookingId`/`booking`, a separate, currently-unused FK on the
- * same two tables. Caller must have already called `requireTripAccess`.
- */
-export async function getTripStops(tripId: string): Promise<ItineraryStopInput[]> {
-  const stops = await prisma.tripStop.findMany({
-    where: { tripId },
-    include: {
-      gem: {
-        select: { gemName: true, category: true, gemCoords: true, photoUrl: true, estDurationMin: true },
-      },
-      bookingsAtStop: { select: { amountVnd: true }, take: 1 },
-    },
-    orderBy: [{ day: "asc" }, { sortOrder: "asc" }],
-  });
-
-  return stops.map((stop) => {
-    const booking = stop.bookingsAtStop[0];
-    return {
-      id: stop.id,
-      day: stop.day,
-      slot: stop.slot,
-      gemId: stop.gemId,
-      customPayload: stop.customPayload,
-      priceVnd: stop.priceVnd === null ? null : Number(stop.priceVnd),
-      sortOrder: stop.sortOrder,
-      transitMode: stop.transitMode,
-      transitLine: stop.transitLine,
-      transitDurationMin: stop.transitDurationMin,
-      transitCostVnd: stop.transitCostVnd === null ? null : Number(stop.transitCostVnd),
-      startTime: stop.startTime,
-      notes: stop.notes,
-      gem: stop.gem,
-      isBooked: booking !== undefined,
-      bookingAmountVnd: booking?.amountVnd == null ? null : Number(booking.amountVnd),
-    };
-  });
-}
 
 function todayUtcMidnight(): Date {
   const now = new Date();

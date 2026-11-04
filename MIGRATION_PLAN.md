@@ -131,7 +131,7 @@ belong in a URL-first Next.js app.
 |---|---|
 | `/profile` or `/profile?tab=0` | `/profile/overview` |
 | `/profile?tab=1` (My Trip, no deep link) | `/profile/trips/[tripId]/overview` — `tripId` resolved server-side to the user's active trip when not explicitly known |
-| `ProfileDeepLink(tab: 1, tripId, segment: TripDetailSegment)` | `/profile/trips/[tripId]/trip`, `/profile/trips/[tripId]/itinerary`, `/profile/trips/[tripId]/dashboard`, `/profile/trips/[tripId]/bookings` |
+| `ProfileDeepLink(tab: 1, tripId, segment: 'itinerary'\|'overview'\|'checklist'\|'budget')` | `/profile/trips/[tripId]/itinerary`, `/profile/trips/[tripId]/overview`, `/profile/trips/[tripId]/checklist`, `/profile/trips/[tripId]/budget` |
 | `/profile?tab=2` | `/profile/saved` |
 | `/profile?tab=3` | `/profile/stories` |
 | `/profile?tab=4` | `/profile/badges` |
@@ -143,14 +143,6 @@ bookmarks, the edge function's invite-redirect base). The top-level
 `/trips/:id` / `/trips/:id/summary` trip-dashboard routes are a separate,
 already-URL-addressable feature (`TripSummaryScreen`) and are **not** part of
 this change — only the tab-index-driven Profile shell is being replaced.
-
-**Correction, 2026-11-04**: the segment row above previously read
-`'itinerary'|'overview'|'checklist'|'budget'`, mapped to `.../overview`,
-`.../checklist`, `.../budget`. That was wrong even against Flutter's own
-source — `trips_tab.dart`'s actual `TripDetailSegment` enum is `trip |
-itinerary | dashboard | bookings` — and has been corrected above. The
-Next.js trip-tab routes built so far (`trip`, `itinerary`, `dashboard`,
-`bookings`) already matched Flutter; only this table was stale.
 
 ---
 
@@ -918,130 +910,12 @@ These apply from Step 3 onward and are also documented in `README.md`:
   production project ref (`yshgjzmyapdepkapodno`). There is no override/
   bypass env var — this is intentional so it can't be run against
   production by muscle memory.
-- **Step 4 — Shared layout (in progress)**: app shell, profile header
-  (including the new nested `/profile/*` routes per §1's routing-change
-  subsection), trip header + switcher, per the original instructions' "Step
-  4" scope. Status below, cross-referenced against §1's 47-route inventory.
+- **Step 4 — Shared layout**: app shell, profile header (including the new
+  nested `/profile/*` routes per §1's routing-change subsection), trip header
+  + switcher, per the original instructions' "Step 4" scope.
 
 Each step stops for review before proceeding to the next, per the user's
 explicit instruction after Step 1's approval ("Stop again after Step 2 for
 review").
 
-### Feature-parity checklist (as of 2026-11-04)
-
-**Auth — done.** `/auth` (sign-in page, Google OAuth button, `?redirect=`
-support), `/auth/callback` (a route handler, not a page — `route.ts` +
-`route.test.ts`), `/auth/sign-out`.
-
-**Profile shell — done.** `/profile` redirects to `/profile/overview`,
-including the legacy `?tab=N` compatibility redirects from §1's approved
-routing-change table. `ProfileLayout`/`TripLayout` shared shells, the trip
-header, `TripSwitcher` (responsive popover/bottom-sheet, own coverage in
-`trip-switcher.spec.ts`), and `TripSubTabs` are real and working.
-
-**Profile tabs — stubs only:** `overview`, `saved`, `stories`, `badges`,
-`settings` each render a placeholder ("...tab — content lands in a later
-step.") and nothing more.
-
-**Trip tabs** (`/profile/trips/[tripId]/*`, segments `trip | itinerary |
-dashboard | bookings` — see the §1 correction above):
-- `trip` — partial. Name, location, date range, description; no edit flow.
-- `itinerary` — **done this session.** Real data via
-  `getTripStops`/`buildItinerary` (`lib/server/trips.ts`,
-  `lib/trips/itinerary.ts`); day strip, slot sections, stop rows with
-  cost/booked-status chips, and an interactive Mapbox GL map
-  (`ItineraryMap.tsx`/`ItineraryMapLoader.tsx`) laid out beside the day panel
-  at ≥768px and stacked below it under that. Dev-preview fixtures
-  (`SAPA_ITINERARY_STOPS`, 9 stops across 3 populated days + 5 deliberately
-  empty ones) and Playwright coverage (`e2e/trip-itinerary.spec.ts`) added;
-  full lint/typecheck/unit/e2e suite passes with no regressions, including
-  the pre-existing `trip-header-layout.spec.ts`.
-- `dashboard` — partial. Budget card is real; Spent/Remaining/Per-Person are
-  `—` placeholders.
-- `bookings` — stub only.
-
-**Main bottom-nav shell, overlays/modals, and business listings — not
-started.** No files exist yet for `/explore`, `/explore-ideas`, `/listings`
-(or `/listings/:id`), `/gems/:id`, `/tours` (or `/tours/:id`), top-level
-`/stories` (or `/stories/:id`), `/destinations/explore`, `/drop-gem`,
-`/submit-story`, `/trips`, `/trips/new`, `/trips/:id/builder`, `/hikes`,
-`/log-hike`, `/splits` (or `/splits/:id`), or any `/attractions`/
-`/restaurants` route. `app/page.tsx` exists but is, by its own doc comment,
-deliberately **not** a full `HomeScreen` port yet — no hero/search/gems-rail/
-Explore-Ideas-rail.
-
-### Itinerary tab — porting notes and deviations (this session)
-
-Ported from `trips_tab.dart`'s `_ItinerarySegmentState` with real Prisma data
-and an interactive Mapbox map in place of Flutter's native map widget.
-Deliberate deviations and known gaps, flagged per the "fix while porting"
-convention:
-
-- **Found during this update's screenshot verification, fixed**: no `.env`,
-  `.env.local`, or `.env.example` in this repo has ever held a real
-  `NEXT_PUBLIC_MAPBOX_TOKEN` — all three hold placeholder text (`.env.local`'s
-  is a bare 6-character `"pk...`, not a redacted real token). Pre-existing,
-  not caused by this session, and invisible to `trip-itinerary.spec.ts`
-  (its layout assertions only check the map container's bounding box, not
-  tile/marker content) — only surfaced by visually inspecting the rendered
-  page for this update's screenshots, where the map area painted as an empty
-  box with just the zoom control and Mapbox wordmark, no basemap or pins.
-  `ItineraryMap.tsx`'s existing `!MAPBOX_TOKEN` fallback didn't catch this
-  because the placeholder value is non-empty, so it still attempted a real
-  `mapboxgl.Map`, which fails its style fetch asynchronously. Fixed by
-  listening for the map's `error` event and falling back to the same
-  "Map unavailable" message in that case too (and giving that fallback the
-  `itinerary-map` test id it was missing, so layout assertions still resolve
-  it either way). **Update, 2026-11-04**: a real token has since been added to
-  `.env.local` (user-supplied, git-ignored) — local dev now renders live
-  tiles, the route line, and numbered pins/arrows; re-verified via
-  `trip-itinerary.spec.ts`/`trip-header-layout.spec.ts` (13/13 passing).
-- **Iconography**: kept this Next.js app's existing emoji per-category icon
-  convention instead of porting Flutter's monochrome icon set — a
-  stack-appropriate substitution, not a missed detail.
-- **Map feature scope** narrowed to pins, route line, direction arrows,
-  `fitBounds`, and a simple popup. Flutter's 3D terrain/lighting/
-  gesture-shield handling was intentionally left out — the gesture-shield in
-  particular solves a native-scrollable-list-vs-map-pan conflict that doesn't
-  exist in the same way on web.
-- Plain `<img>` for gem photos instead of `next/image`, consistent with this
-  codebase's current state elsewhere (`next/image` isn't yet used for
-  user-content photos anywhere) — worth revisiting app-wide, not per
-  component, if that changes.
-- Flutter's `_StayBanner` and `_BookingChipRow` were left out as out of scope
-  for this pass; neither blocked the UI or the Playwright coverage, and both
-  read from booking data this tab doesn't otherwise need yet.
-- `lib/trips/itinerary.ts` (day/slot grouping, color assignment, coordinate
-  resolution) has no dedicated unit test yet despite being a pure,
-  trivially-testable module — only exercised indirectly via the Playwright
-  fixture spec. Worth a `vitest` file next time this module changes.
-
-### Proposed build order
-
-1. **Finish the trip tabs** — `dashboard` and `trip` to full parity, then
-   build out `bookings`. Highest leverage next step: the shared shell,
-   data-fetching pattern, and money/date-formatting utilities from this
-   session are already in place and directly reusable, so each tab is
-   cheaper to finish now than later.
-2. **Profile tabs** (`overview`, `saved`, `stories`, `badges`, `settings`) —
-   hang off the same `ProfileLayout` shell that's already done. `saved` is
-   low-effort: Flutter's own tab says "coming soon" since persistence isn't
-   implemented there either.
-3. **Main bottom-nav shell** (`/home` real port, `/explore`,
-   `/explore-ideas`, `/listings`) — the largest remaining scope item.
-4. **Overlays/modals and business listings** — last, since several
-   (`/drop-gem`, `/submit-story`, `/attractions`/`/restaurants` CRUD +
-   moderation) are real-account/role-gated write flows with no read-only
-   equivalent to ship first, and none are referenced from anything built so
-   far.
-
-No pushback on the sequencing — it follows directly from what's already
-built and shared. One flag for whenever Step 4 resumes: item 3's `/explore`
-(Mapbox-based destination browser) and `/listings` (Tilequery-backed POI
-detail) are substantial standalone features in their own right, not
-incremental stub fills, so they likely warrant their own review checkpoint
-rather than being bundled with smaller items.
-
-**Step 4 is in progress. The itinerary tab (this session) is complete,
-verified, and pending your review; the rest of this checklist and the build
-order above are proposals for what comes next, not yet started.**
+**This plan is awaiting your explicit approval before any of the above starts.**
