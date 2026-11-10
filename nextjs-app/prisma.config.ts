@@ -10,17 +10,15 @@
 // order makes `.env.local` win). `.env.local` is the gitignored, real-
 // secrets file (see `.gitignore`'s `.env*` entry); `.env` only needs to
 // exist at all for environments (like a fresh sandbox/CI checkout) that
-// don't have one yet — `prisma generate`'s datasource check just needs
-// DATABASE_URL to be *set*, not necessarily a working connection string.
-// End result: one `.env.local` with real values makes both `npm run dev`
-// and standalone `npx prisma <command>` work, no manual
+// don't have one yet. End result: one `.env.local` with real values makes
+// both `npm run dev` and standalone `npx prisma <command>` work, no manual
 // `export DATABASE_URL=...` needed. See README.md's "Environment variables"
 // section for what belongs in DATABASE_URL vs DIRECT_URL.
 import { config as loadEnv } from "dotenv";
 loadEnv({ path: ".env" });
 loadEnv({ path: ".env.local" });
 
-import { defineConfig, env } from "prisma/config";
+import { defineConfig } from "prisma/config";
 
 export default defineConfig({
   schema: "prisma/schema.prisma",
@@ -88,17 +86,34 @@ export default defineConfig({
   },
   engine: "classic",
   datasource: {
-    // Transaction pooler (PgBouncer, port 6543, `?pgbouncer=true`) — used by
-    // `prisma generate`'s runtime client config check. Actual runtime
-    // queries go through the generated client reading DATABASE_URL directly
-    // (see prisma/schema.prisma).
-    url: env("DATABASE_URL"),
+    // Read directly rather than through `prisma/config`'s `env()` helper,
+    // which throws `PrismaConfigEnvError` immediately on an unset variable —
+    // this file is evaluated (and would therefore throw) on every `prisma`
+    // CLI invocation, including plain `prisma generate`, which doesn't need
+    // a working connection string at all, just the generated client code.
+    // That matters because Vercel Preview deployments intentionally have no
+    // DATABASE_URL configured (see vercel.json/.env.example), and
+    // `prisma generate` still has to succeed there as part of `postinstall`.
+    // Commands that actually need a connection (`migrate`, `db pull`,
+    // `studio`) will still fail, just with Prisma's own clear
+    // "Environment variable not found" error at the point they try to
+    // connect, rather than this file silently producing an unusable client.
+    //
+    // `defineConfig`'s types require `string`, not `string | undefined` —
+    // the `?? ""` is only to satisfy that; an empty string behaves
+    // identically to undefined for every command that doesn't attempt an
+    // actual connection (`generate`), and commands that do (`migrate`,
+    // `db pull`, `studio`) fail with Prisma's own clear invalid-URL error
+    // either way.
+    //
+    // Transaction pooler (PgBouncer, port 6543, `?pgbouncer=true`).
+    url: process.env.DATABASE_URL ?? "",
     // Session pooler (port 5432, no `pgbouncer=true`) — required by
     // `prisma migrate`/`prisma db pull`, which can't run through a
     // transaction pooler. NOT Supabase's literal "direct connection" host
     // (`db.[project-ref].supabase.co`) — that one is IPv6-only on the free
     // plan and unreachable from most networks. See README.md's
     // "Environment variables" section / MIGRATION_PLAN.md §0 / §5.
-    directUrl: env("DIRECT_URL"),
+    directUrl: process.env.DIRECT_URL ?? "",
   },
 });
