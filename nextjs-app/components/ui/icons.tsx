@@ -86,3 +86,143 @@ export function GitHubIcon({ className }: IconProps) {
     </svg>
   );
 }
+
+/*
+ * Trip screen icon set (components/features/trips/{Travelers,Documents,
+ * Packing}Card.tsx + TravelerLookupSheet.tsx) — same hand-drawn-approximation
+ * approach as the icons above, loosely matching the Material glyph each
+ * replaces rather than reproducing its exact path:
+ *   GroupsIcon      ~ Icons.groups_outlined            (Travelers card header)
+ *   DocumentIcon    ~ Icons.description_outlined        (Documents card header + empty state)
+ *   ChecklistIcon   ~ Icons.checklist_outlined          (Packing card header + empty state)
+ *   CloseIcon       ~ Icons.close                       (remove document/packing row)
+ *   CheckCircleIcon ~ Icons.check_circle(_rounded)      (packed toggle ON; lookup result check)
+ *   CircleIcon      ~ Icons.radio_button_unchecked_rounded (packed toggle OFF)
+ *   MinusIcon       ~ Icons.remove                      (quantity stepper −; PlusIcon above already covers +)
+ *   SearchIcon      ~ Icons.search                      (lookup search field; also stands in for
+ *                                                         Icons.person_search_outlined's "not found" message —
+ *                                                         a dedicated person+magnifier glyph isn't worth a 10th icon)
+ *   InfoCircleIcon  ~ Icons.info_outline                (lookup "that's you" message)
+ * `check_circle_outline` (lookup "already added" message) also reuses
+ * CheckCircleIcon: it's drawn as a true even-odd cutout (not an overlaid
+ * stroke), so the checkmark always shows whatever is behind it — correct on
+ * both the dark packing card and the light lookup sheet without a prop.
+ */
+
+export function GroupsIcon({ className }: IconProps) {
+  return (
+    <svg viewBox="0 0 20 20" fill="none" aria-hidden="true" className={className}>
+      <circle cx="7.2" cy="6.8" r="2.3" stroke="currentColor" strokeWidth="1.5" />
+      <circle cx="13.3" cy="7.3" r="2" stroke="currentColor" strokeWidth="1.5" />
+      <path
+        d="M2.5 16.2c0-2.76 2.1-4.7 4.7-4.7s4.7 1.94 4.7 4.7"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+      />
+      <path d="M12.3 12.1c2.1.3 3.7 2 3.7 4.1" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+export function DocumentIcon({ className }: IconProps) {
+  return (
+    <svg viewBox="0 0 20 20" fill="none" aria-hidden="true" className={className}>
+      <path
+        d="M6 2.5h5.5L16 7v9.5a1 1 0 01-1 1H6a1 1 0 01-1-1v-13a1 1 0 011-1z"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinejoin="round"
+      />
+      <path d="M11.5 2.5V7H16" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
+      <path d="M7.5 10.5h5M7.5 13.5h5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+export function ChecklistIcon({ className }: IconProps) {
+  return (
+    <svg viewBox="0 0 20 20" fill="none" aria-hidden="true" className={className}>
+      <path
+        d="M3.5 5.2l1.3 1.3L7 4.2"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path d="M9.5 5h7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+      <path
+        d="M3.5 10.2l1.3 1.3L7 9.2"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path d="M9.5 10h7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+      <path
+        d="M3.5 15.2l1.3 1.3L7 14.2"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path d="M9.5 15h7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+export function CloseIcon({ className }: IconProps) {
+  return (
+    <svg viewBox="0 0 20 20" fill="none" aria-hidden="true" className={className}>
+      <path d="M5 5L15 15M15 5L5 15" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+/** Solid circle with the checkmark cut out via `evenodd` (a true hole, not an overlaid stroke) — see file-header note above. */
+export function CheckCircleIcon({ className }: IconProps) {
+  return (
+    <svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true" className={className}>
+      <path
+        fillRule="evenodd"
+        clipRule="evenodd"
+        d="M10 18a8 8 0 1 0 0-16 8 8 0 0 0 0 16Zm3.8-10.4a.9.9 0 0 0-1.33-1.2l-4.2 4.63-1.77-1.77a.9.9 0 1 0-1.27 1.27l2.45 2.45a.9.9 0 0 0 1.3-.03l4.82-5.35Z"
+      />
+    </svg>
+  );
+}
+
+export function CircleIcon({ className }: IconProps) {
+  return (
+    <svg viewBox="0 0 20 20" fill="none" aria-hidden="true" className={className}>
+      <circle cx="10" cy="10" r="7.25" stroke="currentColor" strokeWidth="1.5" />
+    </svg>
+  );
+}
+
+export function MinusIcon({ className }: IconProps) {
+  return (
+    <svg viewBox="0 0 20 20" fill="none" aria-hidden="true" className={className}>
+      <path d="M4 10H16" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+export function SearchIcon({ className }: IconProps) {
+  return (
+    <svg viewBox="0 0 20 20" fill="none" aria-hidden="true" className={className}>
+      <circle cx="8.5" cy="8.5" r="5.5" stroke="currentColor" strokeWidth="1.5" />
+      <path d="M16.5 16.5L13 13" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+export function InfoCircleIcon({ className }: IconProps) {
+  return (
+    <svg viewBox="0 0 20 20" fill="none" aria-hidden="true" className={className}>
+      <circle cx="10" cy="10" r="7.25" stroke="currentColor" strokeWidth="1.5" />
+      <path d="M10 9.25V14" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+      <circle cx="10" cy="6.75" r="0.9" fill="currentColor" />
+    </svg>
+  );
+}
