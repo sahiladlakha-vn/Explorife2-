@@ -40,7 +40,12 @@ enum AdminActionType {
 /// "Action Log" field, made real (see that migration's doc comment).
 class AdminActionLogEntry {
   final String id;
-  final String actorId;
+  // Nullable since the 20260925000600 migration switched actor_id's FK
+  // from ON DELETE CASCADE to ON DELETE SET NULL — a row whose actor
+  // account has since been deleted keeps its place in the log (that's the
+  // whole point of an audit log surviving the actor), just with no actor
+  // to point to anymore, rather than the row itself vanishing.
+  final String? actorId;
   final AdminActionType actionType;
   final String? targetProfileId;
   final Map<String, dynamic>? details;
@@ -57,7 +62,7 @@ class AdminActionLogEntry {
 
   factory AdminActionLogEntry.fromJson(Map<String, dynamic> json) => AdminActionLogEntry(
         id: json['id'] as String,
-        actorId: json['actor_id'] as String,
+        actorId: json['actor_id'] as String?,
         actionType: AdminActionType.fromWire(json['action_type'] as String),
         targetProfileId: json['target_profile_id'] as String?,
         details: json['details'] as Map<String, dynamic>?,

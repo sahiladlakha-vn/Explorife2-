@@ -322,6 +322,17 @@ class _TopBar extends StatelessWidget {
   final FocusNode profileIconFocusNode;
   final VoidCallback onProfileTap;
 
+  // Saving gems isn't persisted yet — same "coming soon" honesty policy
+  // Home's save button uses (see home_screen.dart's _comingSoonSave) — and
+  // there's no messaging feature anywhere in this app at all, so this link
+  // is deliberately a snackbar, never a route to a screen that doesn't
+  // exist.
+  void _comingSoonMessages(BuildContext context) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Messages is coming soon')),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final avatarUrl = context.watch<AuthProvider>().user?.avatarUrl;
@@ -351,20 +362,21 @@ class _TopBar extends StatelessWidget {
                   ),
                 ),
               ),
-              const SizedBox(width: 8),
-              Text.rich(
-                TextSpan(children: [
-                  TextSpan(
-                    text: 'Explor',
-                    style: GoogleFonts.audiowide(
-                        fontSize: 18, color: AppTheme.lightInk, letterSpacing: 0.5),
-                  ),
-                  TextSpan(
-                    text: 'ife',
-                    style: GoogleFonts.audiowide(
-                        fontSize: 18, color: AppTheme.primary, letterSpacing: 0.5),
-                  ),
-                ]),
+              const SizedBox(width: 4),
+              // Compass icon + single-tone "ExploriFe" wordmark — matches
+              // the prototype's `.nav-left` exactly (previously a two-tone
+              // "Explor"/"ife" split with no icon).
+              const Icon(Icons.explore_outlined,
+                  size: 24, color: AppTheme.primary),
+              const SizedBox(width: 6),
+              Text(
+                'ExploriFe',
+                style: GoogleFonts.plusJakartaSans(
+                  fontSize: 19,
+                  fontWeight: FontWeight.w800,
+                  color: AppTheme.lightInk,
+                  letterSpacing: -0.3,
+                ),
               ),
               const SizedBox(width: 20),
               // Desktop gets a real full-width search field (tap-to-open,
@@ -372,9 +384,10 @@ class _TopBar extends StatelessWidget {
               // of them run live query state inline, they all hand off to
               // ListingsScreen's Suggestions state). Tablet collapses this
               // to a plain icon button instead: there isn't enough width
-              // next to the logo + avatar for a legible full field once the
-              // drawer's own 280px overlay width is accounted for, and this
-              // still reaches the exact same search experience in one tap.
+              // next to the logo + nav-links + avatar for a legible full
+              // field once the drawer's own 280px overlay width is
+              // accounted for, and this still reaches the exact same search
+              // experience in one tap.
               Expanded(
                 child: tier == ScreenTier.desktop
                     ? _TopBarSearchField(
@@ -394,7 +407,40 @@ class _TopBar extends StatelessWidget {
                         ),
                       ),
               ),
-              const SizedBox(width: 12),
+              // `.nav-right`'s Account/Favorites/Messages text+icon links —
+              // desktop only, same reasoning as the search field collapse
+              // above (no room at tablet width). Account and Favorites are
+              // real destinations already reachable elsewhere (Profile tab,
+              // Saved Gems tab); Messages has no feature behind it anywhere
+              // in this app, so it stays a "coming soon" snackbar rather
+              // than a fake route.
+              if (tier == ScreenTier.desktop) ...[
+                const SizedBox(width: 20),
+                _NavLink(
+                  icon: Icons.person_outline,
+                  label: 'Account',
+                  onTap: () => context.go('/profile'),
+                ),
+                const SizedBox(width: 20),
+                _NavLink(
+                  icon: Icons.favorite_border,
+                  label: 'Favorites',
+                  // Saved Gems is Profile's tab index 2 — see ProfileDeepLink
+                  // in profile_screen.dart. Uses the query-param form (not
+                  // extra: ProfileDeepLink(...)) so this file doesn't have to
+                  // import profile_screen.dart, which itself imports this
+                  // file — see AppShellScope's doc comment above for why
+                  // that cycle is avoided elsewhere too.
+                  onTap: () => context.go('/profile?tab=2'),
+                ),
+                const SizedBox(width: 20),
+                _NavLink(
+                  icon: Icons.chat_bubble_outline,
+                  label: 'Messages',
+                  onTap: () => _comingSoonMessages(context),
+                ),
+              ],
+              const SizedBox(width: 16),
               Semantics(
                 button: true,
                 label: 'Your profile',
@@ -431,6 +477,47 @@ class _TopBar extends StatelessWidget {
   }
 }
 
+/// One `.nav-link` — muted icon+label that darkens on hover, matching the
+/// prototype exactly. Desktop-only (see _TopBar.build).
+class _NavLink extends StatelessWidget {
+  const _NavLink({required this.icon, required this.label, required this.onTap});
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      button: true,
+      label: label,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(8),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 18, color: AppTheme.lightMute),
+              const SizedBox(width: 6),
+              Text(
+                label,
+                style: GoogleFonts.plusJakartaSans(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: AppTheme.lightMute,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// Pill-shaped, matching the prototype's `.nav-search` (border-radius: 9999px,
+// bg: var(--bg)) — previously a 10px-rounded rect on AppTheme.lightCard.
 class _TopBarSearchField extends StatelessWidget {
   const _TopBarSearchField({required this.onTap});
   final VoidCallback onTap;
@@ -441,16 +528,16 @@ class _TopBarSearchField extends StatelessWidget {
       button: true,
       label: 'Search places, activities, and gems',
       child: Material(
-        color: AppTheme.lightCard,
-        borderRadius: BorderRadius.circular(10),
+        color: AppTheme.lightSurface,
+        borderRadius: BorderRadius.circular(999),
         child: InkWell(
           onTap: onTap,
-          borderRadius: BorderRadius.circular(10),
+          borderRadius: BorderRadius.circular(999),
           child: Container(
-            constraints: const BoxConstraints(maxWidth: 420),
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            constraints: const BoxConstraints(maxWidth: 480),
+            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
             decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(10),
+              borderRadius: BorderRadius.circular(999),
               border: Border.all(color: AppTheme.lightBorder),
             ),
             child: const Row(

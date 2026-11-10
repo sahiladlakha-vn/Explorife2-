@@ -5,6 +5,43 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../core/theme/app_theme.dart';
 import '../../providers/auth_provider.dart';
 
+final _usernameFormat = RegExp(r'^[a-z0-9_]{3,20}$');
+
+/// Validates + persists a display-name/username edit — the one save path
+/// both [EditProfileSheet] (mobile bottom sheet + ProfilePanel) and the
+/// desktop Settings screen's inline Edit Profile panel call, so those two
+/// surfaces can't quietly drift on validation rules or Postgres
+/// error-code mapping the way two independent copies eventually would.
+/// Returns a user-facing error message on failure, or `null` on success.
+Future<String?> saveProfileEdit(
+  BuildContext context, {
+  required String name,
+  required String username,
+}) async {
+  final trimmedName = name.trim();
+  final trimmedUsername = username.trim().toLowerCase();
+  if (trimmedUsername.isNotEmpty &&
+      !_usernameFormat.hasMatch(trimmedUsername)) {
+    return 'Usernames are 3–20 lowercase letters, numbers, or underscores.';
+  }
+  final auth = context.read<AuthProvider>();
+  try {
+    if (trimmedName.isNotEmpty) await auth.updateDisplayName(trimmedName);
+    if (trimmedUsername != (auth.user?.username ?? '')) {
+      await auth.updateUsername(trimmedUsername);
+    }
+    return null;
+  } on PostgrestException catch (e) {
+    return e.code == '23505'
+        ? 'That username is already taken.'
+        : e.code == '23514'
+            ? 'Usernames are 3–20 lowercase letters, numbers, or underscores.'
+            : 'Could not save: ${e.message}';
+  } catch (e) {
+    return 'Could not save: $e';
+  }
+}
+
 /// Display name + username editor — the one "edit yourself" sheet in the
 /// app, shared between the Settings tab's "Edit profile" row and the
 /// desktop/tablet profile panel's signed-in state (ProfilePanel). Extracted
@@ -23,7 +60,6 @@ class _EditProfileSheetState extends State<EditProfileSheet> {
       text: context.read<AuthProvider>().user?.name ?? '');
   late final _usernameCtrl = TextEditingController(
       text: context.read<AuthProvider>().user?.username ?? '');
-  static final _usernameFormat = RegExp(r'^[a-z0-9_]{3,20}$');
   bool _saving = false;
   String? _error;
 
@@ -35,40 +71,20 @@ class _EditProfileSheetState extends State<EditProfileSheet> {
   }
 
   Future<void> _save() async {
-    final name = _nameCtrl.text.trim();
-    final username = _usernameCtrl.text.trim().toLowerCase();
-    if (username.isNotEmpty && !_usernameFormat.hasMatch(username)) {
-      setState(() => _error =
-          'Usernames are 3–20 lowercase letters, numbers, or underscores.');
-      return;
-    }
-
     setState(() {
       _saving = true;
       _error = null;
     });
-    final auth = context.read<AuthProvider>();
-    try {
-      if (name.isNotEmpty) await auth.updateDisplayName(name);
-      if (username != (auth.user?.username ?? '')) {
-        await auth.updateUsername(username);
-      }
-      if (mounted) Navigator.of(context).pop();
-    } on PostgrestException catch (e) {
+    final error = await saveProfileEdit(context,
+        name: _nameCtrl.text, username: _usernameCtrl.text);
+    if (error != null) {
       setState(() {
         _saving = false;
-        _error = e.code == '23505'
-            ? 'That username is already taken.'
-            : e.code == '23514'
-                ? 'Usernames are 3–20 lowercase letters, numbers, or underscores.'
-                : 'Could not save: ${e.message}';
+        _error = error;
       });
-    } catch (e) {
-      setState(() {
-        _saving = false;
-        _error = 'Could not save: $e';
-      });
+      return;
     }
+    if (mounted) Navigator.of(context).pop();
   }
 
   static InputDecoration _fieldDecoration(String hint) => InputDecoration(

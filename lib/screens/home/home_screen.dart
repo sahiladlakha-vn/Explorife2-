@@ -1,20 +1,23 @@
+import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
-import '../../core/constants/curated_collections.dart';
 import '../../core/constants/gem_categories.dart';
+import '../../core/layout/app_spacing.dart';
 import '../../core/layout/breakpoints.dart';
 import '../../core/services/geocoding_service.dart';
 import '../../core/theme/app_theme.dart';
+import '../../providers/curated_collection_provider.dart';
 import '../../providers/gem_provider.dart';
 import '../../providers/tour_provider.dart';
+import '../../models/curated_collection.dart';
 import '../../models/gem.dart';
-import '../../models/tour.dart';
 import '../../widgets/app_network_image.dart';
-import '../../widgets/common/photo_info_card.dart';
 import '../../widgets/state_views.dart';
+import '../../widgets/tours/tour_experience_card.dart';
+import 'widgets/hero_media_background.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -69,35 +72,15 @@ class _HomeScreenState extends State<HomeScreen> {
             // alwaysScrollable so pull-to-refresh works even when content is short
             physics: const AlwaysScrollableScrollPhysics(),
             slivers: [
-              // ── HERO + STATS ──
-              // Tablet/desktop overlap the stats bar slightly over the
-              // hero's bottom edge per the desktop-layout spec — a Stack
-              // with the bar Positioned a bit above Hero's own bottom edge,
-              // not just stacked flush. _Hero has a fixed 520 height; the
-              // trailing SizedBox below approximates how far the bar's own
-              // height hangs past that edge so the next section doesn't
-              // render underneath it. Phone keeps the original flush stack.
-              SliverToBoxAdapter(
-                child: tier == ScreenTier.phone
-                    ? Column(children: [_Hero(), _StatsBar()])
-                    : Column(
-                        children: [
-                          Stack(
-                            clipBehavior: Clip.none,
-                            children: [
-                              _Hero(),
-                              Positioned(
-                                top: 520 - 24,
-                                left: 20,
-                                right: 20,
-                                child: _StatsBar(),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 36),
-                        ],
-                      ),
-              ),
+              // ── HERO (+ stats bar merged into its own bottom edge) ──
+              // Both the hero copy card and the stats strip now live inside
+              // one rounded, inset media card (see _Hero) — matching the
+              // prototype's single "hero" unit instead of the previous
+              // flush-bleed hero with a separate light stats bar stacked
+              // below/overlapping it.
+              const SliverToBoxAdapter(child: _Hero()),
+              const SliverToBoxAdapter(
+                  child: SizedBox(height: AppSpacing.sectionGap)),
 
               // ── SEARCH + FILTERS (always visible chrome) ──
               SliverPadding(
@@ -124,15 +107,16 @@ class _HomeScreenState extends State<HomeScreen> {
                             : '/listings?category=$cat');
                       },
                     ),
-                    const SizedBox(height: 20),
+                    const SizedBox(height: AppSpacing.sectionGap),
                   ]),
                 ),
               ),
 
               // ── EXPLORE IDEAS (curated collections rail) ──
-              // Replaces Start Exploring / DestinationBrowserSheet. Runs no
-              // retrieval of its own beyond the static collection list —
-              // every card navigates straight into Search Results or
+              // Replaces Start Exploring / DestinationBrowserSheet. Backed
+              // by CuratedCollectionProvider (public.curated_collections)
+              // as of 2026-09-18 — was a hardcoded static Dart list before
+              // that. Every card navigates straight into Search Results or
               // Destination Detail, the same screens the search bar above
               // already opens. See _CollectionCard.
               const SliverPadding(
@@ -142,21 +126,33 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ),
               SliverToBoxAdapter(
-                child: _RailOrGrid(
-                  tier: tier,
-                  itemCount: CuratedCollections.all.length,
-                  tabletColumns: 2,
-                  desktopColumns: 3,
-                  childAspectRatio: 0.78,
-                  itemBuilder: (ctx, i) => _CollectionCard(
-                    collection: CuratedCollections.all[i],
-                    margin: tier == ScreenTier.phone
-                        ? const EdgeInsets.only(right: 14)
-                        : EdgeInsets.zero,
-                  ),
+                child: Consumer<CuratedCollectionProvider>(
+                  builder: (context, collectionProv, _) {
+                    final collections = collectionProv.collections;
+                    if (collectionProv.loading) {
+                      return const FeaturedRowSkeleton();
+                    }
+                    if (collectionProv.hasError) {
+                      return ErrorStateView(
+                          onRetry: collectionProv.refresh,
+                          message: collectionProv.error);
+                    }
+                    if (collections.isEmpty) {
+                      return const EmptyStateView(
+                          text: 'No ideas available yet.');
+                    }
+                    return _RailOrGrid(
+                      itemCount: collections.length,
+                      itemBuilder: (ctx, i) => _CollectionCard(
+                        collection: collections[i],
+                        onSave: () => _comingSoonSave(ctx),
+                      ),
+                    );
+                  },
                 ),
               ),
-              const SliverPadding(padding: EdgeInsets.only(top: 20)),
+              const SliverPadding(
+                  padding: EdgeInsets.only(top: AppSpacing.sectionGap)),
 
               // ── CONTENT REGION (real gems via GemProvider) ──
               SliverToBoxAdapter(
@@ -173,7 +169,7 @@ class _HomeScreenState extends State<HomeScreen> {
                             onSeeAll: () => context.go('/listings'),
                           ),
                         ),
-                        const SizedBox(height: 12),
+                        const SizedBox(height: AppSpacing.headerGap),
                         if (gem.loading)
                           const FeaturedRowSkeleton()
                         else if (gem.hasError)
@@ -183,18 +179,11 @@ class _HomeScreenState extends State<HomeScreen> {
                           const EmptyStateView(text: 'No featured gems yet.')
                         else
                           _RailOrGrid(
-                            tier: tier,
                             itemCount: featuredGems.length,
-                            tabletColumns: 3,
-                            desktopColumns: 4,
-                            childAspectRatio: 0.78,
                             itemBuilder: (ctx, i) => _FeaturedGemCard(
                               gem: featuredGems[i],
                               isTrending: gem.isTrending(featuredGems[i]),
                               onSave: () => _comingSoonSave(ctx),
-                              margin: tier == ScreenTier.phone
-                                  ? const EdgeInsets.only(right: 14)
-                                  : EdgeInsets.zero,
                             ),
                           ),
                       ],
@@ -225,7 +214,7 @@ class _HomeScreenState extends State<HomeScreen> {
                             onSeeAll: () => context.go('/tours'),
                           ),
                         ),
-                        const SizedBox(height: 12),
+                        const SizedBox(height: AppSpacing.headerGap),
                         if (tourProv.loading)
                           const FeaturedRowSkeleton()
                         else if (tourProv.hasError)
@@ -235,17 +224,22 @@ class _HomeScreenState extends State<HomeScreen> {
                         else if (tours.isEmpty)
                           const EmptyStateView(text: 'No tours available yet.')
                         else
-                          _RailOrGrid(
-                            tier: tier,
-                            itemCount: tours.length,
-                            tabletColumns: 2,
-                            desktopColumns: 3,
-                            childAspectRatio: 0.78,
-                            itemBuilder: (ctx, i) => _TourRailCard(
-                              tour: tours[i],
-                              margin: tier == ScreenTier.phone
-                                  ? const EdgeInsets.only(right: 14)
-                                  : EdgeInsets.zero,
+                          // A dedicated, taller rail (not _RailOrGrid's
+                          // shared fixed 290px height) — each card here is
+                          // a full mini tour-detail view (hero, tabs,
+                          // booking pills, footer CTA), not the compact
+                          // summary shell every other Home rail uses, so it
+                          // needs its own height budget. See
+                          // TourExperienceCard's own doc comment for why.
+                          SizedBox(
+                            height: TourExperienceCard.height,
+                            child: ListView.builder(
+                              scrollDirection: Axis.horizontal,
+                              padding:
+                                  const EdgeInsets.symmetric(horizontal: 20),
+                              itemCount: tours.length,
+                              itemBuilder: (ctx, i) =>
+                                  TourExperienceCard(tour: tours[i]),
                             ),
                           ),
                       ],
@@ -258,23 +252,23 @@ class _HomeScreenState extends State<HomeScreen> {
                 padding: const EdgeInsets.symmetric(horizontal: 20),
                 sliver: SliverList(
                   delegate: SliverChildListDelegate([
-                    const SizedBox(height: 20),
+                    const SizedBox(height: AppSpacing.sectionGap),
 
                     // Community row (static marketing)
                     _CommunityRow(),
-                    const SizedBox(height: 20),
+                    const SizedBox(height: AppSpacing.sectionGap),
 
                     // Nearby gems heading
                     _SectionHead(
                       title: 'GEMS NEAR YOU',
                       onSeeAll: () => context.go('/listings'),
                     ),
-                    const SizedBox(height: 12),
+                    const SizedBox(height: AppSpacing.headerGap),
 
                     // Real, distance-sorted gems (best-effort location, own states)
                     _NearbyGems(tier: tier),
 
-                    const SizedBox(height: 20),
+                    const SizedBox(height: AppSpacing.sectionGap),
 
                     // Banner
                     _BannerCard(),
@@ -294,7 +288,17 @@ class _HomeScreenState extends State<HomeScreen> {
 // ─────────────────────────────────────────
 // HERO
 // ─────────────────────────────────────────
+/// Hero — matches the prototype's single rounded, inset "hero" unit: a
+/// video/poster media card (unchanged from before, see
+/// widgets/hero_media_background.dart) clipped to rounded corners and inset
+/// from the screen edges (rather than the old full-bleed edge-to-edge
+/// treatment), with a glass copy card anchored top-left (see
+/// [_HeroGlassCard]) and a dark glass stats strip pinned to its own bottom
+/// edge (see [_HeroStatsBar]) — both now part of the same rounded card
+/// instead of a separate light stats bar stacked below/overlapping it.
 class _Hero extends StatelessWidget {
+  const _Hero();
+
   @override
   Widget build(BuildContext context) {
     // Tablet/desktop already get logo + hamburger + search + avatar from
@@ -303,210 +307,204 @@ class _Hero extends StatelessWidget {
     // screen at once" duplication this rebuild was asked to avoid, so phone
     // is the only tier that renders its own top nav row inside the hero.
     final isPhone = Breakpoints.tierOf(context) == ScreenTier.phone;
-    return SizedBox(
-      height: 520,
-      child: Stack(
-        fit: StackFit.expand,
-        children: [
-          // Background image (decorative)
-          const AppNetworkImage(
-            url:
-                'https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=800&q=80',
-            fit: BoxFit.cover,
-          ),
-          // Gradient overlay
-          Container(
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: [
-                  Colors.transparent,
-                  AppTheme.bg.withValues(alpha: 0.7),
-                  AppTheme.bg,
-                ],
-                stops: const [0.3, 0.75, 1.0],
+    final outerPad = isPhone ? 16.0 : 20.0;
+    return Padding(
+      padding: EdgeInsets.fromLTRB(outerPad, 12, outerPad, 0),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(isPhone ? 16 : 24),
+        child: SizedBox(
+          height: 520,
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              // Background (decorative) — a looping video on Web (autoplay/
+              // muted, falling back to the static poster for reduced-motion/
+              // data-saver/slow connections or any playback error), and the
+              // same static poster image on mobile.
+              const HeroMediaBackground(),
+              // Darken the top/bottom edges slightly so the glass card and
+              // stats bar stay legible regardless of what's playing behind
+              // them — same intent as the prototype's `.hero::after`.
+              Container(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      Colors.black.withValues(alpha: 0.18),
+                      Colors.transparent,
+                      Colors.transparent,
+                      Colors.black.withValues(alpha: 0.5),
+                    ],
+                    stops: const [0.0, 0.28, 0.62, 1.0],
+                  ),
+                ),
               ),
-            ),
-          ),
-          // Orange tint
-          Container(
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [
-                  AppTheme.primary.withValues(alpha: 0.15),
-                  Colors.transparent
-                ],
-              ),
-            ),
-          ),
-          // Foreground — nav pinned to top, hero copy anchored to the bottom.
-          SafeArea(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  if (isPhone)
-                    Row(
-                      children: [
-                        Text(
-                          'Explor',
-                          style: GoogleFonts.audiowide(
-                            fontSize: 20,
-                            color: Colors.white,
-                            letterSpacing: 1,
-                          ),
-                        ),
-                        Text(
-                          'ife',
-                          style: GoogleFonts.audiowide(
-                            fontSize: 20,
-                            color: AppTheme.primary,
-                            letterSpacing: 1,
-                          ),
-                        ),
-                        const Spacer(),
-                        _CircleIconBtn(
-                          icon: Icons.notifications_outlined,
-                          semanticLabel: 'Notifications',
-                          onTap: () =>
-                              ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                                content: Text('No new notifications')),
-                          ),
-                        ),
-                        const SizedBox(width: 10),
-                        Semantics(
-                          button: true,
-                          label: 'Your profile',
-                          child: GestureDetector(
-                            onTap: () => context.go('/profile'),
-                            child: Container(
-                              width: 44,
-                              height: 44,
-                              decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                border: Border.all(
-                                    color: Colors.white.withValues(alpha: 0.25),
-                                    width: 1.5),
+              // Foreground — nav pinned to top, hero copy card anchored
+              // top-left.
+              SafeArea(
+                bottom: false,
+                child: Padding(
+                  padding: EdgeInsets.fromLTRB(
+                      isPhone ? 16 : 32, isPhone ? 12 : 28, isPhone ? 16 : 32, 0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      if (isPhone)
+                        Row(
+                          children: [
+                            Text(
+                              'Explor',
+                              style: GoogleFonts.audiowide(
+                                fontSize: 20,
+                                color: Colors.white,
+                                letterSpacing: 1,
                               ),
-                              child: const ClipOval(
-                                child: AppNetworkImage(
-                                  url: 'https://picsum.photos/seed/user1/80/80',
-                                  fit: BoxFit.cover,
+                            ),
+                            Text(
+                              'ife',
+                              style: GoogleFonts.audiowide(
+                                fontSize: 20,
+                                color: AppTheme.primary,
+                                letterSpacing: 1,
+                              ),
+                            ),
+                            const Spacer(),
+                            _CircleIconBtn(
+                              icon: Icons.notifications_outlined,
+                              semanticLabel: 'Notifications',
+                              onTap: () =>
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                    content: Text('No new notifications')),
+                              ),
+                            ),
+                            const SizedBox(width: 10),
+                            Semantics(
+                              button: true,
+                              label: 'Your profile',
+                              child: GestureDetector(
+                                onTap: () => context.go('/profile'),
+                                child: Container(
+                                  width: 44,
+                                  height: 44,
+                                  decoration: BoxDecoration(
+                                    shape: BoxShape.circle,
+                                    border: Border.all(
+                                        color: Colors.white
+                                            .withValues(alpha: 0.25),
+                                        width: 1.5),
+                                  ),
+                                  child: const ClipOval(
+                                    child: AppNetworkImage(
+                                      url:
+                                          'https://picsum.photos/seed/user1/80/80',
+                                      fit: BoxFit.cover,
+                                    ),
+                                  ),
                                 ),
                               ),
                             ),
+                          ],
+                        )
+                      else
+                        // Tablet/desktop: RefreshIndicator's pull gesture
+                        // isn't discoverable with a mouse + scrollwheel the
+                        // way it is on touch, so this gives them an explicit
+                        // way to trigger the exact same
+                        // GemProvider.refresh() call — the one piece of the
+                        // old top row worth keeping once the rest moved to
+                        // AppShell's top bar.
+                        Align(
+                          alignment: Alignment.topRight,
+                          child: _CircleIconBtn(
+                            icon: Icons.refresh,
+                            semanticLabel: 'Refresh',
+                            onTap: () => context.read<GemProvider>().refresh(),
                           ),
                         ),
-                      ],
-                    )
-                  else
-                    // Tablet/desktop: RefreshIndicator's pull gesture isn't
-                    // discoverable with a mouse + scrollwheel the way it is
-                    // on touch, so this gives them an explicit way to
-                    // trigger the exact same GemProvider.refresh() call —
-                    // the one piece of the old top row worth keeping once
-                    // the rest moved to AppShell's top bar.
-                    Align(
-                      alignment: Alignment.topRight,
-                      child: _CircleIconBtn(
-                        icon: Icons.refresh,
-                        semanticLabel: 'Refresh',
-                        onTap: () => context.read<GemProvider>().refresh(),
-                      ),
-                    ),
-
-                  const Spacer(),
-
-                  // Hero copy
-                  _LiveBadge(),
-                  const SizedBox(height: 10),
-                  RichText(
-                    text: TextSpan(
-                      style: GoogleFonts.bebasNeue(
-                          fontSize: 48, height: 0.95, letterSpacing: 1),
-                      children: const [
-                        TextSpan(
-                            text: 'THE LIFE\nYOU WERE\nMEANT TO\n',
-                            style: TextStyle(color: Colors.white)),
-                        TextSpan(
-                            text: 'EXPLORE',
-                            style: TextStyle(color: AppTheme.primary)),
-                      ],
-                    ),
+                      SizedBox(height: isPhone ? 20 : 28),
+                      _HeroGlassCard(isPhone: isPhone),
+                    ],
                   ),
-                  const SizedBox(height: 12),
-                  Text(
-                    'Discover hidden trails, connect with fellow adventurers',
-                    style: GoogleFonts.fredoka(
-                        fontSize: 13,
-                        color: Colors.white.withValues(alpha: 0.75),
-                        height: 1.5),
-                  ),
-                  const SizedBox(height: 20),
-                  // The old standalone "Start Exploring" modal
-                  // (DestinationBrowserSheet) was retired in favor of the
-                  // "EXPLORE IDEAS" rail below — see build()'s curated-
-                  // collections section; that rail (and this CTA) both feed
-                  // the same Search Results / Destination Detail surface,
-                  // not a separate flow. Phone keeps the compact icon-only
-                  // ghost button; tablet/desktop show it as a labeled pill
-                  // per the desktop-layout spec.
-                  if (isPhone)
-                    Row(
-                      children: [
-                        _GhostIconBtn(
-                          icon: Icons.explore_outlined,
-                          semanticLabel: 'Open map',
-                          onTap: () => context.go('/explore'),
-                        ),
-                      ],
-                    )
-                  else
-                    _StartExploringPill(onTap: () => context.go('/explore')),
-                ],
+                ),
               ),
-            ),
+              Positioned(
+                left: 0,
+                right: 0,
+                bottom: 0,
+                child: _HeroStatsBar(isPhone: isPhone),
+              ),
+            ],
           ),
-        ],
+        ),
       ),
     );
   }
 }
 
-class _LiveBadge extends StatelessWidget {
+/// The translucent dark "glass" copy card anchored top-left inside the hero
+/// — headline + subtext + CTA. [CuratedCollection]'s own "no fake data"
+/// principle doesn't apply here (this copy is static marketing, not a data
+/// card), so it's just a direct port of the prototype's `.hero-card`.
+class _HeroGlassCard extends StatelessWidget {
+  const _HeroGlassCard({required this.isPhone});
+  final bool isPhone;
+
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      decoration: BoxDecoration(
-        color: AppTheme.primary.withValues(alpha: 0.2),
-        border: Border.all(color: AppTheme.primary.withValues(alpha: 0.4)),
-        borderRadius: BorderRadius.circular(20),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: 6,
-            height: 6,
-            decoration: const BoxDecoration(
-                color: AppTheme.primary, shape: BoxShape.circle),
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(20),
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
+        child: Container(
+          constraints: BoxConstraints(maxWidth: isPhone ? double.infinity : 460),
+          padding: EdgeInsets.all(isPhone ? 22 : 36),
+          decoration: BoxDecoration(
+            color: const Color(0xFF111827).withValues(alpha: 0.55),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: Colors.white.withValues(alpha: 0.18)),
           ),
-          const SizedBox(width: 6),
-          Text(
-            'LIVE ADVENTURE',
-            style: GoogleFonts.jetBrainsMono(
-              fontSize: 10,
-              color: AppTheme.primary,
-              letterSpacing: 1,
-            ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text.rich(
+                TextSpan(
+                  style: GoogleFonts.instrumentSerif(
+                    fontSize: isPhone ? 30 : 44,
+                    height: 1.08,
+                    color: Colors.white,
+                  ),
+                  children: const [
+                    TextSpan(text: 'The life you were\nmeant to '),
+                    TextSpan(
+                        text: 'explore',
+                        style: TextStyle(color: AppTheme.primary)),
+                  ],
+                ),
+              ),
+              SizedBox(height: isPhone ? 12 : 16),
+              Text(
+                'Discover hidden trails, connect with fellow adventurers.',
+                style: GoogleFonts.fredoka(
+                  fontSize: isPhone ? 12.5 : 14,
+                  height: 1.5,
+                  color: Colors.white.withValues(alpha: 0.78),
+                ),
+              ),
+              SizedBox(height: isPhone ? 18 : 26),
+              // The old standalone "Start Exploring" modal
+              // (DestinationBrowserSheet) was retired in favor of the
+              // "EXPLORE IDEAS" rail below — see build()'s curated-
+              // collections section; that rail (and this CTA) both feed the
+              // same Search Results / Destination Detail surface, not a
+              // separate flow. One labeled pill at every tier now (matching
+              // the prototype), replacing the old phone-only icon button.
+              _StartExploringPill(onTap: () => context.go('/explore')),
+            ],
           ),
-        ],
+        ),
       ),
     );
   }
@@ -540,39 +538,9 @@ class _CircleIconBtn extends StatelessWidget {
   }
 }
 
-class _GhostIconBtn extends StatelessWidget {
-  final IconData icon;
-  final VoidCallback onTap;
-  final String semanticLabel;
-  const _GhostIconBtn(
-      {required this.icon, required this.onTap, required this.semanticLabel});
-
-  @override
-  Widget build(BuildContext context) {
-    return Semantics(
-      button: true,
-      label: semanticLabel,
-      child: GestureDetector(
-        onTap: onTap,
-        child: Container(
-          width: 46,
-          height: 46,
-          decoration: BoxDecoration(
-            color: Colors.white.withValues(alpha: 0.1),
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: Colors.white.withValues(alpha: 0.2)),
-          ),
-          child: Icon(icon, color: Colors.white, size: 20),
-        ),
-      ),
-    );
-  }
-}
-
-/// Tablet/desktop's labeled version of the hero CTA — same destination
-/// (`/explore`) as phone's icon-only [_GhostIconBtn], just a real "Start
-/// Exploring" pill per the desktop-layout spec instead of a bare icon,
-/// since there's room for the label at these widths.
+/// The hero's single CTA pill — used across all tiers now that [_Hero] is
+/// one unified rounded card (previously phone got an icon-only ghost button
+/// and only tablet/desktop got this labeled pill; see git history).
 class _StartExploringPill extends StatelessWidget {
   const _StartExploringPill({required this.onTap});
   final VoidCallback onTap;
@@ -611,67 +579,98 @@ class _StartExploringPill extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────
-// STATS BAR
+// STATS BAR (dark glass strip pinned to the hero's own bottom edge —
+// matches the prototype's `.stats-bar` grid of blurred `.stat-item` cells)
 // ─────────────────────────────────────────
-class _StatsBar extends StatelessWidget {
+class _HeroStatsBar extends StatelessWidget {
+  const _HeroStatsBar({required this.isPhone});
+  final bool isPhone;
+
   // Third element is the route a tap lands on, or null for a purely
-  // decorative pill — was null for all four before the Tours feature
-  // existed (this whole Row had no GestureDetector/onTap anywhere). TRAILS
-  // is the only one wired up so far: it's the one stat with a real,
-  // dedicated destination now that the Tours list screen exists; the other
-  // three (EXPLORERS/COUNTRIES/RATED) have no equivalent screen to land on.
-  final _stats = const [
+  // decorative cell — was null for all four before the Tours feature
+  // existed. TRAILS is the only one wired up so far: it's the one stat with
+  // a real, dedicated destination now that the Tours list screen exists;
+  // the other three (EXPLORERS/COUNTRIES/RATED) have no equivalent screen
+  // to land on.
+  static const _stats = [
     ('12K+', 'TRAILS', '/tours'),
     ('84K', 'EXPLORERS', null),
     ('190+', 'COUNTRIES', null),
     ('4.9★', 'RATED', null),
   ];
 
+  Widget _cell(BuildContext context, int i) {
+    final s = _stats[i];
+    final route = s.$3;
+    final content = ClipRect(
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
+        child: Container(
+          color: const Color(0xFF111827).withValues(alpha: 0.55),
+          alignment: Alignment.center,
+          padding: const EdgeInsets.symmetric(vertical: 14),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(s.$1,
+                  style: GoogleFonts.fredoka(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w700,
+                      color: Colors.white)),
+              const SizedBox(height: 2),
+              Text(s.$2,
+                  style: GoogleFonts.jetBrainsMono(
+                      fontSize: 9,
+                      color: Colors.white.withValues(alpha: 0.65),
+                      letterSpacing: 0.5)),
+            ],
+          ),
+        ),
+      ),
+    );
+    return Expanded(
+      child: route == null
+          ? content
+          : Semantics(
+              button: true,
+              label: '${s.$1} ${s.$2}',
+              child:
+                  GestureDetector(onTap: () => context.go(route), child: content),
+            ),
+    );
+  }
+
+  // 1px hairline seams between cells — Flutter equivalent of the
+  // prototype's `.stats-bar { gap: 1px; background: rgba(255,255,255,.25) }`
+  // grid trick: a translucent-white sliver peeking through between the
+  // opaque glass cells.
+  static const _hairlineV =
+      SizedBox(width: 1, child: ColoredBox(color: Color(0x40FFFFFF)));
+  static const _hairlineH =
+      SizedBox(height: 1, child: ColoredBox(color: Color(0x40FFFFFF)));
+
   @override
   Widget build(BuildContext context) {
-    return Container(
-      decoration: const BoxDecoration(
-        border: Border.symmetric(
-            horizontal: BorderSide(color: AppTheme.lightBorder)),
-      ),
-      child: Row(
-        children: _stats.asMap().entries.map((e) {
-          final i = e.key;
-          final s = e.value;
-          final route = s.$3;
-          final cell = Container(
-            padding: const EdgeInsets.symmetric(vertical: 12),
-            decoration: BoxDecoration(
-              color: AppTheme.lightCard,
-              border: i < _stats.length - 1
-                  ? const Border(right: BorderSide(color: AppTheme.lightBorder))
-                  : null,
-            ),
-            child: Column(
-              children: [
-                Text(s.$1,
-                    style: GoogleFonts.bebasNeue(
-                        fontSize: 20, color: AppTheme.primary)),
-                Text(s.$2,
-                    style: GoogleFonts.jetBrainsMono(
-                        fontSize: 9,
-                        color: AppTheme.lightMute,
-                        letterSpacing: 0.5)),
-              ],
-            ),
-          );
-          return Expanded(
-            child: route == null
-                ? cell
-                : Semantics(
-                    button: true,
-                    label: '${s.$1} ${s.$2}',
-                    child: GestureDetector(
-                        onTap: () => context.go(route), child: cell),
-                  ),
-          );
-        }).toList(),
-      ),
+    if (isPhone) {
+      return Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(children: [_cell(context, 0), _hairlineV, _cell(context, 1)]),
+          _hairlineH,
+          Row(children: [_cell(context, 2), _hairlineV, _cell(context, 3)]),
+        ],
+      );
+    }
+    return Row(
+      children: [
+        _cell(context, 0),
+        _hairlineV,
+        _cell(context, 1),
+        _hairlineV,
+        _cell(context, 2),
+        _hairlineV,
+        _cell(context, 3),
+      ],
     );
   }
 }
@@ -684,7 +683,7 @@ class _SearchBar extends StatelessWidget {
   Widget build(BuildContext context) {
     return Semantics(
       button: true,
-      label: 'Search places, activities, and gems',
+      label: 'Explore by category or destination',
       child: GestureDetector(
         // Merged into ListingsScreen (/listings) — extra: true lands it
         // focused on the search field (Suggestions state) instead of the
@@ -693,8 +692,8 @@ class _SearchBar extends StatelessWidget {
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
           decoration: BoxDecoration(
-            color: AppTheme.lightCard,
-            borderRadius: BorderRadius.circular(14),
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(16),
             border: Border.all(color: AppTheme.lightBorder),
           ),
           child: Row(
@@ -703,7 +702,7 @@ class _SearchBar extends StatelessWidget {
               const SizedBox(width: 10),
               Expanded(
                 child: Text(
-                  'Search places, activities, gems…',
+                  'Explore by Category or Destination...',
                   style: GoogleFonts.fredoka(
                       color: AppTheme.lightMute, fontSize: 14),
                 ),
@@ -745,7 +744,20 @@ class _CategoryPills extends StatelessWidget {
         separatorBuilder: (_, __) => const SizedBox(width: 8),
         itemBuilder: (ctx, i) {
           final isSelected = i == selected;
-          final color = isSelected ? Colors.white : AppTheme.lightMute;
+          // Home never tracks a persistent selection (see the caller's
+          // comment — a tap is a one-shot shortcut into Listings, not a
+          // filter reflected back here), but the prototype's "All" chip is
+          // always drawn active/dark as the default resting state. Reproduce
+          // that purely presentational default — index 0 with no real
+          // selection — without adding real selection-tracking state.
+          final isDefaultAll = selected == -1 && i == 0;
+          final color =
+              isSelected || isDefaultAll ? Colors.white : AppTheme.lightMute;
+          final fill = isSelected
+              ? AppTheme.primary
+              : isDefaultAll
+                  ? const Color(0xFF111827)
+                  : AppTheme.lightCard;
           return Semantics(
             button: true,
             selected: isSelected,
@@ -757,11 +769,9 @@ class _CategoryPills extends StatelessWidget {
                 padding:
                     const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                 decoration: BoxDecoration(
-                  color: isSelected ? AppTheme.primary : AppTheme.lightCard,
+                  color: fill,
                   borderRadius: BorderRadius.circular(20),
-                  border: Border.all(
-                    color: isSelected ? AppTheme.primary : AppTheme.lightBorder,
-                  ),
+                  border: Border.all(color: fill),
                 ),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
@@ -790,69 +800,32 @@ class _CategoryPills extends StatelessWidget {
 // ─────────────────────────────────────────
 // SECTION HEADING
 // ─────────────────────────────────────────
-/// Phone-width horizontal rail vs. tablet/desktop grid — the one switch
-/// every "row of cards" section on Home shares, so each section states its
-/// column counts once rather than re-deriving the tier branch itself. Card
-/// builders are responsible for zeroing their own rail-gutter margin when
-/// [tier] isn't phone (see PhotoInfoCard.margin) — GridView's own
-/// crossAxisSpacing/mainAxisSpacing already provides gutters.
+/// Horizontally-scrollable rail of fixed-width cards, used by every "row of
+/// cards" section on Home (Explore Ideas/Featured/Tours) at every screen
+/// tier — cards are a fixed width (_IdeaStyleCard.width), so a wider
+/// viewport simply reveals more cards in the same scrolling rail instead of
+/// wrapping into a capped, non-scrolling grid.
 class _RailOrGrid extends StatelessWidget {
   const _RailOrGrid({
-    required this.tier,
     required this.itemCount,
     required this.itemBuilder,
-    required this.tabletColumns,
-    required this.desktopColumns,
-    this.childAspectRatio,
-    this.mainAxisExtent,
-  }) : assert((childAspectRatio == null) != (mainAxisExtent == null),
-            'pass exactly one of childAspectRatio or mainAxisExtent');
+  });
 
-  final ScreenTier tier;
   final int itemCount;
   final IndexedWidgetBuilder itemBuilder;
-  final int tabletColumns;
-  final int desktopColumns;
 
-  /// Matches every current rail's own fixed height (Explore Ideas/Featured/
-  /// Tours all used 290 before this helper existed).
+  /// Matches every current rail's own fixed card height (Explore Ideas/
+  /// Featured/Tours all used 290 before this helper existed).
   static const double _railHeight = 290;
-
-  /// For photo-card sections (Explore Ideas/Featured/Tours) — a fixed
-  /// width:height shape regardless of the column's actual pixel width.
-  final double? childAspectRatio;
-
-  /// For row-shaped cards (Gems Near You) whose height doesn't scale with
-  /// column width the way a portrait photo card's does.
-  final double? mainAxisExtent;
 
   @override
   Widget build(BuildContext context) {
-    if (tier == ScreenTier.phone) {
-      return SizedBox(
-        height: _railHeight,
-        child: ListView.builder(
-          scrollDirection: Axis.horizontal,
-          padding: const EdgeInsets.symmetric(horizontal: 20),
-          itemCount: itemCount,
-          itemBuilder: itemBuilder,
-        ),
-      );
-    }
-    final cols = tier == ScreenTier.desktop ? desktopColumns : tabletColumns;
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20),
-      child: GridView.builder(
-        shrinkWrap: true,
-        physics: const NeverScrollableScrollPhysics(),
+    return SizedBox(
+      height: _railHeight,
+      child: ListView.builder(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 20),
         itemCount: itemCount,
-        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-          crossAxisCount: cols,
-          crossAxisSpacing: 16,
-          mainAxisSpacing: 16,
-          childAspectRatio: childAspectRatio ?? 1,
-          mainAxisExtent: mainAxisExtent,
-        ),
         itemBuilder: itemBuilder,
       ),
     );
@@ -893,6 +866,280 @@ class _SectionHead extends StatelessWidget {
   }
 }
 
+/// Shared "idea card" shell for every Home rail (Explore Ideas, Featured,
+/// Tours & Experiences): dark card, photo up top with a frosted save
+/// button, an optional top-left badge, and an optional photo-caption strip
+/// on the photo's own bottom edge, then an info block below (title,
+/// 2-line subtitle, a neutral tag pill, an optional card-specific "meta"
+/// row for real secondary data), a divider, then a solid-button footer.
+/// Only the slot *content* differs per rail — the shape never does, which
+/// is the whole point of pulling it out: previously Featured/Tours used a
+/// different shell ([PhotoInfoCard]) than Explore Ideas, so the three
+/// rails didn't visually match.
+///
+/// Dark theme + photo-caption strip + button-style footer CTA (2026-09-08)
+/// replaced this shell's original light-card look, matching a design
+/// reference the product owner shared. Two elements in that reference had
+/// no real backing data and were deliberately NOT reproduced rather than
+/// faked: a star rating badge (this app has no rating field anywhere — see
+/// Tour's own doc comment for why) and a footer "N experiences" counter (no
+/// such count is tracked for any rail's content). [photoCaption] is wired
+/// to real data where it exists (Gem.photoCaptions) and left null
+/// everywhere else, rather than inventing caption text.
+class _IdeaStyleCard extends StatefulWidget {
+  const _IdeaStyleCard({
+    required this.imageUrl,
+    required this.onTap,
+    required this.semanticLabel,
+    required this.title,
+    required this.tagLabel,
+    required this.footerLeft,
+    required this.footerCta,
+    this.subtitle,
+    this.topLeftBadge,
+    this.photoCaption,
+    this.onSave,
+    this.saveSemanticLabel,
+    this.metaRow,
+  });
+
+  final String imageUrl;
+  final VoidCallback onTap;
+  final String semanticLabel;
+  final String title;
+  final String? subtitle;
+  final String tagLabel;
+  final Widget? topLeftBadge;
+
+  /// Real per-photo caption text (e.g. Gem.captionFor), shown in a strip
+  /// along the photo's own bottom edge. Null omits the strip entirely —
+  /// never filled with invented text for a card type with no such field.
+  final String? photoCaption;
+  final VoidCallback? onSave;
+  final String? saveSemanticLabel;
+  final Widget? metaRow;
+  final Widget footerLeft;
+  final String footerCta;
+
+  // Fixed shape every Home rail card shares.
+  static const double width = 225;
+  static const double height = 290;
+
+  @override
+  State<_IdeaStyleCard> createState() => _IdeaStyleCardState();
+}
+
+class _IdeaStyleCardState extends State<_IdeaStyleCard> {
+  bool _hovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      button: true,
+      label: widget.semanticLabel,
+      explicitChildNodes: true,
+      child: MouseRegion(
+        onEnter: (_) => setState(() => _hovered = true),
+        onExit: (_) => setState(() => _hovered = false),
+        child: GestureDetector(
+          onTap: widget.onTap,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 180),
+            curve: Curves.easeOut,
+            width: _IdeaStyleCard.width,
+            height: _IdeaStyleCard.height,
+            margin: const EdgeInsets.only(right: 14),
+            transform: Matrix4.translationValues(0, _hovered ? -6 : 0, 0),
+            decoration: BoxDecoration(
+              // Matches the app's existing "dark glass" surface colour
+              // (_HeroGlassCard/_HeroStatsBar) rather than pure black, so
+              // this shell reads as the same design language elsewhere on
+              // Home instead of a one-off.
+              color: const Color(0xFF111827),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: _hovered ? 0.32 : 0.18),
+                  blurRadius: _hovered ? 24 : 8,
+                  offset: Offset(0, _hovered ? 12 : 2),
+                ),
+              ],
+            ),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(19),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // ── photo + optional badge + frosted save button ──
+                  Expanded(
+                    flex: 4,
+                    child: Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        AnimatedScale(
+                          duration: const Duration(milliseconds: 220),
+                          curve: Curves.easeOut,
+                          scale: _hovered ? 1.08 : 1.0,
+                          child: AppNetworkImage(
+                              url: widget.imageUrl, fit: BoxFit.cover),
+                        ),
+                        if (widget.topLeftBadge != null)
+                          Positioned(
+                              top: 8, left: 8, child: widget.topLeftBadge!),
+                        if (widget.onSave != null)
+                          Positioned(
+                            top: 8,
+                            right: 8,
+                            child: Semantics(
+                              button: true,
+                              label: widget.saveSemanticLabel ?? 'Save',
+                              child: GestureDetector(
+                                onTap: widget.onSave,
+                                child: Container(
+                                  width: 40,
+                                  height: 40,
+                                  alignment: Alignment.center,
+                                  child: Container(
+                                    width: 30,
+                                    height: 30,
+                                    decoration: BoxDecoration(
+                                      color: Colors.black.withValues(alpha: 0.35),
+                                      shape: BoxShape.circle,
+                                    ),
+                                    child: const Icon(Icons.favorite_border,
+                                        color: Colors.white, size: 15),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        // Real photo caption only (see photoCaption's own
+                        // doc comment) — never rendered for a card type
+                        // with no such field.
+                        if (widget.photoCaption != null &&
+                            widget.photoCaption!.isNotEmpty)
+                          Positioned(
+                            left: 0,
+                            right: 0,
+                            bottom: 0,
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 10, vertical: 5),
+                              color: Colors.black.withValues(alpha: 0.45),
+                              child: Text(widget.photoCaption!,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: GoogleFonts.fredoka(
+                                      fontSize: 10.5, color: Colors.white)),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                  // ── title / subtitle / tag / meta / divider / link footer ──
+                  Expanded(
+                    flex: 5,
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(14, 8, 14, 6),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(widget.title,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: GoogleFonts.bebasNeue(
+                                      fontSize: 18,
+                                      color: Colors.white,
+                                      height: 1.1,
+                                      letterSpacing: 0.3)),
+                              const SizedBox(height: 3),
+                              if (widget.subtitle != null &&
+                                  widget.subtitle!.isNotEmpty) ...[
+                                Text(widget.subtitle!,
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: GoogleFonts.fredoka(
+                                        fontSize: 11,
+                                        color: Colors.white.withValues(alpha: 0.65),
+                                        height: 1.25)),
+                                const SizedBox(height: 3),
+                              ],
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 8, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: Colors.white.withValues(alpha: 0.08),
+                                  borderRadius: BorderRadius.circular(20),
+                                  border: Border.all(
+                                      color: Colors.white.withValues(alpha: 0.14)),
+                                ),
+                                child: Text(widget.tagLabel,
+                                    style: GoogleFonts.fredoka(
+                                        fontSize: 10,
+                                        color: Colors.white.withValues(alpha: 0.85),
+                                        fontWeight: FontWeight.w500)),
+                              ),
+                              if (widget.metaRow != null) ...[
+                                const SizedBox(height: 4),
+                                widget.metaRow!,
+                              ],
+                            ],
+                          ),
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Divider(
+                                  height: 1,
+                                  color: Colors.white.withValues(alpha: 0.12)),
+                              const SizedBox(height: 6),
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Flexible(child: widget.footerLeft),
+                                  const SizedBox(width: 6),
+                                  // Solid button (was a plain text link) —
+                                  // matches the referenced design's white
+                                  // pill CTA; text content is unchanged real
+                                  // per-card copy ("View →" / "Explore →" /
+                                  // "Book →").
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 10, vertical: 6),
+                                    decoration: BoxDecoration(
+                                      color: Colors.white,
+                                      borderRadius: BorderRadius.circular(8),
+                                    ),
+                                    child: Text(widget.footerCta,
+                                        style: GoogleFonts.jetBrainsMono(
+                                            fontSize: 10,
+                                            color: const Color(0xFF111827),
+                                            fontWeight: FontWeight.w700)),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 // ─────────────────────────────────────────
 // FEATURED GEM CARD (real Explorife gems)
 // ─────────────────────────────────────────
@@ -900,12 +1147,8 @@ class _FeaturedGemCard extends StatelessWidget {
   final Gem gem;
   final bool isTrending;
   final VoidCallback? onSave;
-  final EdgeInsets margin;
   const _FeaturedGemCard(
-      {required this.gem,
-      required this.isTrending,
-      this.onSave,
-      this.margin = const EdgeInsets.only(right: 14)});
+      {required this.gem, required this.isTrending, this.onSave});
 
   // Difficulty → colour + label, matched case-insensitively because stored
   // casing isn't guaranteed (e.g. 'Hard' vs 'hard'). Null when unset.
@@ -914,14 +1157,14 @@ class _FeaturedGemCard extends StatelessWidget {
     if (d == null || d.trim().isEmpty) return null;
     switch (d.toLowerCase()) {
       case 'easy':
-        return (color: const Color(0xFF2ECC71), label: 'EASY');
+        return (color: const Color(0xFF2ECC71), label: 'Easy');
       case 'moderate':
       case 'mod':
-        return (color: const Color(0xFFFFC107), label: 'MODERATE');
+        return (color: const Color(0xFFE8A83C), label: 'Moderate');
       case 'hard':
-        return (color: AppTheme.primary, label: 'HARD');
+        return (color: AppTheme.primary, label: 'Hard');
       default:
-        return (color: AppTheme.textSecondary, label: d.toUpperCase());
+        return (color: AppTheme.lightMute, label: d);
     }
   }
 
@@ -930,13 +1173,29 @@ class _FeaturedGemCard extends StatelessWidget {
     final diff = _difficulty;
     final loc = gem.gemLocation;
     final hasLoc = loc != null && loc.isNotEmpty;
+    final desc = gem.description;
+    final subtitle = (desc != null && desc.isNotEmpty)
+        ? desc
+        : (hasLoc ? loc : gem.tagline);
     final bestTime = gem.bestTimeToVisit;
-    return PhotoInfoCard(
+    // Real per-photo caption when one was actually written for this gem's
+    // cover photo (see Gem.photoCaptions's own doc comment) — most gems
+    // have none, in which case the strip is simply omitted (photoCaption's
+    // own doc comment on _IdeaStyleCard).
+    final caption = gem.photoUrl != null ? gem.captionFor(gem.photoUrl!) : null;
+
+    return _IdeaStyleCard(
       imageUrl: gem.photoUrl ?? '',
       onTap: () => context.push('/gems/${gem.id}'),
       semanticLabel: hasLoc ? '${gem.gemName}, $loc' : gem.gemName,
-      margin: margin,
-      topLeft: isTrending
+      title: gem.gemName,
+      subtitle: subtitle,
+      tagLabel: '${gem.emoji} ${gem.displayCategory}',
+      photoCaption: caption,
+      // Save btn (not persisted yet → onSave shows a coming-soon hint)
+      onSave: onSave,
+      saveSemanticLabel: 'Save ${gem.gemName}',
+      topLeftBadge: isTrending
           ? Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
               decoration: BoxDecoration(
@@ -958,117 +1217,73 @@ class _FeaturedGemCard extends StatelessWidget {
               ),
             )
           : null,
-      // Save btn (not persisted yet → onSave shows a coming-soon hint)
-      topRight: Semantics(
-        button: true,
-        label: 'Save ${gem.gemName}',
-        child: GestureDetector(
-          onTap: onSave,
-          child: Container(
-            width: 44, height: 44, // min tap target
-            alignment: Alignment.center,
-            child: Container(
-              width: 32,
-              height: 32,
-              decoration: BoxDecoration(
-                color: Colors.black.withValues(alpha: 0.4),
-                shape: BoxShape.circle,
-              ),
-              child: const Icon(Icons.bookmark_outline,
-                  color: Colors.white, size: 18),
-            ),
-          ),
-        ),
-      ),
-      bottom: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Tag pill — same primary-tinted "tag" convention used on
-          // _GemTrailRow's card below and the itinerary stop cards, at a
-          // slightly higher alpha so it still pops against this card's dark
-          // photo scrim (not the light page background the other cards sit
-          // on).
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-            decoration: BoxDecoration(
-              color: AppTheme.primary.withValues(alpha: 0.2),
-              border:
-                  Border.all(color: AppTheme.primary.withValues(alpha: 0.4)),
-              borderRadius: BorderRadius.circular(5),
-            ),
-            child: Text(
-              '${gem.emoji}  ${gem.displayCategory.toUpperCase()}',
-              style: GoogleFonts.jetBrainsMono(
-                  fontSize: 9, color: AppTheme.primary, letterSpacing: 1.5),
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(gem.gemName.toUpperCase(),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: GoogleFonts.bebasNeue(
-                  fontSize: 22, color: Colors.white, height: 1)),
-          if (hasLoc)
-            Text(loc,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: GoogleFonts.fredoka(
-                    fontSize: 11, color: Colors.white.withValues(alpha: 0.65))),
-          const SizedBox(height: 8),
-          Row(
-            children: [
-              if (diff != null) ...[
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                  decoration: BoxDecoration(
-                    color: diff.color.withValues(alpha: 0.15),
-                    borderRadius: BorderRadius.circular(6),
-                  ),
-                  child: Text(diff.label,
-                      style: GoogleFonts.jetBrainsMono(
-                          fontSize: 10, color: diff.color, letterSpacing: 0.5)),
+      metaRow: (bestTime != null && bestTime.isNotEmpty)
+          ? Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.schedule, size: 12, color: AppTheme.lightMute),
+                const SizedBox(width: 4),
+                Flexible(
+                  child: Text(bestTime,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: GoogleFonts.fredoka(
+                          fontSize: 10.5, color: AppTheme.lightMute)),
                 ),
-                const SizedBox(width: 8),
               ],
-              if (bestTime != null && bestTime.isNotEmpty)
-                Expanded(
-                  child: Row(
-                    children: [
-                      Icon(Icons.schedule,
-                          size: 12, color: Colors.white.withValues(alpha: 0.7)),
-                      const SizedBox(width: 4),
-                      Expanded(
-                        child: Text(bestTime,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: GoogleFonts.fredoka(
-                                fontSize: 11,
-                                color: Colors.white.withValues(alpha: 0.7))),
-                      ),
-                    ],
-                  ),
+            )
+          : null,
+      footerLeft: diff != null
+          ? Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 7,
+                  height: 7,
+                  decoration:
+                      BoxDecoration(color: diff.color, shape: BoxShape.circle),
                 ),
-            ],
-          ),
-        ],
-      ),
+                const SizedBox(width: 5),
+                Text(diff.label,
+                    style: GoogleFonts.fredoka(
+                        fontSize: 10.5,
+                        color: diff.color,
+                        fontWeight: FontWeight.w600)),
+              ],
+            )
+          : Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.place_outlined, size: 13, color: AppTheme.lightMute),
+                const SizedBox(width: 4),
+                Flexible(
+                  child: Text(hasLoc ? loc : 'Gem',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: GoogleFonts.fredoka(
+                          fontSize: 10.5, color: AppTheme.lightMute)),
+                ),
+              ],
+            ),
+      footerCta: 'View →',
     );
   }
 }
 
 /// One card in Home's "EXPLORE IDEAS" rail — a real, curated collection
-/// (curated_collections.dart), not a synthetic Gem, but built on the exact
-/// same [PhotoInfoCard] shell _FeaturedGemCard uses above. Tapping navigates
-/// straight into the same Search Results / Destination Detail screens Phase
-/// 1 built; this card runs no query/retrieval logic of its own.
+/// (public.curated_collections), not a synthetic Gem. No rating/price exists
+/// on [CuratedCollection] (it's editorial, not a bookable listing), so the
+/// tag row and footer show the collection's real scope instead of
+/// inventing numbers. Built on the shared [_IdeaStyleCard] shell — see its
+/// doc comment for why Featured/Tours below now use the same shell too.
 class _CollectionCard extends StatelessWidget {
-  const _CollectionCard(
-      {required this.collection,
-      this.margin = const EdgeInsets.only(right: 14)});
+  const _CollectionCard({
+    required this.collection,
+    this.onSave,
+  });
 
   final CuratedCollection collection;
-  final EdgeInsets margin;
+  final VoidCallback? onSave;
 
   /// Destination scope: resolves the city's real coordinates (same
   /// GeocodingService call every other city-tap flow in this app makes) and
@@ -1095,124 +1310,92 @@ class _CollectionCard extends StatelessWidget {
     if (context.mounted) context.push(uri.toString());
   }
 
+  /// Real count of gems that fall inside this collection's scope — never a
+  /// fabricated number. Category scope is an exact match against
+  /// [GemProvider.search]'s own category filter; destination scope reuses
+  /// the exact same fuzzy substring match against `gemLocation` that
+  /// [DestinationLandingScreen] already performs for the same city (no
+  /// separate/stricter matcher invented just for this count, so the number
+  /// shown here always agrees with what that screen would actually list).
+  int _experienceCount(GemProvider gems, CollectionScope scope) {
+    return scope.isDestination
+        ? gems.search(query: scope.value).length
+        : gems.search(category: scope.value).length;
+  }
+
   @override
   Widget build(BuildContext context) {
-    return PhotoInfoCard(
+    final scope = collection.scope;
+    final tagLabel = scope.value == 'all'
+        ? 'All'
+        : scope.value[0].toUpperCase() + scope.value.substring(1);
+    final count = _experienceCount(context.watch<GemProvider>(), scope);
+    final rating = collection.rating;
+    final bestTime = collection.bestTimeToVisit;
+
+    return _IdeaStyleCard(
       imageUrl: collection.coverImageUrl,
       onTap: () => _open(context),
       semanticLabel: collection.title,
-      margin: margin,
-      bottom: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(collection.title.toUpperCase(),
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: GoogleFonts.bebasNeue(
-                  fontSize: 22, color: Colors.white, height: 1)),
-          const SizedBox(height: 4),
-          Text(collection.subtitle,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: GoogleFonts.fredoka(
-                  fontSize: 11, color: Colors.white.withValues(alpha: 0.65))),
-        ],
-      ),
-    );
-  }
-}
-
-/// One card in Home's "TOURS & EXPERIENCES" rail — built on the same
-/// [PhotoInfoCard] shell every other Home rail uses (_FeaturedGemCard,
-/// _CollectionCard above), rather than reusing tours_list_screen.dart's own
-/// [TourCard] verbatim: that card is sized for a GridView cell (relies on a
-/// bounded-height parent via an internal Expanded) and isn't built on
-/// PhotoInfoCard, so dropping it into a horizontal rail here would break
-/// Home's one-shell-per-rail convention as well as need an extra sizing
-/// wrapper. Same [Tour] data (TourProvider.tours) as the standalone
-/// screen — no separate query, just a different display shell for the
-/// same underlying tours.
-class _TourRailCard extends StatelessWidget {
-  const _TourRailCard(
-      {required this.tour, this.margin = const EdgeInsets.only(right: 14)});
-
-  final Tour tour;
-  final EdgeInsets margin;
-
-  @override
-  Widget build(BuildContext context) {
-    return PhotoInfoCard(
-      imageUrl: tour.coverPhoto ?? '',
-      onTap: () => context.push('/tours/${tour.id}'),
-      semanticLabel: tour.name,
-      margin: margin,
-      // Never automatic — see Tour.isCurated's own doc comment for why
-      // this is the ONLY thing that ever shows this badge.
-      topLeft: tour.isCurated
+      title: collection.title,
+      subtitle: collection.subtitle,
+      tagLabel: tagLabel,
+      onSave: onSave,
+      saveSemanticLabel: 'Save ${collection.title}',
+      // Curator-assigned (see CuratedCollection.rating's own doc comment) —
+      // not a computed/aggregated score. Only ever set for destination
+      // scope, so this is simply absent for category collections.
+      topLeftBadge: rating != null
           ? Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
               decoration: BoxDecoration(
-                color: AppTheme.primary,
+                color: Colors.black.withValues(alpha: 0.55),
                 borderRadius: BorderRadius.circular(6),
               ),
-              child: Text('TOP PICK',
-                  style: GoogleFonts.jetBrainsMono(
-                      fontSize: 9,
-                      color: Colors.white,
-                      fontWeight: FontWeight.w700,
-                      letterSpacing: 0.5)),
-            )
-          : null,
-      bottom: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(tour.name.toUpperCase(),
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: GoogleFonts.bebasNeue(
-                  fontSize: 20, color: Colors.white, height: 1)),
-          const SizedBox(height: 8),
-          Row(
-            children: [
-              if (tour.durationLabel != null &&
-                  tour.durationLabel!.isNotEmpty) ...[
-                Icon(Icons.schedule,
-                    size: 12, color: Colors.white.withValues(alpha: 0.7)),
-                const SizedBox(width: 4),
-                Expanded(
-                  child: Text(tour.durationLabel!,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.star_rounded, size: 13, color: Color(0xFFFFC542)),
+                  const SizedBox(width: 4),
+                  Text(rating.toStringAsFixed(1),
                       style: GoogleFonts.fredoka(
                           fontSize: 11,
-                          color: Colors.white.withValues(alpha: 0.7))),
-                ),
-              ],
-              if (tour.pickupIncluded) ...[
+                          fontWeight: FontWeight.w700,
+                          color: Colors.white)),
+                ],
+              ),
+            )
+          : null,
+      // Curator-written seasonal advice (see CuratedCollection.bestTimeToVisit)
+      // — same slot/style _FeaturedGemCard uses for the real
+      // gem.bestTimeToVisit field, so this reads identically to that one.
+      metaRow: (bestTime != null && bestTime.isNotEmpty)
+          ? Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.schedule, size: 12, color: AppTheme.lightMute),
                 const SizedBox(width: 4),
-                Icon(Icons.directions_car_filled_outlined,
-                    size: 12, color: Colors.white.withValues(alpha: 0.7)),
+                Text('Best time: $bestTime',
+                    style: GoogleFonts.fredoka(fontSize: 10.5, color: AppTheme.lightMute)),
               ],
-            ],
+            )
+          : null,
+      footerLeft: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            scope.isDestination
+                ? Icons.place_outlined
+                : Icons.local_fire_department_outlined,
+            size: 13,
+            color: AppTheme.lightMute,
           ),
-          const SizedBox(height: 6),
-          Text.rich(
-            TextSpan(children: [
-              TextSpan(
-                  text: 'From ',
-                  style: GoogleFonts.fredoka(
-                      fontSize: 10.5,
-                      color: Colors.white.withValues(alpha: 0.65))),
-              TextSpan(
-                  text: '${tour.currency} ${tour.priceFrom}',
-                  style: GoogleFonts.fredoka(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w700,
-                      color: Colors.white)),
-            ]),
-          ),
+          const SizedBox(width: 4),
+          Text(count == 1 ? '1 experience' : '$count experiences',
+              style: GoogleFonts.fredoka(fontSize: 10.5, color: AppTheme.lightMute)),
         ],
       ),
+      footerCta: 'Explore →',
     );
   }
 }

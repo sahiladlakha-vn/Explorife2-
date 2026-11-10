@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:provider/provider.dart';
 import '../../core/services/pending_action.dart';
 import '../../core/services/resolve_pending_action.dart';
 import '../../core/theme/app_theme.dart';
+import '../../providers/auth_provider.dart';
+import '../../widgets/auth/oauth_button.dart';
 import '../../screens/auth/auth_screen.dart';
 import '../../screens/home/home_screen.dart';
 import '../../screens/home/destination_landing_screen.dart';
@@ -51,6 +54,55 @@ class AppRouter {
   static GoRouter create(Listenable authRefresh) => GoRouter(
         refreshListenable: authRefresh,
         initialLocation: '/home',
+        // Defense-in-depth against two DIFFERENT failure shapes, not one:
+        // (1) a genuinely unmatched location (typo'd link, stale bookmark);
+        // (2) GoTrue's error redirect for certain link-callback failures
+        // (e.g. identity_already_exists) — which, it turns out, bypasses
+        // AuthProvider's custom redirectTo entirely and lands on the
+        // project's bare Site URL instead, error encoded as ordinary query
+        // params. That never matches any GoRoute (so _AuthCallbackScreen's
+        // own '/auth/callback' handling never even runs) and falls through
+        // to here — Uri.base.queryParameters (the actual browser location)
+        // is what still lets this be recognized and shown with the same
+        // friendly, code-specific message rather than a generic 404.
+        errorBuilder: (context, state) {
+          final params = Uri.base.queryParameters;
+          final authError = _friendlyAuthError(params);
+          if (authError != null) {
+            // Same reasoning as _AuthCallbackScreen's error branch: the
+            // sign-in didn't complete, so any action queued before it
+            // shouldn't be silently resumed on the next successful one.
+            PendingAction.takeAndClear();
+            return _AuthErrorScreen(
+                message: authError, errorCode: params['error_code']);
+          }
+          return Scaffold(
+            backgroundColor: AppTheme.lightSurface,
+            body: SafeArea(
+              child: Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(32),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.search_off,
+                          size: 48, color: AppTheme.lightMute),
+                      const SizedBox(height: 16),
+                      const Text('Page not found',
+                          style: TextStyle(
+                              color: AppTheme.lightInk, fontSize: 18)),
+                      const SizedBox(height: 24),
+                      ElevatedButton(
+                        onPressed: () => context.go('/home'),
+                        child: const Text('Back to Explorife'),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          );
+        },
         routes: [
           GoRoute(
             path: '/auth',
@@ -120,7 +172,8 @@ class AppRouter {
                   if (extra is ProfileDeepLink) {
                     return ProfileScreen(deepLink: extra);
                   }
-                  final tab = int.tryParse(state.uri.queryParameters['tab'] ?? '');
+                  final tab =
+                      int.tryParse(state.uri.queryParameters['tab'] ?? '');
                   return ProfileScreen(
                       deepLink: tab != null ? ProfileDeepLink(tab: tab) : null);
                 },
@@ -228,6 +281,130 @@ class AppRouter {
       );
 }
 
+/// Shared by both _AuthCallbackScreen (the normal '/auth/callback' landing)
+/// and AppRouter's errorBuilder (GoTrue's bare-Site-URL fallback for certain
+/// link-callback failures — see errorBuilder's own doc comment) so the two
+/// paths that can both receive the exact same GoTrue error show identical
+/// copy rather than one showing a friendly message and the other a generic
+/// 404 depending on which of the two ever happened to catch it.
+String? _friendlyAuthError(Map<String, String> params) {
+  final code = params['error_code'];
+  if (code == null) return null;
+  switch (code) {
+    case 'identity_already_exists':
+      return 'That Google account is already linked to a different '
+          'Explorife profile. Try a different Google account, or sign '
+          'out of this guest session first and sign in with that '
+          'account directly.';
+    default:
+      final description = params['error_description'];
+      return description != null
+          ? description.replaceAll('+', ' ')
+          : 'Sign-in failed. Please try again.';
+  }
+}
+
+class _AuthErrorScreen extends StatefulWidget {
+  const _AuthErrorScreen({required this.message, required this.errorCode});
+
+  final String message;
+  final String? errorCode;
+
+  @override
+  State<_AuthErrorScreen> createState() => _AuthErrorScreenState();
+}
+
+class _AuthErrorScreenState extends State<_AuthErrorScreen> {
+  bool _retrying = false;
+  String? _retryError;
+
+  /// The recovery action for `identity_already_exists` specifically: the
+  /// Google identity already belongs to a real account, so rather than
+  /// leave the user stuck on an error, offer to just sign into THAT
+  /// account directly (see AuthProvider.signInWithGoogleDirect's own doc).
+  Future<void> _signInWithThisAccount() async {
+    setState(() {
+      _retrying = true;
+      _retryError = null;
+    });
+    try {
+      await context.read<AuthProvider>().signInWithGoogleDirect();
+      // No further UI update expected on web past this point — the page
+      // navigates away for the fresh OAuth round-trip.
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _retrying = false;
+          _retryError = e.toString();
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final offerDirectSignIn = widget.errorCode == 'identity_already_exists';
+    return Scaffold(
+      backgroundColor: AppTheme.lightSurface,
+      body: SafeArea(
+        child: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(32),
+            // Without a cap here, a wide desktop viewport gives this long a
+            // sentence enough room to lay out as one unwrapped line spanning
+            // almost the full screen instead of a readable, centered
+            // paragraph — 420 keeps it wrapping at a normal paragraph width
+            // on any viewport, not just narrow ones.
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 420),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.error_outline,
+                      size: 48, color: AppTheme.lightMute),
+                  const SizedBox(height: 16),
+                  Text(
+                    widget.message,
+                    textAlign: TextAlign.center,
+                    style:
+                        const TextStyle(color: AppTheme.lightInk, fontSize: 15),
+                  ),
+                  if (_retryError != null) ...[
+                    const SizedBox(height: 12),
+                    Text(
+                      _retryError!,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(color: Colors.red, fontSize: 12),
+                    ),
+                  ],
+                  const SizedBox(height: 24),
+                  if (offerDirectSignIn) ...[
+                    OAuthButton(
+                      label: 'Sign in with this account',
+                      icon: googleIcon,
+                      loading: _retrying,
+                      onTap: _signInWithThisAccount,
+                    ),
+                    const SizedBox(height: 12),
+                    TextButton(
+                      onPressed: _retrying ? null : () => context.go('/home'),
+                      child: const Text('Back to Explorife'),
+                    ),
+                  ] else
+                    ElevatedButton(
+                      onPressed: () => context.go('/home'),
+                      child: const Text('Back to Explorife'),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _AuthCallbackScreen extends StatefulWidget {
   const _AuthCallbackScreen();
   @override
@@ -235,11 +412,12 @@ class _AuthCallbackScreen extends StatefulWidget {
 }
 
 class _AuthCallbackScreenState extends State<_AuthCallbackScreen> {
-  @override
-  void initState() {
-    super.initState();
-    _resume();
-  }
+  // Guards both branches below so a rebuild (e.g. from GoRouterState still
+  // resolving) never double-fires _resume()'s navigation or discards a
+  // second PendingAction. Deliberately set from build(), not initState —
+  // GoRouterState.of(context) reads an InheritedWidget-backed ModalRoute
+  // that isn't safely available that early.
+  bool _handled = false;
 
   /// If a write action was deferred by requireAccount() before this OAuth
   /// redirect fired (see PendingAction/sign_in_sheet.dart), re-run it now
@@ -250,13 +428,39 @@ class _AuthCallbackScreenState extends State<_AuthCallbackScreen> {
     await Future.delayed(const Duration(milliseconds: 500));
     if (!mounted) return;
     final pending = await PendingAction.takeAndClear();
-    final destination =
-        pending == null ? '/home' : await resolvePendingAction(context, pending);
+    final destination = pending == null
+        ? '/home'
+        : await resolvePendingAction(context, pending);
     if (mounted) context.go(destination);
   }
 
   @override
   Widget build(BuildContext context) {
+    // GoTrue redirects here with `?error=...&error_code=...&error_description=...`
+    // (not a session) when the OAuth attempt itself failed server-side —
+    // e.g. the Google account picked is already linked to a different,
+    // older real account (`identity_already_exists`). Some failures in
+    // this same class instead land on AppRouter's errorBuilder (bare Site
+    // URL fallback) rather than here — see _friendlyAuthError's own doc.
+    final params = GoRouterState.of(context).uri.queryParameters;
+    final error = _friendlyAuthError(params);
+
+    if (error != null) {
+      if (!_handled) {
+        _handled = true;
+        // The sign-in didn't actually complete — resuming whatever gated
+        // action queued this attempt would be wrong (and possibly repeat
+        // it against the wrong account once the user retries). One-shot
+        // clear, same as the success path already does.
+        PendingAction.takeAndClear();
+      }
+      return _AuthErrorScreen(message: error, errorCode: params['error_code']);
+    }
+
+    if (!_handled) {
+      _handled = true;
+      _resume();
+    }
     return const Scaffold(
       backgroundColor: AppTheme.lightSurface,
       body: Center(child: CircularProgressIndicator(color: AppTheme.primary)),

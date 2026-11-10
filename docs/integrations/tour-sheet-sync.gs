@@ -34,39 +34,46 @@
  *   C Price From           (numeric, e.g. 1200000. Non-negative. Blank = 0.)
  *   D Currency             (one of VND, USD — blank defaults to VND)
  *   E Duration Label       (free text, e.g. "Full day (10 hours)")
- *   F Cancellation Policy  (free text, e.g. "Free cancellation up to 24
+ *   F Group Size Label     (free text, e.g. "Up to 12 people". Shown in the
+ *                            "Group size" QuickFactsRow cell right next to
+ *                            Duration on every tour card/detail screen.)
+ *   G Cancellation Policy  (free text, e.g. "Free cancellation up to 24
  *                            hours before departure")
- *   G Pickup Included      (checkbox)
- *   H Pickup Detail        (free text, e.g. "Hotel pickup in Old Quarter")
- *   I Guide Languages      (comma-separated, e.g. "English, Vietnamese")
- *   J Highlights           (comma-separated, e.g. "UNESCO site, Sunset view")
- *   K Itinerary            (ORDER MATTERS — one step per line within the
- *                            cell, "Title | Description" per line;
- *                            description is optional (a line with no "|"
- *                            is title-only). Example, three steps in one
- *                            cell:
- *                              Pickup | From your hotel
+ *   H Pickup Included      (checkbox)
+ *   I Pickup Detail        (free text, e.g. "Hotel pickup in Old Quarter")
+ *   J Guide Languages      (comma-separated, e.g. "English, Vietnamese")
+ *   K Highlights           (comma-separated, e.g. "UNESCO site, Sunset view")
+ *   L Itinerary            (ORDER MATTERS — one step per line within the
+ *                            cell. Either "Title | Description" (two parts)
+ *                            or "Title | Time | Description" (three parts,
+ *                            e.g. "Board the cruise | 9:00 AM | Meet at the
+ *                            marina") — a line with no "|" is title-only.
+ *                            Example, three steps in one cell:
+ *                              Pickup | 8:00 AM | From your hotel
  *                              Board the cruise
  *                              Kayaking | Free kayaking around the karsts
  *                            See "DIFFERS FROM GEM SYNC" below for why
  *                            this isn't comma-separated like the other
  *                            list columns.)
- *   L Includes             (comma-separated, e.g. "Lunch, Kayaking, Guide")
- *   M Full Description     (free text)
- *   N Is Curated           (checkbox — the ONLY thing that drives the "Top
+ *   M Includes             (comma-separated, e.g. "Lunch, Kayaking, Guide")
+ *   N Excludes             (comma-separated, e.g. "Alcoholic drinks, Tips" —
+ *                            shown as "What's not included" on the Includes
+ *                            tab, right below Includes' "What's included".)
+ *   O Full Description     (free text)
+ *   P Is Curated           (checkbox — the ONLY thing that drives the "Top
  *                            pick" badge; see Tour.isCurated's own doc
  *                            comment. Never set this from a formula or
  *                            derived value — it's a deliberate editorial
  *                            call, same rule as the Trail spec requires.)
- *   O Photo URL            (one or more real public URLs, comma-separated —
+ *   Q Photo URL            (one or more real public URLs, comma-separated —
  *                            same convention as the Gems sheet's Photo URL
- *                            column: combines with column P into one
+ *                            column: combines with column R into one
  *                            final list, script-rewritten after each sync.)
- *   P Photo Filename       (one or more filenames in your Photo Folder,
+ *   R Photo Filename       (one or more filenames in your Photo Folder,
  *                            comma-separated — same Drive-upload mechanism
  *                            as the Gems sheet's Photo Filename column.)
- *   Q Tour ID              (script-managed — leave blank, it fills itself in)
- *   R Sync Status          (script-managed — shows "Synced <time>" or the error)
+ *   S Tour ID              (script-managed — leave blank, it fills itself in)
+ *   T Sync Status          (script-managed — shows "Synced <time>" or the error)
  *
  * DIFFERS FROM GEM SYNC (and why)
  *   1. Category is validated the SAME way (optional, but rejected if
@@ -88,19 +95,19 @@
  *      nothing analogous to Address -> coordinates for a priced
  *      experience in this app yet, so that whole step (and its Mapbox
  *      dependency) is simply absent, not replaced with anything.
- *   4. Itinerary's "Title | Description" per-line format is new — the
- *      Gems sheet's only real array-column precedent is comma-separated
- *      (Photo URL/Filename); nothing in the actual Gem sync handles an
- *      ORDERED list of {title, description} pairs (goodToKnow isn't
- *      synced from the Gems sheet at all — it's not one of that sheet's
- *      columns). Comma-separated can't preserve title+description
- *      structure without a delimiter collision risk, and a linked
- *      sub-sheet keyed by id is a bigger structural deviation with no
- *      precedent in the real script either. One-line-per-step in a
- *      single cell was chosen as the smallest deviation from the
- *      established convention that still preserves order and structure.
- *      Guide Languages/Highlights/Includes stay comma-separated,
- *      matching the real precedent exactly.
+ *   4. Itinerary's "Title | Description" (or "Title | Time | Description")
+ *      per-line format is new — the Gems sheet's only real array-column
+ *      precedent is comma-separated (Photo URL/Filename); nothing in the
+ *      actual Gem sync handles an ORDERED list of {title, description,
+ *      time} objects (goodToKnow isn't synced from the Gems sheet at all —
+ *      it's not one of that sheet's columns). Comma-separated can't
+ *      preserve title+description structure without a delimiter collision
+ *      risk, and a linked sub-sheet keyed by id is a bigger structural
+ *      deviation with no precedent in the real script either. One-line-
+ *      per-step in a single cell was chosen as the smallest deviation from
+ *      the established convention that still preserves order and
+ *      structure. Guide Languages/Highlights/Includes/Excludes stay
+ *      comma-separated, matching the real precedent exactly.
  *
  * PHOTOS — identical mechanism to the Gems sheet (see that file's own
  * header for the full explanation of why Drive share-links aren't used
@@ -148,10 +155,10 @@ function setup() {
 // ── column layout — edit these if you reorder the sheet ──────────────────
 const COL = {
   NAME: 1, CATEGORY: 2, PRICE_FROM: 3, CURRENCY: 4, DURATION_LABEL: 5,
-  CANCELLATION_POLICY: 6, PICKUP_INCLUDED: 7, PICKUP_DETAIL: 8,
-  GUIDE_LANGUAGES: 9, HIGHLIGHTS: 10, ITINERARY: 11, INCLUDES: 12,
-  FULL_DESCRIPTION: 13, IS_CURATED: 14, PHOTO_URL: 15, PHOTO_FILENAME: 16,
-  TOUR_ID: 17, STATUS: 18,
+  GROUP_SIZE_LABEL: 6, CANCELLATION_POLICY: 7, PICKUP_INCLUDED: 8,
+  PICKUP_DETAIL: 9, GUIDE_LANGUAGES: 10, HIGHLIGHTS: 11, ITINERARY: 12,
+  INCLUDES: 13, EXCLUDES: 14, FULL_DESCRIPTION: 15, IS_CURATED: 16,
+  PHOTO_URL: 17, PHOTO_FILENAME: 18, TOUR_ID: 19, STATUS: 20,
 };
 const HEADER_ROW = 1;
 // Must stay in sync with Gem.categories (lib/models/gem.dart),
@@ -272,11 +279,13 @@ function syncRow_(sheet, row) {
     p_price_from: priceFrom,
     p_currency: currency || null,
     p_duration_label: String(get(COL.DURATION_LABEL) || '').trim() || null,
+    p_group_size_label: String(get(COL.GROUP_SIZE_LABEL) || '').trim() || null,
     p_cancellation_policy: String(get(COL.CANCELLATION_POLICY) || '').trim() || null,
     p_pickup_included: get(COL.PICKUP_INCLUDED) === true,
     p_pickup_detail: String(get(COL.PICKUP_DETAIL) || '').trim() || null,
     p_guide_languages: splitList_(get(COL.GUIDE_LANGUAGES)),
     p_includes: splitList_(get(COL.INCLUDES)),
+    p_excludes: splitList_(get(COL.EXCLUDES)),
     p_itinerary: parseItinerary_(get(COL.ITINERARY)),
     p_highlights: splitList_(get(COL.HIGHLIGHTS)),
     p_full_description: String(get(COL.FULL_DESCRIPTION) || '').trim() || null,
@@ -307,21 +316,29 @@ function splitList_(cellValue) {
     .filter((s) => s.length > 0);
 }
 
-// Parses the Itinerary cell into an ordered array of {title, description}
-// objects — one step per line, "Title | Description" (description
-// optional). See the "DIFFERS FROM GEM SYNC" note at the top of this file
-// for why this isn't comma-separated like the other list columns.
+// Parses the Itinerary cell into an ordered array of {title, description?,
+// time?} objects — one step per line. A line with no "|" is title-only; one
+// "|" is "Title | Description" (unchanged from the original two-part
+// format, so existing rows keep working exactly as before); two "|"s is
+// "Title | Time | Description" (Time is TourItineraryStep.time — e.g. "9:00
+// AM" — rendered next to the step title when present). See the "DIFFERS
+// FROM GEM SYNC" note at the top of this file for why this isn't
+// comma-separated like the other list columns.
 function parseItinerary_(cellValue) {
   const lines = String(cellValue || '')
     .split('\n')
     .map((s) => s.trim())
     .filter((s) => s.length > 0);
   return lines.map((line) => {
-    const idx = line.indexOf('|');
-    if (idx === -1) return { title: line };
-    const title = line.slice(0, idx).trim();
-    const description = line.slice(idx + 1).trim();
-    return description ? { title: title, description: description } : { title: title };
+    const parts = line.split('|').map((s) => s.trim());
+    if (parts.length === 1) return { title: parts[0] };
+    if (parts.length === 2) {
+      return parts[1] ? { title: parts[0], description: parts[1] } : { title: parts[0] };
+    }
+    const step = { title: parts[0] };
+    if (parts[1]) step.time = parts[1];
+    if (parts[2]) step.description = parts[2];
+    return step;
   });
 }
 

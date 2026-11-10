@@ -45,110 +45,171 @@ class _OverviewTab extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final avg = tripCount > 0 ? spent / tripCount : 0;
-    return MaxWidthCenter(
-      child: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 18, 16, 100),
-        children: [
-          // Next / upcoming trip pulse — first thing a returning user sees.
-          _TripCarousel(onOpenTripSegment: onOpenTripSegment),
-          const SizedBox(height: 16),
 
-          // Derived alerts — most actionable, so directly under the trip pulse.
-          // Absent when the active trip has nothing flagged.
-          if (alerts.isNotEmpty) ...[
-            _AlertsCard(
-                alerts: alerts,
-                symbol: symbol,
-                onOpenTripSegment: onOpenTripSegment),
+    // Left column: everything that's about the trip itself (the hero card,
+    // its pagination, and the two trip-derived insight cards that used to
+    // sit directly beneath it in the old single-column order). Right
+    // column: the two account-level summary cards (expense totals aren't
+    // scoped to one trip; stories are the user's own writing, not trip
+    // data). Same grouping either way — desktop just renders it as two
+    // side-by-side columns instead of one stacked column.
+    final leftColumn = <Widget>[
+      // Next / upcoming trip pulse — first thing a returning user sees.
+      _TripCarousel(onOpenTripSegment: onOpenTripSegment),
+      // Derived alerts — most actionable, so directly under the trip pulse.
+      // Absent when the active trip has nothing flagged.
+      if (alerts.isNotEmpty) ...[
+        const SizedBox(height: 16),
+        _AlertsCard(
+            alerts: alerts,
+            symbol: symbol,
+            onOpenTripSegment: onOpenTripSegment),
+      ],
+      // Budget pace — present for any active trip (honest not-started/no-budget
+      // states included); absent only when there's no active trip.
+      if (pace != null) ...[
+        const SizedBox(height: 16),
+        _PaceCard(pace: pace!, budgetVnd: budgetVnd ?? 0, symbol: symbol),
+      ],
+    ];
+
+    final rightColumn = <Widget>[
+      // Expense summary
+      _Card(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const _CardHeader(
+                icon: Icons.trending_up,
+                label: 'EXPENSE SUMMARY',
+                color: _kTeal),
             const SizedBox(height: 16),
-          ],
-
-          // Budget pace — present for any active trip (honest not-started/no-budget
-          // states included); absent only when there's no active trip.
-          if (pace != null) ...[
-            _PaceCard(pace: pace!, budgetVnd: budgetVnd ?? 0, symbol: symbol),
-            const SizedBox(height: 16),
-          ],
-
-          // Expense summary
-          _Card(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const _CardHeader(
-                    icon: Icons.trending_up,
-                    label: 'EXPENSE SUMMARY',
-                    color: _kTeal),
-                const SizedBox(height: 16),
-                _summaryRow('Total across all trips',
-                    '\$${spent.toStringAsFixed(1)}', _kInk),
-                const SizedBox(height: 14),
-                _summaryRow(
-                    'Average per trip', '\$${avg.toStringAsFixed(2)}', _kInk),
-                const SizedBox(height: 14),
-                _summaryRow('Groups settled', '$groups / $groups', _kTeal),
-                const SizedBox(height: 14),
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(4),
-                  child: const LinearProgressIndicator(
-                    value: 1,
-                    minHeight: 5,
-                    backgroundColor: _kBorder,
-                    valueColor: AlwaysStoppedAnimation(_kTeal),
-                  ),
-                ),
-              ],
+            _summaryRow('Total across all trips',
+                '\$${spent.toStringAsFixed(1)}', _kInk),
+            const SizedBox(height: 14),
+            _summaryRow(
+                'Average per trip', '\$${avg.toStringAsFixed(2)}', _kInk),
+            const SizedBox(height: 14),
+            _summaryRow('Groups settled', '$groups / $groups', _kTeal),
+            const SizedBox(height: 14),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(4),
+              child: LinearProgressIndicator(
+                // Was hard-coded `value: 1` — always rendered fully filled,
+                // even for a brand-new account with zero groups ("0 / 0"
+                // text next to a 100%-full bar). `groups` currently doubles
+                // as both this card's numerator and denominator (there's no
+                // separate settled-vs-total tally yet), so the only two
+                // genuinely different states are "at least one group"
+                // (full) and "none yet" (empty) — this guard picks between
+                // those instead of defaulting to full on 0/0.
+                value: groups > 0 ? 1.0 : 0.0,
+                minHeight: 5,
+                backgroundColor: _kBorder,
+                valueColor: const AlwaysStoppedAnimation(_kTeal),
+              ),
             ),
-          ),
-          const SizedBox(height: 16),
-
-          // Recent stories
-          _Card(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const _CardHeader(
-                    icon: Icons.menu_book_outlined,
-                    label: 'RECENT STORIES',
-                    color: AppTheme.primary),
-                const SizedBox(height: 8),
-                if (stories.isEmpty)
-                  _emptyLine('You haven\'t submitted any stories yet.')
-                else
-                  ...stories.take(3).toList().asMap().entries.map(
-                      (e) => _StoryRow(story: e.value, divider: e.key > 0)),
-              ],
-            ),
-          ),
-          const SizedBox(height: 16),
-
-          // Saved Gems — photo strip, matching the mockup. Bookmarked gems
-          // (GemProvider.savedGems), not the user's own dropped pins — same
-          // data the dedicated Saved Gems tab (index 2) reads.
-          _SectionTitle(title: 'Saved Gems', onViewAll: () => onSwitchTab(2)),
-          const SizedBox(height: 10),
-          const _SavedGemsStrip(),
-          const SizedBox(height: 20),
-
-          // Badges — preview strip of the same _BadgeTile the Badges tab (index
-          // 4) renders in full.
-          _SectionTitle(title: 'Badges', onViewAll: () => onSwitchTab(4)),
-          const SizedBox(height: 10),
-          SizedBox(
-            height: 96,
-            child: badges.isEmpty
-                ? _emptyLine('No badges yet.')
-                : ListView.separated(
-                    scrollDirection: Axis.horizontal,
-                    itemCount: badges.length,
-                    separatorBuilder: (_, __) => const SizedBox(width: 10),
-                    itemBuilder: (_, i) => SizedBox(
-                        width: 84, child: _BadgeTile(badge: badges[i])),
-                  ),
-          ),
-        ],
+          ],
+        ),
       ),
+      const SizedBox(height: 16),
+      // Recent stories
+      _Card(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const _CardHeader(
+                icon: Icons.menu_book_outlined,
+                label: 'RECENT STORIES',
+                color: AppTheme.primary),
+            const SizedBox(height: 8),
+            if (stories.isEmpty)
+              _emptyLine('You haven\'t submitted any stories yet.')
+            else
+              ...stories.take(3).toList().asMap().entries.map(
+                  (e) => _StoryRow(story: e.value, divider: e.key > 0)),
+          ],
+        ),
+      ),
+    ];
+
+    // Saved Gems / Badges strips — full-width regardless of the grid above
+    // (they're horizontal photo/tile scrollers, not two-column content), so
+    // they render below the grid on desktop and below the stacked column on
+    // mobile either way.
+    final tailSection = <Widget>[
+      // Saved Gems — photo strip, matching the mockup. Bookmarked gems
+      // (GemProvider.savedGems), not the user's own dropped pins — same
+      // data the dedicated Saved Gems tab (index 2) reads.
+      _SectionTitle(title: 'Saved Gems', onViewAll: () => onSwitchTab(2)),
+      const SizedBox(height: 10),
+      const _SavedGemsStrip(),
+      const SizedBox(height: 20),
+      // Badges — preview strip of the same _BadgeTile the Badges tab (index
+      // 4) renders in full.
+      _SectionTitle(title: 'Badges', onViewAll: () => onSwitchTab(4)),
+      const SizedBox(height: 10),
+      SizedBox(
+        height: 96,
+        child: badges.isEmpty
+            ? _emptyLine('No badges yet.')
+            : ListView.separated(
+                scrollDirection: Axis.horizontal,
+                itemCount: badges.length,
+                separatorBuilder: (_, __) => const SizedBox(width: 10),
+                itemBuilder: (_, i) =>
+                    SizedBox(width: 84, child: _BadgeTile(badge: badges[i])),
+              ),
+      ),
+    ];
+
+    // Desktop: real 2fr/1fr grid (trip card wider, summary/stories
+    // narrower) instead of MaxWidthCenter's 640px single centered column —
+    // that cap was leaving roughly two-thirds of a wide viewport empty.
+    // Mobile keeps the exact original stacked single column.
+    final isDesktop = Breakpoints.isDesktop(context);
+    final body = isDesktop
+        ? Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    flex: 2,
+                    child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: leftColumn),
+                  ),
+                  const SizedBox(width: 20),
+                  Expanded(
+                    flex: 1,
+                    child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: rightColumn),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 20),
+              ...tailSection,
+            ],
+          )
+        : Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              ...leftColumn,
+              const SizedBox(height: 16),
+              ...rightColumn,
+              const SizedBox(height: 16),
+              ...tailSection,
+            ],
+          );
+
+    final content = ListView(
+      padding: const EdgeInsets.fromLTRB(16, 18, 16, 100),
+      children: [body],
     );
+    return isDesktop ? content : MaxWidthCenter(child: content);
   }
 
   Widget _summaryRow(String label, String value, Color valueColor) {
@@ -156,11 +217,11 @@ class _OverviewTab extends StatelessWidget {
       children: [
         Expanded(
           child: Text(label,
-              style: GoogleFonts.fredoka(
+              style: GoogleFonts.inter(
                   fontSize: 15, color: const Color(0xFF555555))),
         ),
         Text(value,
-            style: GoogleFonts.fredoka(
+            style: GoogleFonts.inter(
                 fontSize: 17, fontWeight: FontWeight.w800, color: valueColor)),
       ],
     );
@@ -169,7 +230,7 @@ class _OverviewTab extends StatelessWidget {
   Widget _emptyLine(String text) => Padding(
         padding: const EdgeInsets.symmetric(vertical: 14),
         child:
-            Text(text, style: GoogleFonts.fredoka(fontSize: 13, color: _kMute)),
+            Text(text, style: GoogleFonts.inter(fontSize: 13, color: _kMute)),
       );
 }
 
@@ -186,12 +247,12 @@ class _SectionTitle extends StatelessWidget {
       children: [
         Expanded(
           child: Text(title,
-              style: GoogleFonts.bebasNeue(fontSize: 18, color: _kInk)),
+              style: GoogleFonts.inter(fontSize: 18, color: _kInk)),
         ),
         GestureDetector(
           onTap: onViewAll,
           child: Text('View all →',
-              style: GoogleFonts.fredoka(
+              style: GoogleFonts.inter(
                   fontSize: 12,
                   fontWeight: FontWeight.w600,
                   color: AppTheme.primary)),
@@ -215,7 +276,7 @@ class _SavedGemsStrip extends StatelessWidget {
         padding: const EdgeInsets.symmetric(vertical: 14),
         child: Text(
             'Nothing saved yet — bookmark spots and they\'ll show up here.',
-            style: GoogleFonts.fredoka(fontSize: 13, color: _kMute)),
+            style: GoogleFonts.inter(fontSize: 13, color: _kMute)),
       );
     }
     return SizedBox(
@@ -293,13 +354,13 @@ class _TripCarouselState extends State<_TripCarousel> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text('No trips yet',
-                      style: GoogleFonts.fredoka(
+                      style: GoogleFonts.inter(
                           fontSize: 16,
                           fontWeight: FontWeight.w800,
                           color: _kInk)),
                   const SizedBox(height: 2),
                   Text('Plan your first adventure.',
-                      style: GoogleFonts.fredoka(fontSize: 13, color: _kMute)),
+                      style: GoogleFonts.inter(fontSize: 13, color: _kMute)),
                 ],
               ),
             ),
@@ -332,7 +393,22 @@ class _TripCarouselState extends State<_TripCarousel> {
         ),
         if (trips.length > 1) ...[
           const SizedBox(height: 10),
-          Center(child: _PageDots(count: trips.length, index: _page)),
+          Center(
+            child: _PagePager(
+              index: _page,
+              count: trips.length,
+              onPrev: _page > 0
+                  ? () => _controller.previousPage(
+                      duration: const Duration(milliseconds: 250),
+                      curve: Curves.easeOut)
+                  : null,
+              onNext: _page < trips.length - 1
+                  ? () => _controller.nextPage(
+                      duration: const Duration(milliseconds: 250),
+                      curve: Curves.easeOut)
+                  : null,
+            ),
+          ),
         ],
       ],
     );
@@ -467,7 +543,7 @@ class _TripCardState extends State<_TripCard> {
                         child: Text(trip.displayName,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
-                            style: GoogleFonts.bebasNeue(
+                            style: GoogleFonts.inter(
                                 fontSize: 22, color: Colors.white)),
                       ),
                       // Solo trip (organizer only) → nothing worth showing here;
@@ -520,7 +596,7 @@ class _TripCardState extends State<_TripCard> {
                                         size: 14, color: Colors.white),
                                     const SizedBox(width: 3),
                                     Text('Expense',
-                                        style: GoogleFonts.fredoka(
+                                        style: GoogleFonts.inter(
                                             fontSize: 11.5,
                                             fontWeight: FontWeight.w700,
                                             color: Colors.white)),
@@ -533,7 +609,7 @@ class _TripCardState extends State<_TripCard> {
                   const SizedBox(height: 4),
                   Text(
                     '${Trip.formatDateRange(trip.startDate, trip.endDate)} · ${trip.nights} ${trip.nights == 1 ? 'night' : 'nights'}',
-                    style: GoogleFonts.fredoka(
+                    style: GoogleFonts.inter(
                         fontSize: 12,
                         color: Colors.white.withValues(alpha: 0.8)),
                   ),
@@ -542,19 +618,19 @@ class _TripCardState extends State<_TripCard> {
                     children: [
                       Expanded(
                         child: Text('Budget used',
-                            style: GoogleFonts.fredoka(
+                            style: GoogleFonts.inter(
                                 fontSize: 12, color: Colors.white)),
                       ),
                       Text(
                         '$symbol${Trip.formatVnd(spent, short: true)} ',
-                        style: GoogleFonts.fredoka(
+                        style: GoogleFonts.inter(
                             fontSize: 12,
                             fontWeight: FontWeight.w700,
                             color: Colors.white),
                       ),
                       Text(
                         '/ $symbol${Trip.formatVnd(trip.budgetVnd, short: true)}',
-                        style: GoogleFonts.fredoka(
+                        style: GoogleFonts.inter(
                             fontSize: 12,
                             color: Colors.white.withValues(alpha: 0.8)),
                       ),
@@ -676,7 +752,7 @@ class _TravelerAvatarStack extends StatelessWidget {
                     border: Border.all(color: Colors.white, width: 1.5),
                   ),
                   child: Text('+$extra',
-                      style: GoogleFonts.jetBrainsMono(
+                      style: GoogleFonts.inter(
                           fontSize: 9,
                           fontWeight: FontWeight.w700,
                           color: Colors.white)),
@@ -689,30 +765,59 @@ class _TravelerAvatarStack extends StatelessWidget {
   }
 }
 
-/// Dot-row page indicator — one dot per trip, filled orange for the current
-/// page, so the trip count is visible at a glance without counting swipes.
-class _PageDots extends StatelessWidget {
-  final int count;
+/// Prev/next chevron pager + "current / total" label — replaces the old
+/// one-dot-per-trip row, which stopped being a usable indicator once a user
+/// had more than a handful of trips (17 dots, at time of writing, wrapping
+/// onto a second line). Chevrons disable in place (not hidden) at either
+/// end rather than wrapping around, matching standard pager conventions.
+class _PagePager extends StatelessWidget {
   final int index;
-  const _PageDots({required this.count, required this.index});
+  final int count;
+  final VoidCallback? onPrev;
+  final VoidCallback? onNext;
+  const _PagePager({
+    required this.index,
+    required this.count,
+    required this.onPrev,
+    required this.onNext,
+  });
 
   @override
   Widget build(BuildContext context) {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        for (var i = 0; i < count; i++)
-          AnimatedContainer(
-            duration: const Duration(milliseconds: 150),
-            margin: const EdgeInsets.symmetric(horizontal: 3),
-            width: i == index ? 16 : 6,
-            height: 6,
-            decoration: BoxDecoration(
-              color: i == index ? AppTheme.primary : _kBorder,
-              borderRadius: BorderRadius.circular(3),
-            ),
-          ),
+        _chevron(Icons.chevron_left, onPrev, 'Previous trip'),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 10),
+          child: Text('${index + 1} / $count',
+              style: GoogleFonts.inter(
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w600,
+                  color: _kMute)),
+        ),
+        _chevron(Icons.chevron_right, onNext, 'Next trip'),
       ],
+    );
+  }
+
+  Widget _chevron(IconData icon, VoidCallback? onTap, String label) {
+    final enabled = onTap != null;
+    return Semantics(
+      button: true,
+      enabled: enabled,
+      label: label,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          customBorder: const CircleBorder(),
+          child: Padding(
+            padding: const EdgeInsets.all(4),
+            child: Icon(icon, size: 20, color: enabled ? _kInk : _kBorder),
+          ),
+        ),
+      ),
     );
   }
 }
@@ -746,7 +851,7 @@ class _HeroBadge extends StatelessWidget {
           ),
           child: Text(
             label,
-            style: GoogleFonts.jetBrainsMono(
+            style: GoogleFonts.inter(
                 fontSize: 10,
                 fontWeight: FontWeight.w700,
                 color: foreground,
@@ -785,7 +890,7 @@ class _SegmentChip extends StatelessWidget {
             Icon(icon, size: 17, color: Colors.white),
             const SizedBox(height: 6),
             Text(label,
-                style: GoogleFonts.fredoka(
+                style: GoogleFonts.inter(
                     fontSize: 11,
                     fontWeight: FontWeight.w600,
                     color: Colors.white)),
@@ -996,7 +1101,7 @@ class _TripChipCta extends StatelessWidget {
           borderRadius: BorderRadius.circular(10),
         ),
         child: Text(label,
-            style: GoogleFonts.fredoka(
+            style: GoogleFonts.inter(
                 fontSize: 13,
                 fontWeight: FontWeight.w700,
                 color: Colors.white)),
@@ -1047,7 +1152,7 @@ class _AlertsCard extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text('Needs attention',
-            style: GoogleFonts.bebasNeue(fontSize: 18, color: _kInk)),
+            style: GoogleFonts.inter(fontSize: 18, color: _kInk)),
         const SizedBox(height: 10),
         for (final a in shown) ...[
           _AlertRow(
@@ -1058,7 +1163,7 @@ class _AlertsCard extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.only(left: 4),
             child: Text('+$extra more',
-                style: GoogleFonts.jetBrainsMono(
+                style: GoogleFonts.inter(
                     fontSize: 11, color: _kMute, letterSpacing: 0.5)),
           ),
       ],
@@ -1104,13 +1209,13 @@ class _AlertRow extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(copy.title,
-                    style: GoogleFonts.fredoka(
+                    style: GoogleFonts.inter(
                         fontSize: 14,
                         fontWeight: FontWeight.w800,
                         color: _kInk)),
                 const SizedBox(height: 2),
                 Text(copy.body,
-                    style: GoogleFonts.fredoka(
+                    style: GoogleFonts.inter(
                         fontSize: 12.5, color: _kMute, height: 1.35)),
                 const SizedBox(height: 10),
                 GestureDetector(
@@ -1124,7 +1229,7 @@ class _AlertRow extends StatelessWidget {
                       border: Border.all(color: accent.withValues(alpha: 0.45)),
                     ),
                     child: Text(_alertCta(alert.kind),
-                        style: GoogleFonts.fredoka(
+                        style: GoogleFonts.inter(
                             fontSize: 11.5,
                             fontWeight: FontWeight.w700,
                             color: accent)),
@@ -1273,7 +1378,7 @@ class _PaceCard extends StatelessWidget {
           Expanded(
               child: _mono('Day ${pace.tripDayToday} of ${pace.tripDays}')),
           Text(deltaText,
-              style: GoogleFonts.fredoka(
+              style: GoogleFonts.inter(
                   fontSize: 13, fontWeight: FontWeight.w800, color: accent)),
         ],
       ),
@@ -1319,10 +1424,10 @@ class _PaceCard extends StatelessWidget {
   }
 
   Widget _headline(String t, Color c) => Text(t,
-      style: GoogleFonts.fredoka(
+      style: GoogleFonts.inter(
           fontSize: 15, fontWeight: FontWeight.w800, color: c));
 
   Widget _mono(String t) => Text(t,
-      style: GoogleFonts.jetBrainsMono(
+      style: GoogleFonts.inter(
           fontSize: 11, color: _kMute, letterSpacing: 0.3));
 }
