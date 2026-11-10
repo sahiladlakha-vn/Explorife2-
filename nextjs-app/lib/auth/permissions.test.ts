@@ -30,8 +30,10 @@ import {
   assertCanChangeProfileRole,
   assertCanVerifyAttraction,
   assertCanVerifyRestaurant,
+  requireAdmin,
   PROFILE_ROLE_CHANGE_ROLES,
   VERIFICATION_MODERATOR_ROLES,
+  ADMIN_ROLES,
   type Role,
 } from "./permissions";
 
@@ -229,5 +231,26 @@ describe("ensureAnonymousSession", () => {
     });
     mockSessionUser(null, { signInAnonymously });
     await expect(ensureAnonymousSession()).rejects.toBeInstanceOf(AuthError);
+  });
+});
+
+// --- requireAdmin ------------------------------------------------------------
+
+describe("requireAdmin", () => {
+  it("throws AuthError when there's no session", async () => {
+    mockSessionUser(null);
+    await expect(requireAdmin()).rejects.toBeInstanceOf(AuthError);
+  });
+
+  it("throws ForbiddenError for a signed-in traveler", async () => {
+    mockSessionUser({ id: "user-1" });
+    mockProfileRole("traveler");
+    await expect(requireAdmin()).rejects.toBeInstanceOf(ForbiddenError);
+  });
+
+  it.each(ADMIN_ROLES)("resolves for a %s", async (role) => {
+    mockSessionUser({ id: "user-1" });
+    mockProfileRole(role);
+    await expect(requireAdmin()).resolves.toEqual({ user: { id: "user-1" }, role });
   });
 });

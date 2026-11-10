@@ -1,7 +1,7 @@
 import "server-only";
 import { redirect } from "next/navigation";
 import type { User } from "@supabase/supabase-js";
-import { getCurrentUser } from "./permissions";
+import { ADMIN_ROLES, getCurrentUser, getUserRole, type Role } from "./permissions";
 import { sanitizeRedirect } from "./redirect";
 
 /**
@@ -23,4 +23,22 @@ export async function requireRealUserOrRedirect(currentPath: string): Promise<Us
     redirect(`/auth?redirect=${encodeURIComponent(sanitizeRedirect(currentPath))}`);
   }
   return user;
+}
+
+/**
+ * Page-level counterpart to `requireAdmin()` (`./permissions`): same
+ * `ADMIN_ROLES` check, but redirects instead of throwing, matching
+ * `requireRealUserOrRedirect`'s reasoning above — an unauthenticated or
+ * non-admin visitor hitting an admin page isn't an `error.tsx`-worthy
+ * failure. No session (or a guest session) redirects to sign-in like
+ * `requireRealUserOrRedirect`; a signed-in non-admin redirects to `/profile`
+ * instead, since `/auth` would be confusing for an already-authenticated user.
+ */
+export async function requireAdminOrRedirect(currentPath: string): Promise<{ user: User; role: Role }> {
+  const user = await requireRealUserOrRedirect(currentPath);
+  const role = await getUserRole(user.id);
+  if (!role || !ADMIN_ROLES.includes(role)) {
+    redirect("/profile");
+  }
+  return { user, role };
 }

@@ -40,12 +40,23 @@
   --color-primary: #ff6b2b;
   --color-primary-dark: #e55a1f;
   --color-primary-light: #ff9166;
+  /* app_theme.dart's `primarySoft` = primary @ 12% alpha; expressed as a
+     color-mix so it tracks --color-primary instead of duplicating the hex. */
+  --color-primary-soft: color-mix(in srgb, var(--color-primary) 12%, transparent);
   --color-lime: #baff29;
   --color-teal: #5dcaa5;
   --color-purple: #afa9ec;
   --color-pink: #ed93b1;
   --color-warn: #fac775;
   --color-danger: #e24b4a;
+  /*
+   * profile_palette.dart's `_kGreen` (#3C9A5F) — the Profile/My Trip area's
+   * "confirmed/packed/success" accent (packing-progress fill, confirmed
+   * traveler status, etc). No existing token covers this: `--color-teal`
+   * is a distinct hue used for different semantics elsewhere, so this is a
+   * new addition rather than a rename.
+   */
+  --color-success: #3c9a5f;
 
   /* Discovery-map bottom sheet palette (app_theme.dart "sheet*" constants) */
   --color-sheet-surface: #ffffff;
@@ -81,8 +92,43 @@
   --color-text: var(--color-ink);
   --color-text-muted: color-mix(in srgb, var(--color-ink) 55%, transparent);
   --color-accent: var(--color-primary);
+
+  /*
+   * Admin dashboard glassmorphism surface (components/features/dashboard).
+   * Built from the existing dark palette/accent hues above rather than a new
+   * hue family — a glass panel is just a translucent sheet of whatever sits
+   * behind it, so it only needs alpha-mixed white for the frost plus the
+   * page's own accent colors for the blurred backdrop blobs it sits over.
+   */
+  --color-glass-surface: color-mix(in srgb, white 6%, transparent);
+  --color-glass-surface-raised: color-mix(in srgb, white 10%, transparent);
+  --color-glass-border: color-mix(in srgb, white 14%, transparent);
 }
 
 body {
   font-family: var(--font-sans), sans-serif;
+}
+
+@layer components {
+  /*
+   * `backdrop-filter: blur()` only reads as "glass" over something with
+   * visible color/contrast behind it — see `.admin-dashboard-backdrop` below,
+   * which every `/admin/dashboard` surface renders on top of.
+   */
+  .glass-card {
+    background: var(--color-glass-surface);
+    border: 1px solid var(--color-glass-border);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+  }
+
+  /* Soft blurred accent blobs on the dark base palette — CSS-only, no image asset. */
+  .admin-dashboard-backdrop {
+    background-color: var(--color-bg);
+    background-image:
+      radial-gradient(circle at 10% 10%, color-mix(in srgb, var(--color-primary) 22%, transparent), transparent 45%),
+      radial-gradient(circle at 90% 20%, color-mix(in srgb, var(--color-purple) 18%, transparent), transparent 45%),
+      radial-gradient(circle at 50% 100%, color-mix(in srgb, var(--color-teal) 16%, transparent), transparent 50%);
+    background-attachment: fixed;
+  }
 }

@@ -164,6 +164,11 @@ export async function requireRole(
   return { user, role };
 }
 
+/** Throws AuthError/ForbiddenError per `requireRole`, scoped to `ADMIN_ROLES`. Call first in any admin-only Server Action/Route Handler. */
+export async function requireAdmin(): Promise<{ user: User; role: Role }> {
+  return requireRole(ADMIN_ROLES);
+}
+
 // --- Trigger-protection re-implementations -----------------------------
 //
 // Re-implements, in application code, the authorization logic of three live
