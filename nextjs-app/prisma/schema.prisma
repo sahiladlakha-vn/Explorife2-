@@ -42,6 +42,16 @@
 generator client {
   provider = "prisma-client"
   output   = "../lib/generated/prisma"
+  // Without this, `prisma generate` only builds the Query Engine binary for
+  // whatever OS runs the install (the dev machine's own platform — macOS
+  // here), which is included as "native" automatically. Vercel's Node.js
+  // serverless functions run on Amazon Linux, which needs the
+  // rhel-openssl-3.0.x binary specifically — omitting it is exactly why
+  // production was throwing `PrismaClientInitializationError: Prisma Client
+  // could not locate the Query Engine for runtime "rhel-openssl-3.0.x"` on
+  // every request that touched the DB. Keep "native" too so local dev/tests
+  // still work without pulling the Linux binary.
+  binaryTargets = ["native", "rhel-openssl-3.0.x"]
 }
 
 datasource db {
