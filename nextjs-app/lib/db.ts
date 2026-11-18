@@ -1,3 +1,5 @@
+import path from "node:path";
+
 // Imported from the generated client output (prisma/schema.prisma's
 // `generator client { output = "../lib/generated/prisma" }`), not from the
 // "@prisma/client" package directly — Prisma 6's `prisma-client` generator
@@ -24,6 +26,14 @@ import { PrismaClient } from "./generated/prisma/client";
 const globalForPrisma = globalThis as unknown as {
   prisma: PrismaClient | undefined;
 };
+
+// Turbopack bakes a build-machine path into the compiled client, so on Vercel it never looks where the engine lands; point it there.
+if (process.env.VERCEL && !process.env.PRISMA_QUERY_ENGINE_LIBRARY) {
+  process.env.PRISMA_QUERY_ENGINE_LIBRARY = path.join(
+    process.cwd(),
+    "lib/generated/prisma/libquery_engine-rhel-openssl-3.0.x.so.node",
+  );
+}
 
 export const prisma =
   globalForPrisma.prisma ??
