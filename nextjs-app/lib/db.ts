@@ -9,6 +9,7 @@ import path from "node:path";
 // here. ./generated/prisma is gitignored and rebuilt by `prisma generate`
 // (wired into `postinstall`, see package.json).
 import { PrismaClient } from "./generated/prisma/client";
+import { withPgbouncerFlag } from "./db-url";
 
 // Standard Next.js/Prisma dev singleton: without this, every hot-reload in
 // `next dev` would re-import this module and spin up a brand-new PrismaClient
@@ -35,11 +36,25 @@ if (process.env.VERCEL && !process.env.PRISMA_QUERY_ENGINE_LIBRARY) {
   );
 }
 
-export const prisma =
-  globalForPrisma.prisma ??
-  new PrismaClient({
+function createPrismaClient() {
+  // Safety net for a transaction-pooler DATABASE_URL (port 6543) that is
+  // missing `?pgbouncer=true` — see ./db-url.ts for the failures it prevents.
+  // Only a *changed* URL is passed explicitly; otherwise Prisma keeps reading
+  // DATABASE_URL itself, exactly as before. The warning never includes the URL.
+  const { url, patched } = withPgbouncerFlag(process.env.DATABASE_URL);
+  if (patched) {
+    console.warn(
+      "[db] DATABASE_URL points at the Supabase transaction pooler (port 6543) without `pgbouncer=true`; adding it at runtime so Prisma stops using prepared statements. Add `?pgbouncer=true` to the DATABASE_URL environment variable and redeploy to silence this warning.",
+    );
+  }
+
+  return new PrismaClient({
     log: process.env.NODE_ENV === "development" ? ["warn", "error"] : ["error"],
+    ...(patched ? { datasourceUrl: url } : {}),
   });
+}
+
+export const prisma = globalForPrisma.prisma ?? createPrismaClient();
 
 if (process.env.NODE_ENV !== "production") {
   globalForPrisma.prisma = prisma;

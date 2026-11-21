@@ -119,6 +119,13 @@ for the full annotated list, `MIGRATION_PLAN.md` §5 for the full rationale):
 - **`DATABASE_URL`** — the **transaction pooler** (Supabase's PgBouncer,
   port `6543`, `?pgbouncer=true`). Used by the Prisma client at runtime for
   all normal app query traffic.
+
+  Keep the `?pgbouncer=true`: without it Prisma's prepared statements break
+  on the transaction pooler (intermittent Postgres `26000`/`42P05`/`08P01`
+  errors, seen as "Something went wrong" on signed-in pages). As a safety
+  net, `lib/db.ts` appends it at runtime and logs a warning if a port-`6543`
+  URL is missing it, but the environment variable should carry it itself.
+
 - **`DIRECT_URL`** — the **session pooler** (same pooler host, port `5432`,
   no `?pgbouncer=true`). Used only by `prisma migrate`/`prisma db pull`/
   `prisma migrate diff`, which need a full, non-transaction-pooled session.
