@@ -94,15 +94,17 @@
   --color-accent: var(--color-primary);
 
   /*
-   * Admin dashboard glassmorphism surface (components/features/dashboard).
-   * Built from the existing dark palette/accent hues above rather than a new
-   * hue family — a glass panel is just a translucent sheet of whatever sits
-   * behind it, so it only needs alpha-mixed white for the frost plus the
-   * page's own accent colors for the blurred backdrop blobs it sits over.
+   * Admin dashboard (components/features/dashboard): its own accent colours
+   * and font. They get new `dash-*` names instead of overriding --color-primary
+   * / --font-sans because `@theme inline` bakes token values into the
+   * generated utilities, so a scoped override of an existing token would not
+   * apply — new names leave every other screen on the app palette and fonts.
+   * `--font-dashboard` is the next/font variable set on the dashboard root.
    */
-  --color-glass-surface: color-mix(in srgb, white 6%, transparent);
-  --color-glass-surface-raised: color-mix(in srgb, white 10%, transparent);
-  --color-glass-border: color-mix(in srgb, white 14%, transparent);
+  --font-dash: var(--font-dashboard);
+  --color-dash-accent: #f5c542; /* warm amber */
+  --color-dash-positive: #34d399; /* emerald */
+  --color-dash-negative: #fb7185; /* rose */
 }
 
 body {
@@ -111,24 +113,109 @@ body {
 
 @layer components {
   /*
-   * `backdrop-filter: blur()` only reads as "glass" over something with
-   * visible color/contrast behind it — see `.admin-dashboard-backdrop` below,
-   * which every `/admin/dashboard` surface renders on top of.
+   * Frosted glass. `backdrop-filter: blur()` only reads as "glass" over
+   * something with visible colour behind it — every /admin/dashboard surface
+   * sits on the scene in `.admin-dashboard-scene` below. Values follow the
+   * dashboard spec: white at 12% (spec range 10–20%), a white/20 border, a
+   * 24px blur (= backdrop-blur-xl), an inset top highlight and a soft shadow.
    */
   .glass-card {
-    background: var(--color-glass-surface);
-    border: 1px solid var(--color-glass-border);
-    backdrop-filter: blur(20px);
-    -webkit-backdrop-filter: blur(20px);
+    background: rgb(255 255 255 / 0.12);
+    border: 1px solid rgb(255 255 255 / 0.2);
+    backdrop-filter: blur(24px) saturate(140%);
+    -webkit-backdrop-filter: blur(24px) saturate(140%);
+    box-shadow:
+      inset 0 1px 0 rgb(255 255 255 / 0.35),
+      0 12px 32px -14px rgb(0 0 0 / 0.55);
   }
 
-  /* Soft blurred accent blobs on the dark base palette — CSS-only, no image asset. */
-  .admin-dashboard-backdrop {
-    background-color: var(--color-bg);
-    background-image:
-      radial-gradient(circle at 10% 10%, color-mix(in srgb, var(--color-primary) 22%, transparent), transparent 45%),
-      radial-gradient(circle at 90% 20%, color-mix(in srgb, var(--color-purple) 18%, transparent), transparent 45%),
-      radial-gradient(circle at 50% 100%, color-mix(in srgb, var(--color-teal) 16%, transparent), transparent 50%);
-    background-attachment: fixed;
+  /* The one dark variant (Recent Bookings): neutral-900 at 70%. */
+  .glass-card-dark {
+    background: rgb(23 23 23 / 0.7);
+    border: 1px solid rgb(255 255 255 / 0.1);
+    backdrop-filter: blur(24px) saturate(120%);
+    -webkit-backdrop-filter: blur(24px) saturate(120%);
+    box-shadow:
+      inset 0 1px 0 rgb(255 255 255 / 0.12),
+      0 12px 32px -14px rgb(0 0 0 / 0.6);
+  }
+
+  /*
+   * Full-bleed warm travel scene behind the dashboard, blurred softly (a dark
+   * overlay is added by <DashboardBackdrop>). It is a generated illustration,
+   * not a photograph — swap the url() for a real JPEG to change it.
+   */
+  .admin-dashboard-scene {
+    background-image: url("/admin/dashboard-scene.svg");
+    background-size: cover;
+    background-position: center;
+    filter: blur(10px) saturate(115%);
+  }
+
+  /*
+   * Dashboard motion. All CSS (no client JS) so it works in Server Components.
+   * `backwards` fill, not `both`: a persisting end-state `transform` would
+   * override the :hover lift once the entrance has finished.
+   */
+  .dash-reveal {
+    animation: dash-fade-up 0.6s cubic-bezier(0.22, 1, 0.36, 1) backwards;
+    animation-delay: calc(var(--i, 0) * 70ms);
+  }
+
+  .dash-lift {
+    transition:
+      transform 0.25s ease,
+      box-shadow 0.25s ease;
+  }
+
+  .dash-lift:hover {
+    transform: translateY(-5px);
+  }
+
+  .dash-bar-y {
+    transform-origin: bottom;
+    animation: dash-grow-y 0.8s cubic-bezier(0.22, 1, 0.36, 1) backwards;
+    animation-delay: calc(var(--i, 0) * 45ms + 250ms);
+  }
+
+  .dash-bar-x {
+    transform-origin: left;
+    animation: dash-grow-x 0.9s cubic-bezier(0.22, 1, 0.36, 1) backwards;
+    animation-delay: calc(var(--i, 0) * 80ms + 250ms);
+  }
+
+  @keyframes dash-fade-up {
+    from {
+      opacity: 0;
+      transform: translateY(14px);
+    }
+  }
+
+  @keyframes dash-grow-y {
+    from {
+      transform: scaleY(0);
+    }
+  }
+
+  @keyframes dash-grow-x {
+    from {
+      transform: scaleX(0);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .dash-reveal,
+    .dash-bar-y,
+    .dash-bar-x {
+      animation: none;
+    }
+
+    .dash-lift {
+      transition: none;
+    }
+
+    .dash-lift:hover {
+      transform: none;
+    }
   }
 }

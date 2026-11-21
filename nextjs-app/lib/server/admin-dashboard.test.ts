@@ -15,6 +15,7 @@ vi.mock("@/lib/db", () => ({
     },
     trip: {
       findMany: vi.fn(),
+      findFirst: vi.fn(),
     },
     tripBooking: {
       aggregate: vi.fn(),
@@ -35,16 +36,23 @@ import {
   getUpcomingBookingCoverage,
   getModerationStats,
   getBookingValueSummary,
+  getBookingVelocity,
   getBookingFunnel,
-  getUpcomingTrips,
+  getUpcomingWeek,
   getRecentBookings,
-  getBookingMix,
-  getDestinationRanking,
+  getBookingMixByPeriod,
+  getModerationByPeriod,
+  getDestinationRankingByPeriod,
 } from "./admin-dashboard";
 
 beforeEach(() => {
-  vi.clearAllMocks();
+  vi.resetAllMocks();
 });
+
+/** The values a tagged-template `$queryRaw` call interpolated (index 0 of `calls[n]` is the SQL strings). */
+function boundValues(callIndex: number): unknown[] {
+  return vi.mocked(prisma.$queryRaw).mock.calls[callIndex]!.slice(1);
+}
 
 describe("getTotalUsers", () => {
   it("returns the profile count", async () => {
@@ -54,21 +62,29 @@ describe("getTotalUsers", () => {
 });
 
 describe("getTripsInProgress", () => {
-  it("computes the active percentage", async () => {
-    vi.mocked(prisma.$queryRaw).mockResolvedValue([{ activeCount: 3, totalCount: 12 }]);
+  it("computes the active and completed percentages", async () => {
+    vi.mocked(prisma.$queryRaw).mockResolvedValue([
+      { activeCount: 3, completedCount: 6, totalCount: 12 },
+    ]);
     await expect(getTripsInProgress()).resolves.toEqual({
       activeCount: 3,
+      completedCount: 6,
       totalCount: 12,
       percentage: 25,
+      completedPercentage: 50,
     });
   });
 
   it("returns 0% rather than dividing by zero when there are no trips", async () => {
-    vi.mocked(prisma.$queryRaw).mockResolvedValue([{ activeCount: 0, totalCount: 0 }]);
+    vi.mocked(prisma.$queryRaw).mockResolvedValue([
+      { activeCount: 0, completedCount: 0, totalCount: 0 },
+    ]);
     await expect(getTripsInProgress()).resolves.toEqual({
       activeCount: 0,
+      completedCount: 0,
       totalCount: 0,
       percentage: 0,
+      completedPercentage: 0,
     });
   });
 });
@@ -122,24 +138,32 @@ describe("getModerationStats", () => {
 });
 
 describe("getBookingValueSummary", () => {
-  it("combines the paid aggregate with the daily series", async () => {
+  /** 14 zero-filled Vietnam days, 2026-11-08 .. 2026-11-21: 10 tr a day, then 15 tr a day. */
+  const fourteenDays = Array.from({ length: 14 }, (_, i) => ({
+    day: `2026-11-${String(8 + i).padStart(2, "0")}`,
+    count: i % 2,
+    amountVnd: i < 7 ? 10_000_000 : 15_000_000,
+  }));
+
+  function mockAggregate(sum: bigint | null, count: number) {
     vi.mocked(prisma.tripBooking.aggregate).mockResolvedValue({
-      _sum: { amountVnd: BigInt(1_200_000_000) },
-      _count: 42,
+      _sum: { amountVnd: sum },
+      _count: count,
       // eslint-disable-next-line @typescript-eslint/no-explicit-any -- only _sum/_count are read
     } as any);
-    vi.mocked(prisma.$queryRaw).mockResolvedValue([
-      { day: "2026-11-08", count: 2, amountVnd: 50_000_000 },
-      { day: "2026-11-09", count: 1, amountVnd: 25_000_000 },
-    ]);
+  }
+
+  it("combines the lifetime paid aggregate with the series and the week-over-week change", async () => {
+    mockAggregate(BigInt(1_200_000_000), 42);
+    vi.mocked(prisma.$queryRaw).mockResolvedValue(fourteenDays);
 
     await expect(getBookingValueSummary()).resolves.toEqual({
       paidVnd: 1_200_000_000,
       paidCount: 42,
-      daily: [
-        { day: "2026-11-08", count: 2, amountVnd: 50_000_000 },
-        { day: "2026-11-09", count: 1, amountVnd: 25_000_000 },
-      ],
+      daily: fourteenDays,
+      last7Vnd: 105_000_000,
+      prev7Vnd: 70_000_000,
+      changePercent: 50,
     });
     expect(prisma.tripBooking.aggregate).toHaveBeenCalledWith({
       where: { status: "paid" },
@@ -148,19 +172,55 @@ describe("getBookingValueSummary", () => {
     });
   });
 
-  it("defaults paidVnd to 0 when there are no paid bookings at all", async () => {
-    vi.mocked(prisma.tripBooking.aggregate).mockResolvedValue({
-      _sum: { amountVnd: null },
-      _count: 0,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- only _sum/_count are read
-    } as any);
+  it("reports a decrease as a negative percentage", async () => {
+    mockAggregate(BigInt(1), 1);
+    vi.mocked(prisma.$queryRaw).mockResolvedValue(
+      fourteenDays.map((d, i) => ({ ...d, amountVnd: i < 7 ? 20_000_000 : 10_000_000 })),
+    );
+    const summary = await getBookingValueSummary();
+    expect(summary.changePercent).toBe(-50);
+  });
+
+  it("has no percentage change when the previous week had nothing paid (no baseline)", async () => {
+    mockAggregate(BigInt(5_000_000), 1);
+    vi.mocked(prisma.$queryRaw).mockResolvedValue(
+      fourteenDays.map((d, i) => ({ ...d, amountVnd: i === 13 ? 5_000_000 : 0 })),
+    );
+    await expect(getBookingValueSummary()).resolves.toMatchObject({
+      last7Vnd: 5_000_000,
+      prev7Vnd: 0,
+      changePercent: null,
+    });
+  });
+
+  it("defaults everything to 0 when there are no paid bookings at all", async () => {
+    mockAggregate(null, 0);
     vi.mocked(prisma.$queryRaw).mockResolvedValue([]);
 
     await expect(getBookingValueSummary()).resolves.toEqual({
       paidVnd: 0,
       paidCount: 0,
       daily: [],
+      last7Vnd: 0,
+      prev7Vnd: 0,
+      changePercent: null,
     });
+  });
+});
+
+describe("getBookingVelocity", () => {
+  it("returns the per-day counts and their total", async () => {
+    const daily = [
+      { day: "2026-11-20", count: 3 },
+      { day: "2026-11-21", count: 4 },
+    ];
+    vi.mocked(prisma.$queryRaw).mockResolvedValue(daily);
+    await expect(getBookingVelocity()).resolves.toEqual({ daily, total: 7 });
+  });
+
+  it("returns a zero total for an empty series", async () => {
+    vi.mocked(prisma.$queryRaw).mockResolvedValue([]);
+    await expect(getBookingVelocity()).resolves.toEqual({ daily: [], total: 0 });
   });
 });
 
@@ -194,39 +254,82 @@ describe("getBookingFunnel", () => {
   });
 });
 
-describe("getUpcomingTrips", () => {
-  it("maps trips to ISO date strings, querying only startDate > today", async () => {
-    vi.mocked(prisma.trip.findMany).mockResolvedValue([
-      {
-        id: "trip-1",
-        name: "Sapa Trekking",
-        location: "Sapa",
-        startDate: new Date("2026-12-01T00:00:00.000Z"),
-        endDate: new Date("2026-12-05T00:00:00.000Z"),
-      },
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- only the selected fields are read
-    ] as any);
+describe("getUpcomingWeek", () => {
+  const SELECT = { id: true, name: true, location: true, startDate: true, endDate: true };
 
-    await expect(getUpcomingTrips()).resolves.toEqual([
-      {
-        id: "trip-1",
-        name: "Sapa Trekking",
-        location: "Sapa",
-        startDate: "2026-12-01T00:00:00.000Z",
-        endDate: "2026-12-05T00:00:00.000Z",
+  const sapa = {
+    id: "trip-1",
+    name: "Sapa Trekking",
+    location: "Sapa",
+    startDate: new Date("2026-11-18T00:00:00.000Z"),
+    endDate: new Date("2026-11-23T00:00:00.000Z"),
+  };
+  const phuQuoc = {
+    id: "trip-2",
+    name: "Phu Quoc Getaway",
+    location: "Phu Quoc",
+    startDate: new Date("2026-11-30T00:00:00.000Z"),
+    endDate: new Date("2026-12-06T00:00:00.000Z"),
+  };
+
+  beforeEach(() => {
+    vi.mocked(prisma.$queryRaw).mockResolvedValue([{ weekStart: "2026-11-16", today: "2026-11-19" }]);
+  });
+
+  it("returns the Vietnam week, the trips overlapping it, and the next trip after it as plain days", async () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- only the selected fields are read
+    vi.mocked(prisma.trip.findMany).mockResolvedValue([sapa] as any);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- only the selected fields are read
+    vi.mocked(prisma.trip.findFirst).mockResolvedValue(phuQuoc as any);
+
+    await expect(getUpcomingWeek()).resolves.toEqual({
+      weekStart: "2026-11-16",
+      today: "2026-11-19",
+      trips: [
+        { id: "trip-1", name: "Sapa Trekking", location: "Sapa", startDate: "2026-11-18", endDate: "2026-11-23" },
+      ],
+      nextTrip: {
+        id: "trip-2",
+        name: "Phu Quoc Getaway",
+        location: "Phu Quoc",
+        startDate: "2026-11-30",
+        endDate: "2026-12-06",
       },
-    ]);
-    expect(prisma.trip.findMany).toHaveBeenCalledWith({
-      where: { startDate: { gt: expect.any(Date) } },
-      orderBy: { startDate: "asc" },
-      take: 6,
-      select: { id: true, name: true, location: true, startDate: true, endDate: true },
     });
   });
 
-  it("returns an empty list when there are no upcoming trips", async () => {
+  it("queries trips overlapping Monday..Sunday and the first trip starting after Sunday", async () => {
     vi.mocked(prisma.trip.findMany).mockResolvedValue([]);
-    await expect(getUpcomingTrips()).resolves.toEqual([]);
+    vi.mocked(prisma.trip.findFirst).mockResolvedValue(null);
+
+    await getUpcomingWeek();
+
+    expect(prisma.trip.findMany).toHaveBeenCalledWith({
+      where: {
+        startDate: { lte: new Date("2026-11-22T00:00:00.000Z") },
+        endDate: { gte: new Date("2026-11-16T00:00:00.000Z") },
+      },
+      orderBy: [{ startDate: "asc" }, { endDate: "asc" }],
+      take: 12,
+      select: SELECT,
+    });
+    expect(prisma.trip.findFirst).toHaveBeenCalledWith({
+      where: { startDate: { gt: new Date("2026-11-22T00:00:00.000Z") } },
+      orderBy: { startDate: "asc" },
+      select: SELECT,
+    });
+  });
+
+  it("returns no trips and a null next trip on an empty calendar", async () => {
+    vi.mocked(prisma.trip.findMany).mockResolvedValue([]);
+    vi.mocked(prisma.trip.findFirst).mockResolvedValue(null);
+
+    await expect(getUpcomingWeek()).resolves.toEqual({
+      weekStart: "2026-11-16",
+      today: "2026-11-19",
+      trips: [],
+      nextTrip: null,
+    });
   });
 });
 
@@ -285,35 +388,116 @@ describe("getRecentBookings", () => {
   });
 });
 
-describe("getBookingMix", () => {
-  it("maps grouped rows, converting the summed BigInt to a number", async () => {
-    vi.mocked(prisma.tripBooking.groupBy).mockResolvedValue([
-      { bookingType: "flight", _count: 10, _sum: { amountVnd: BigInt(300_000_000) } },
-      { bookingType: "stay", _count: 6, _sum: { amountVnd: null } },
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- groupBy row shape depends on the `by`/`_count`/`_sum` args
-    ] as any);
+describe("getBookingMixByPeriod", () => {
+  it("runs one query per window (30 / 90 / 365 days) and zero-fills the known booking types", async () => {
+    vi.mocked(prisma.$queryRaw)
+      .mockResolvedValueOnce([{ bookingType: "flight", count: 3, amountVnd: 300 }])
+      .mockResolvedValueOnce([
+        { bookingType: "stay", count: 2, amountVnd: 200 },
+        { bookingType: "visa", count: 1, amountVnd: 10 },
+      ])
+      .mockResolvedValueOnce([]);
 
-    await expect(getBookingMix()).resolves.toEqual([
-      { bookingType: "flight", count: 10, amountVnd: 300_000_000 },
-      { bookingType: "stay", count: 6, amountVnd: 0 },
+    const mix = await getBookingMixByPeriod();
+
+    expect([boundValues(0), boundValues(1), boundValues(2)]).toEqual([[30], [90], [365]]);
+    expect(mix.month).toEqual([
+      { bookingType: "flight", count: 3, amountVnd: 300 },
+      { bookingType: "stay", count: 0, amountVnd: 0 },
+      { bookingType: "activity", count: 0, amountVnd: 0 },
+      { bookingType: "transport", count: 0, amountVnd: 0 },
     ]);
+    expect(mix.quarter.map((m) => m.bookingType)).toEqual([
+      "flight",
+      "stay",
+      "activity",
+      "transport",
+      "visa",
+    ]);
+    expect(mix.quarter[1]).toEqual({ bookingType: "stay", count: 2, amountVnd: 200 });
+    expect(mix.year.every((m) => m.count === 0 && m.amountVnd === 0)).toBe(true);
   });
 });
 
-describe("getDestinationRanking", () => {
+describe("getModerationByPeriod", () => {
+  it("computes stats per window, binding the same day count to both listing tables", async () => {
+    vi.mocked(prisma.$queryRaw)
+      .mockResolvedValueOnce([{ totalListings: 10, verifiedCount: 5, pendingCount: 5, avgTurnaroundSeconds: 3600 }])
+      .mockResolvedValueOnce([{ totalListings: 0, verifiedCount: 0, pendingCount: 0, avgTurnaroundSeconds: null }])
+      .mockResolvedValueOnce([{ totalListings: 4, verifiedCount: 3, pendingCount: 1, avgTurnaroundSeconds: 14_400 }]);
+
+    const result = await getModerationByPeriod();
+
+    expect([boundValues(0), boundValues(1), boundValues(2)]).toEqual([
+      [30, 30],
+      [90, 90],
+      [365, 365],
+    ]);
+    expect(result.month).toEqual({
+      totalListings: 10,
+      verifiedCount: 5,
+      pendingCount: 5,
+      percentage: 50,
+      avgTurnaroundHours: 1,
+    });
+    expect(result.quarter).toEqual({
+      totalListings: 0,
+      verifiedCount: 0,
+      pendingCount: 0,
+      percentage: 0,
+      avgTurnaroundHours: null,
+    });
+    expect(result.year.percentage).toBe(75);
+    expect(result.year.avgTurnaroundHours).toBe(4);
+  });
+});
+
+describe("getDestinationRankingByPeriod", () => {
+  /** `$queryRaw` is called once per window in month, quarter, year order. */
+  function mockUsage(month: unknown[], quarter: unknown[], year: unknown[]) {
+    vi.mocked(prisma.$queryRaw)
+      .mockResolvedValueOnce(month)
+      .mockResolvedValueOnce(quarter)
+      .mockResolvedValueOnce(year);
+  }
+
+  function mockCollections(rows: { title: string; scopeValue: string }[]) {
+    vi.mocked(prisma.curatedCollection.findMany).mockResolvedValue(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- only `title` / `scopeValue` are selected
+      rows as any,
+    );
+  }
+
+  it("queries each window (30 / 90 / 365 days) and loads the collections once", async () => {
+    mockUsage([{ location: "Sapa", tripCount: 1 }], [], []);
+    mockCollections([]);
+
+    await getDestinationRankingByPeriod();
+
+    expect([boundValues(0), boundValues(1), boundValues(2)]).toEqual([[30], [90], [365]]);
+    expect(prisma.curatedCollection.findMany).toHaveBeenCalledTimes(1);
+    expect(prisma.curatedCollection.findMany).toHaveBeenCalledWith({
+      where: { isDestination: true },
+      orderBy: { sortOrder: "asc" },
+      select: { title: true, scopeValue: true },
+    });
+  });
+
   it("computes the featured flag via normalizeDestination, matching across diacritics and aliases", async () => {
-    vi.mocked(prisma.$queryRaw).mockResolvedValue([
+    const rows = [
       { location: "Da Nang", tripCount: 12 },
       { location: "Ho Chi Minh City", tripCount: 8 },
       { location: "Sapa", tripCount: 5 },
+    ];
+    mockUsage(rows, rows, rows);
+    mockCollections([
+      { title: "Da Nang", scopeValue: "Đà Nẵng" },
+      { title: "Saigon", scopeValue: "Saigon" },
     ]);
-    vi.mocked(prisma.curatedCollection.findMany).mockResolvedValue([
-      { scopeValue: "Đà Nẵng" },
-      { scopeValue: "Saigon" },
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- only `scopeValue` is selected
-    ] as any);
 
-    await expect(getDestinationRanking()).resolves.toEqual({
+    const result = await getDestinationRankingByPeriod();
+
+    expect(result.quarter).toEqual({
       mode: "usage",
       items: [
         { location: "Da Nang", tripCount: 12, featured: true },
@@ -321,22 +505,21 @@ describe("getDestinationRanking", () => {
         { location: "Sapa", tripCount: 5, featured: false },
       ],
     });
-    expect(prisma.curatedCollection.findMany).toHaveBeenCalledWith({
-      where: { isDestination: true },
-      select: { scopeValue: true },
-    });
   });
 
   it("merges destinations sharing a normalized key, summing counts and labeling with the most common original spelling", async () => {
-    vi.mocked(prisma.$queryRaw).mockResolvedValue([
+    const rows = [
       { location: "Ho Chi Minh City", tripCount: 7 },
       { location: "Saigon", tripCount: 5 },
       { location: "HCMC", tripCount: 2 },
       { location: "Sapa", tripCount: 4 },
-    ]);
-    vi.mocked(prisma.curatedCollection.findMany).mockResolvedValue([]);
+    ];
+    mockUsage(rows, rows, rows);
+    mockCollections([]);
 
-    await expect(getDestinationRanking()).resolves.toEqual({
+    const result = await getDestinationRankingByPeriod();
+
+    expect(result.year).toEqual({
       mode: "usage",
       items: [
         { location: "Ho Chi Minh City", tripCount: 14, featured: false },
@@ -345,35 +528,41 @@ describe("getDestinationRanking", () => {
     });
   });
 
-  it("caps the merged ranking at 6 entries", async () => {
-    vi.mocked(prisma.$queryRaw).mockResolvedValue(
-      Array.from({ length: 8 }, (_, i) => ({ location: `Place ${i}`, tripCount: 8 - i })),
-    );
-    vi.mocked(prisma.curatedCollection.findMany).mockResolvedValue([]);
+  it("caps each ranking at 6 entries", async () => {
+    const rows = Array.from({ length: 8 }, (_, i) => ({ location: `Place ${i}`, tripCount: 8 - i }));
+    mockUsage(rows, rows, rows);
+    mockCollections([]);
 
-    const result = await getDestinationRanking();
-    expect(result.mode).toBe("usage");
-    expect(result.items).toHaveLength(6);
+    const result = await getDestinationRankingByPeriod();
+    for (const period of ["month", "quarter", "year"] as const) {
+      expect(result[period].mode).toBe("usage");
+      expect(result[period].items).toHaveLength(6);
+    }
   });
 
-  it("falls back to the editorial CuratedCollection ranking when there's no usage data", async () => {
-    vi.mocked(prisma.$queryRaw).mockResolvedValue([]);
-    vi.mocked(prisma.curatedCollection.findMany).mockResolvedValue([
-      { title: "Sapa" },
-      { title: "Ha Long Bay" },
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- only `title` is selected
-    ] as any);
+  it("gives a quiet window an honest empty list while other windows still rank", async () => {
+    mockUsage([], [{ location: "Sapa", tripCount: 3 }], [{ location: "Sapa", tripCount: 9 }]);
+    mockCollections([{ title: "Sapa", scopeValue: "Sapa" }]);
 
-    await expect(getDestinationRanking()).resolves.toEqual({
-      mode: "editorial",
-      items: [{ title: "Sapa" }, { title: "Ha Long Bay" }],
+    const result = await getDestinationRankingByPeriod();
+
+    expect(result.month).toEqual({ mode: "usage", items: [] });
+    expect(result.quarter).toEqual({
+      mode: "usage",
+      items: [{ location: "Sapa", tripCount: 3, featured: true }],
     });
-    expect(prisma.curatedCollection.findMany).toHaveBeenCalledTimes(1);
-    expect(prisma.curatedCollection.findMany).toHaveBeenCalledWith({
-      where: { isDestination: true },
-      orderBy: { sortOrder: "asc" },
-      take: 6,
-      select: { title: true },
-    });
+  });
+
+  it("falls back to the editorial CuratedCollection ranking for every window when there are no trips at all", async () => {
+    mockUsage([], [], []);
+    mockCollections([
+      { title: "Sapa", scopeValue: "Sapa" },
+      { title: "Ha Long Bay", scopeValue: "Ha Long Bay" },
+    ]);
+
+    const result = await getDestinationRankingByPeriod();
+    const editorial = { mode: "editorial", items: [{ title: "Sapa" }, { title: "Ha Long Bay" }] };
+
+    expect(result).toEqual({ month: editorial, quarter: editorial, year: editorial });
   });
 });
