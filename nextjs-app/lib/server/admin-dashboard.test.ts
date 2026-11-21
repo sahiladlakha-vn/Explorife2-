@@ -528,6 +528,109 @@ describe("getDestinationRankingByPeriod", () => {
     });
   });
 
+  describe("real-world location strings (geocoder output mixed with typed text)", () => {
+    it("merges a geocoder string with the typed spellings of the same place and shows the place name", async () => {
+      // The shapes found in the production trips table.
+      const rows = [
+        { location: "Hội An, An Giang, Vietnam", tripCount: 3 },
+        { location: "Da Nang, Vietnam", tripCount: 2 },
+        { location: "da nang", tripCount: 1 },
+        { location: "Da nang", tripCount: 1 },
+        { location: "hoi an", tripCount: 1 },
+        { location: "Hamburg, Germany", tripCount: 1 },
+      ];
+      mockUsage(rows, rows, rows);
+      mockCollections([]);
+
+      const result = await getDestinationRankingByPeriod();
+
+      expect(result.year).toEqual({
+        mode: "usage",
+        items: [
+          { location: "Da Nang", tripCount: 4, featured: false },
+          { location: "Hội An", tripCount: 4, featured: false },
+          { location: "Hamburg, Germany", tripCount: 1, featured: false },
+        ],
+      });
+    });
+
+    it('does not fold a "Saigon" in another country into Ho Chi Minh City', async () => {
+      const rows = [
+        { location: "Ho Chi Minh City, Vietnam", tripCount: 2 },
+        { location: "Saigon", tripCount: 1 },
+        {
+          location: "Saigon, 78132, Pontianak Timur, Pontianak, West Kalimantan, Indonesia",
+          tripCount: 1,
+        },
+      ];
+      mockUsage(rows, rows, rows);
+      mockCollections([{ title: "Explore Ho Chi Minh City", scopeValue: "Ho Chi Minh City" }]);
+
+      const result = await getDestinationRankingByPeriod();
+
+      expect(result.quarter).toEqual({
+        mode: "usage",
+        items: [
+          { location: "Ho Chi Minh City", tripCount: 3, featured: true },
+          { location: "Saigon, Indonesia", tripCount: 1, featured: false },
+        ],
+      });
+    });
+
+    it("gives the Featured badge to geocoder strings and accented spellings of a featured destination", async () => {
+      const rows = [
+        { location: "Ho Chi Minh City, Vietnam", tripCount: 2 },
+        { location: "Hà Nội, Việt Nam", tripCount: 1 },
+        { location: "Da Nang, Vietnam", tripCount: 1 },
+      ];
+      mockUsage(rows, rows, rows);
+      mockCollections([
+        { title: "Explore Hanoi", scopeValue: "Hanoi" },
+        { title: "Explore Ho Chi Minh City", scopeValue: "Ho Chi Minh City" },
+      ]);
+
+      const result = await getDestinationRankingByPeriod();
+
+      expect(result.year).toEqual({
+        mode: "usage",
+        items: [
+          { location: "Ho Chi Minh City", tripCount: 2, featured: true },
+          { location: "Da Nang", tripCount: 1, featured: false },
+          { location: "Hà Nội", tripCount: 1, featured: true },
+        ],
+      });
+    });
+
+    it("picks the same label and order whatever order the database returns the rows in", async () => {
+      const rows = [
+        { location: "da nang", tripCount: 1 },
+        { location: "Da nang", tripCount: 1 },
+        { location: "Da Nang", tripCount: 1 },
+        { location: "Hamburg, Germany", tripCount: 1 },
+        { location: "Hamburg, Hamburg, Germany", tripCount: 1 },
+      ];
+      const orderings = [rows, [...rows].reverse(), [rows[2]!, rows[4]!, rows[0]!, rows[3]!, rows[1]!]];
+
+      const results = [];
+      for (const ordering of orderings) {
+        mockUsage(ordering, ordering, ordering);
+        mockCollections([]);
+        results.push((await getDestinationRankingByPeriod()).year);
+      }
+
+      for (const result of results) {
+        expect(result).toEqual({
+          mode: "usage",
+          items: [
+            // A three-way tie on one vote each: the capitalised spelling wins, "Da Nang" before "Da nang".
+            { location: "Da Nang", tripCount: 3, featured: false },
+            { location: "Hamburg, Germany", tripCount: 2, featured: false },
+          ],
+        });
+      }
+    });
+  });
+
   it("caps each ranking at 6 entries", async () => {
     const rows = Array.from({ length: 8 }, (_, i) => ({ location: `Place ${i}`, tripCount: 8 - i }));
     mockUsage(rows, rows, rows);
