@@ -27,7 +27,10 @@ import type {
   WeekTrip,
 } from "@/lib/dashboard/types";
 import { addDays } from "@/lib/dashboard/week-strip";
-import { normalizeDestination } from "./destination-normalize";
+import {
+  destinationLabel,
+  normalizeDestination,
+} from "./destination-normalize";
 
 /**
  * Read-only aggregate queries for `/admin/dashboard`. Every export here is a
@@ -465,43 +468,68 @@ interface DestinationUsageRow {
   tripCount: number;
 }
 
+interface MergedDestination extends DestinationUsageRow {
+  /** The `normalizeDestination` key the group was merged on. */
+  key: string;
+}
+
+/**
+ * The spelling to show for one merged group. Each raw string is first reduced
+ * to its display label (`destinationLabel`: "Da Nang, Vietnam" -> "Da Nang"),
+ * then the label with the most trips behind it wins. Ties are broken the same
+ * way every time instead of by whichever row the database returned first: a
+ * capitalised spelling beats a lowercase one, then plain code-unit order (not
+ * `localeCompare`, which would put "Da nang" before "Da Nang").
+ */
+function pickLabel(votes: Map<string, number>): string {
+  const capitalised = (label: string) => /^\p{Lu}/u.test(label);
+  return [...votes.entries()].sort(
+    ([labelA, votesA], [labelB, votesB]) =>
+      votesB - votesA ||
+      Number(capitalised(labelB)) - Number(capitalised(labelA)) ||
+      (labelA < labelB ? -1 : labelA > labelB ? 1 : 0),
+  )[0]![0];
+}
+
 /**
  * Merges raw location groups that share a `normalizeDestination` key (e.g.
- * "Saigon" and "Ho Chi Minh City" trips both become one "Ho Chi Minh City"
- * row), summing their counts. The displayed label is whichever raw spelling
- * had the highest individual count within the merged group — not the
- * normalized key itself, which is just a matching key, not display text.
- * Rows are case-preserving (`trim(location)`, not lowercased) specifically
- * so that popularity contest is meaningful.
+ * "Saigon", "Ho Chi Minh City" and "Ho Chi Minh City, Vietnam" trips all
+ * become one "Ho Chi Minh City" row), summing their counts. The displayed
+ * label is not the normalized key (just a matching key, not display text) but
+ * the most common display spelling — see `pickLabel`. Rows are case-preserving
+ * (`trim(location)`, not lowercased) specifically so that popularity contest is
+ * meaningful. Each result carries its `key`, so callers (the Featured check)
+ * never have to re-derive it from the label.
  */
 function mergeByNormalizedDestination(
   rows: DestinationUsageRow[],
-): DestinationUsageRow[] {
+): MergedDestination[] {
   const merged = new Map<
     string,
-    { label: string; labelCount: number; tripCount: number }
+    { tripCount: number; labelVotes: Map<string, number> }
   >();
 
   for (const row of rows) {
     const key = normalizeDestination(row.location);
-    const existing = merged.get(key);
-    if (!existing) {
-      merged.set(key, {
-        label: row.location,
-        labelCount: row.tripCount,
-        tripCount: row.tripCount,
-      });
-      continue;
-    }
-    existing.tripCount += row.tripCount;
-    if (row.tripCount > existing.labelCount) {
-      existing.label = row.location;
-      existing.labelCount = row.tripCount;
-    }
+    const group = merged.get(key) ?? {
+      tripCount: 0,
+      labelVotes: new Map<string, number>(),
+    };
+    group.tripCount += row.tripCount;
+    const label = destinationLabel(row.location);
+    group.labelVotes.set(
+      label,
+      (group.labelVotes.get(label) ?? 0) + row.tripCount,
+    );
+    merged.set(key, group);
   }
 
-  return [...merged.values()]
-    .map(({ label, tripCount }) => ({ location: label, tripCount }))
+  return [...merged.entries()]
+    .map(([key, { tripCount, labelVotes }]) => ({
+      key,
+      location: pickLabel(labelVotes),
+      tripCount,
+    }))
     .sort(
       (a, b) =>
         b.tripCount - a.tripCount || a.location.localeCompare(b.location),
@@ -559,7 +587,7 @@ export async function getDestinationRankingByPeriod(): Promise<ByPeriod<Destinat
       .map((row) => ({
         location: row.location,
         tripCount: row.tripCount,
-        featured: featuredScopes.has(normalizeDestination(row.location)),
+        featured: featuredScopes.has(row.key),
       })),
   });
 
