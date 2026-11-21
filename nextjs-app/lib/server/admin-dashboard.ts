@@ -1,6 +1,32 @@
 import "server-only";
 import { cacheLife } from "next/cache";
 import { prisma } from "@/lib/db";
+import { fillBookingMix } from "@/lib/dashboard/booking-mix";
+import {
+  lastAndPreviousSevenDays,
+  percentChange,
+} from "@/lib/dashboard/booking-trends";
+import {
+  PERFORMANCE_PERIOD_DAYS,
+  PERFORMANCE_PERIODS,
+} from "@/lib/dashboard/periods";
+import type {
+  BookingFunnel,
+  BookingMixEntry,
+  BookingValueDay,
+  BookingValueSummary,
+  BookingVelocity,
+  BookingVelocityDay,
+  ByPeriod,
+  DestinationRanking,
+  ModerationStats,
+  RecentBookingItem,
+  TripsInProgress,
+  UpcomingBookingCoverage,
+  UpcomingWeek,
+  WeekTrip,
+} from "@/lib/dashboard/types";
+import { addDays } from "@/lib/dashboard/week-strip";
 import { normalizeDestination } from "./destination-normalize";
 
 /**
@@ -11,30 +37,25 @@ import { normalizeDestination } from "./destination-normalize";
  * cache"` and shared across every admin who loads the dashboard within the
  * cache window. Admin-identity/role resolution happens in the page instead
  * of here, since it reads cookies — Cache Components forbids a `"use
- * cache"` function from reading dynamic data.
+ * cache"` function from reading dynamic data. (`cacheLife` below is the
+ * `revalidate: 60` of this codebase: `cacheComponents: true` rejects the
+ * segment-level `revalidate` export.)
  *
  * Prisma bypasses RLS like every other `lib/server/*.ts` module, but there's
  * no per-user authorization check *in this file* — callers (the dashboard
  * page) must call `requireAdminOrRedirect`/`requireAdmin` first. These
  * functions are safe to share across admins precisely because they contain
  * no per-user data.
+ *
+ * Time handling: every "today", "this week" and per-day bucket is computed in
+ * SQL with `AT TIME ZONE 'Asia/Ho_Chi_Minh'`, never from JavaScript's clock, so
+ * the results are Vietnam calendar days regardless of where the server runs.
  */
 
 const DASHBOARD_CACHE_LIFE = { stale: 30, revalidate: 60, expire: 300 } as const;
 
-const VIETNAM_UTC_OFFSET_MS = 7 * 60 * 60 * 1000;
-
-/**
- * Vietnam has a fixed UTC+7 offset with no DST, so shifting the clock by a
- * constant is exact. Only needed for `getUpcomingTrips` below — every other
- * widget does its day-bucketing in raw SQL via `AT TIME ZONE
- * 'Asia/Ho_Chi_Minh'`, or needs no timezone conversion at all because it
- * compares absolute instants (`now() - interval`) rather than calendar days.
- */
-function vietnamTodayAsUtcDate(): Date {
-  const shifted = new Date(Date.now() + VIETNAM_UTC_OFFSET_MS);
-  return new Date(Date.UTC(shifted.getUTCFullYear(), shifted.getUTCMonth(), shifted.getUTCDate()));
-}
+const percentage = (part: number, total: number): number =>
+  total === 0 ? 0 : Math.round((part / total) * 100);
 
 // --- Total users -----------------------------------------------------------
 
@@ -44,20 +65,18 @@ export async function getTotalUsers(): Promise<number> {
   return prisma.profile.count();
 }
 
-// --- Trips in Progress (dial) ------------------------------------------------
-
-export interface TripsInProgress {
-  activeCount: number;
-  totalCount: number;
-  percentage: number;
-}
+// --- Trips: in progress (dial / Active Trips KPI) and completed (pill) -------
 
 interface TripsInProgressRow {
   activeCount: number;
+  completedCount: number;
   totalCount: number;
 }
 
-/** % of all trips whose [startDate, endDate] contains today (Vietnam calendar date). */
+/**
+ * Active = [startDate, endDate] contains today; completed = endDate is before
+ * today. Both as a share of all trips, by Vietnam calendar date.
+ */
 export async function getTripsInProgress(): Promise<TripsInProgress> {
   "use cache";
   cacheLife(DASHBOARD_CACHE_LIFE);
@@ -68,22 +87,24 @@ export async function getTripsInProgress(): Promise<TripsInProgress> {
         WHERE start_date <= (now() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date
           AND end_date >= (now() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date
       )::int AS "activeCount",
+      count(*) FILTER (
+        WHERE end_date < (now() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date
+      )::int AS "completedCount",
       count(*)::int AS "totalCount"
     FROM trips
   `;
   // Unconditional aggregate (no GROUP BY) over `trips` — always exactly one row.
   const row = rows[0]!;
-  const percentage = row.totalCount === 0 ? 0 : Math.round((row.activeCount / row.totalCount) * 100);
-  return { activeCount: row.activeCount, totalCount: row.totalCount, percentage };
+  return {
+    activeCount: row.activeCount,
+    completedCount: row.completedCount,
+    totalCount: row.totalCount,
+    percentage: percentage(row.activeCount, row.totalCount),
+    completedPercentage: percentage(row.completedCount, row.totalCount),
+  };
 }
 
 // --- Upcoming booking coverage (pill) ----------------------------------------
-
-export interface UpcomingBookingCoverage {
-  upcomingCount: number;
-  withBookingCount: number;
-  percentage: number;
-}
 
 interface UpcomingBookingCoverageRow {
   upcomingCount: number;
@@ -105,19 +126,14 @@ export async function getUpcomingBookingCoverage(): Promise<UpcomingBookingCover
     WHERE t.start_date > (now() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date
   `;
   const row = rows[0]!;
-  const percentage = row.upcomingCount === 0 ? 0 : Math.round((row.withBookingCount / row.upcomingCount) * 100);
-  return { upcomingCount: row.upcomingCount, withBookingCount: row.withBookingCount, percentage };
+  return {
+    upcomingCount: row.upcomingCount,
+    withBookingCount: row.withBookingCount,
+    percentage: percentage(row.withBookingCount, row.upcomingCount),
+  };
 }
 
 // --- Moderation (verification queue) -----------------------------------------
-
-export interface ModerationStats {
-  totalListings: number;
-  verifiedCount: number;
-  pendingCount: number;
-  percentage: number;
-  avgTurnaroundHours: number | null;
-}
 
 interface ModerationStatsRow {
   totalListings: number;
@@ -126,7 +142,18 @@ interface ModerationStatsRow {
   avgTurnaroundSeconds: number | null;
 }
 
-/** % of attractions+restaurants verified, plus avg time from created_at to verified_at for the ones that are. Soft-deleted listings excluded. */
+function toModerationStats(row: ModerationStatsRow): ModerationStats {
+  return {
+    totalListings: row.totalListings,
+    verifiedCount: row.verifiedCount,
+    pendingCount: row.pendingCount,
+    percentage: percentage(row.verifiedCount, row.totalListings),
+    avgTurnaroundHours:
+      row.avgTurnaroundSeconds === null ? null : row.avgTurnaroundSeconds / 3600,
+  };
+}
+
+/** % of attractions+restaurants verified, plus avg time from created_at to verified_at for the ones that are. Soft-deleted listings excluded. All time. */
 export async function getModerationStats(): Promise<ModerationStats> {
   "use cache";
   cacheLife(DASHBOARD_CACHE_LIFE);
@@ -144,80 +171,95 @@ export async function getModerationStats(): Promise<ModerationStats> {
       SELECT verification_status, verified_at, created_at FROM restaurants WHERE deleted_at IS NULL
     ) listings
   `;
-  const row = rows[0]!;
-  const percentage = row.totalListings === 0 ? 0 : Math.round((row.verifiedCount / row.totalListings) * 100);
-  return {
-    totalListings: row.totalListings,
-    verifiedCount: row.verifiedCount,
-    pendingCount: row.pendingCount,
-    percentage,
-    avgTurnaroundHours: row.avgTurnaroundSeconds === null ? null : row.avgTurnaroundSeconds / 3600,
-  };
+  return toModerationStats(rows[0]!);
 }
 
 // --- Booking Value (Paid) ----------------------------------------------------
 
-export interface BookingValueDay {
-  day: string;
-  count: number;
-  amountVnd: number;
-}
-
-export interface BookingValueSummary {
-  paidVnd: number;
-  paidCount: number;
-  daily: BookingValueDay[];
-}
-
-interface BookingValueDayRow {
-  day: string;
-  count: number;
-  amountVnd: number;
-}
-
 /**
- * Lifetime paid total (headline number) plus the last 7 days of paid
- * bookings bucketed by Vietnam calendar day (mini bar chart). `amountVnd:
- * null` means unpriced/TBD and must stay excluded from the sum — SQL `sum()`
- * already ignores NULLs on its own, so no `?? 0` coalescing happens on
- * individual rows here.
+ * Lifetime paid total (headline) plus the last 14 Vietnam days of paid
+ * bookings, zero-filled so quiet days still get a bar. The card shows the last
+ * 7 days by weekday and compares their total with the 7 days before (the
+ * period-over-period badge). `amountVnd: null` means unpriced/TBD and stays
+ * out of every sum — SQL `sum()` ignores NULLs on its own. This is user-logged
+ * trip spend, not revenue.
  */
 export async function getBookingValueSummary(): Promise<BookingValueSummary> {
   "use cache";
   cacheLife(DASHBOARD_CACHE_LIFE);
 
-  const [agg, dailyRows] = await Promise.all([
+  const [agg, daily] = await Promise.all([
     prisma.tripBooking.aggregate({
       where: { status: "paid" },
       _sum: { amountVnd: true },
       _count: true,
     }),
-    prisma.$queryRaw<BookingValueDayRow[]>`
+    prisma.$queryRaw<BookingValueDay[]>`
+      WITH days AS (
+        SELECT d::date AS day
+        FROM generate_series(
+          ((now() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date - 13)::timestamp,
+          (now() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date::timestamp,
+          interval '1 day'
+        ) AS d
+      )
       SELECT
-        ((created_at AT TIME ZONE 'Asia/Ho_Chi_Minh')::date)::text AS day,
-        count(*)::int AS count,
-        coalesce(sum(amount_vnd), 0)::float8 AS "amountVnd"
-      FROM trip_bookings
-      WHERE status = 'paid' AND created_at >= now() - interval '7 days'
-      GROUP BY 1
-      ORDER BY 1
+        days.day::text AS day,
+        count(b.id)::int AS count,
+        coalesce(sum(b.amount_vnd), 0)::float8 AS "amountVnd"
+      FROM days
+      LEFT JOIN trip_bookings b
+        ON b.status = 'paid'
+       AND (b.created_at AT TIME ZONE 'Asia/Ho_Chi_Minh')::date = days.day
+      GROUP BY days.day
+      ORDER BY days.day
     `,
   ]);
+
+  const { last7, prev7 } = lastAndPreviousSevenDays(
+    daily.map((day) => day.amountVnd),
+  );
 
   return {
     paidVnd: Number(agg._sum.amountVnd ?? BigInt(0)),
     paidCount: agg._count,
-    daily: dailyRows,
+    daily,
+    last7Vnd: last7,
+    prev7Vnd: prev7,
+    changePercent: percentChange(last7, prev7),
   };
 }
 
-// --- Booking funnel: To Book -> Booked -> Paid (cumulative) ------------------
+// --- Booking Velocity --------------------------------------------------------
 
-export interface BookingFunnel {
-  toBook: number;
-  booked: number;
-  paid: number;
+/** Bookings created per Vietnam day over the last 14 days (any status), zero-filled. */
+export async function getBookingVelocity(): Promise<BookingVelocity> {
+  "use cache";
+  cacheLife(DASHBOARD_CACHE_LIFE);
+
+  const daily = await prisma.$queryRaw<BookingVelocityDay[]>`
+    WITH days AS (
+      SELECT d::date AS day
+      FROM generate_series(
+        ((now() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date - 13)::timestamp,
+        (now() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date::timestamp,
+        interval '1 day'
+      ) AS d
+    )
+    SELECT
+      days.day::text AS day,
+      count(b.id)::int AS count
+    FROM days
+    LEFT JOIN trip_bookings b
+      ON (b.created_at AT TIME ZONE 'Asia/Ho_Chi_Minh')::date = days.day
+    GROUP BY days.day
+    ORDER BY days.day
+  `;
+
+  return { daily, total: daily.reduce((sum, day) => sum + day.count, 0) };
 }
+
+// --- Booking funnel: To Book -> Booked -> Paid (cumulative) ------------------
 
 /** Cumulative stages: toBook = every booking; booked = booked+paid; paid = paid only. */
 export async function getBookingFunnel(): Promise<BookingFunnel> {
@@ -240,47 +282,82 @@ export async function getBookingFunnel(): Promise<BookingFunnel> {
   };
 }
 
-// --- Upcoming trips (timeline) -----------------------------------------------
+// --- Upcoming trips (week strip) ---------------------------------------------
 
-export interface UpcomingTripItem {
+interface WeekBoundsRow {
+  weekStart: string;
+  today: string;
+}
+
+const WEEK_TRIP_SELECT = {
+  id: true,
+  name: true,
+  location: true,
+  startDate: true,
+  endDate: true,
+} as const;
+
+function toWeekTrip(trip: {
   id: string;
   name: string;
   location: string;
-  startDate: string;
-  endDate: string;
-}
-
-/** Next 6 trips starting after today (Vietnam calendar date), earliest first. */
-export async function getUpcomingTrips(): Promise<UpcomingTripItem[]> {
-  "use cache";
-  cacheLife(DASHBOARD_CACHE_LIFE);
-
-  const trips = await prisma.trip.findMany({
-    where: { startDate: { gt: vietnamTodayAsUtcDate() } },
-    orderBy: { startDate: "asc" },
-    take: 6,
-    select: { id: true, name: true, location: true, startDate: true, endDate: true },
-  });
-
-  return trips.map((trip) => ({
+  startDate: Date;
+  endDate: Date;
+}): WeekTrip {
+  return {
     id: trip.id,
     name: trip.name,
     location: trip.location,
-    startDate: trip.startDate.toISOString(),
-    endDate: trip.endDate.toISOString(),
-  }));
+    // Trip dates are DATE columns (UTC midnight), so the ISO prefix is the calendar day.
+    startDate: trip.startDate.toISOString().slice(0, 10),
+    endDate: trip.endDate.toISOString().slice(0, 10),
+  };
+}
+
+/**
+ * The current Vietnam week (Monday–Sunday) and the trips overlapping it,
+ * placed on the strip by startDate/endDate, plus the next trip after the week
+ * so the card is never an empty box on a quiet week. The week bounds come from
+ * Postgres (`date_trunc('week')` is Monday-based), not from JavaScript's clock.
+ */
+export async function getUpcomingWeek(): Promise<UpcomingWeek> {
+  "use cache";
+  cacheLife(DASHBOARD_CACHE_LIFE);
+
+  const [bounds] = await prisma.$queryRaw<WeekBoundsRow[]>`
+    SELECT
+      date_trunc('week', now() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date::text AS "weekStart",
+      (now() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date::text AS today
+  `;
+  const weekStart = bounds!.weekStart;
+  const weekEnd = addDays(weekStart, 6);
+
+  const [trips, nextTrip] = await Promise.all([
+    prisma.trip.findMany({
+      where: {
+        startDate: { lte: new Date(`${weekEnd}T00:00:00Z`) },
+        endDate: { gte: new Date(`${weekStart}T00:00:00Z`) },
+      },
+      orderBy: [{ startDate: "asc" }, { endDate: "asc" }],
+      take: 12,
+      select: WEEK_TRIP_SELECT,
+    }),
+    prisma.trip.findFirst({
+      where: { startDate: { gt: new Date(`${weekEnd}T00:00:00Z`) } },
+      orderBy: { startDate: "asc" },
+      select: WEEK_TRIP_SELECT,
+    }),
+  ]);
+
+  return {
+    weekStart,
+    today: bounds!.today,
+    trips: trips.map(toWeekTrip),
+    nextTrip: nextTrip ? toWeekTrip(nextTrip) : null,
+  };
 }
 
 // --- Recent bookings (dark card) ---------------------------------------------
-
-export interface RecentBookingItem {
-  id: string;
-  tripName: string;
-  bookingType: string;
-  amountVnd: number | null;
-  status: string;
-  createdAt: string;
-}
 
 /** Last 8 bookings. Trip name only, never the booking creator's email/phone. */
 export async function getRecentBookings(): Promise<RecentBookingItem[]> {
@@ -310,47 +387,78 @@ export async function getRecentBookings(): Promise<RecentBookingItem[]> {
   }));
 }
 
-// --- Booking mix (replaces Lead/Traffic Attribution) -------------------------
+// --- Performance Overview: one result per Month / Quarter / Year window ------
 
-export interface BookingMixEntry {
-  bookingType: string;
-  count: number;
-  amountVnd: number;
+/**
+ * Runs `load` once per Performance Overview window (rolling 30 / 90 / 365
+ * days) in parallel. The page ships all three results to the client so the
+ * toggle switches instantly without another round trip.
+ */
+async function forEachPeriod<T>(
+  load: (days: number) => Promise<T>,
+): Promise<ByPeriod<T>> {
+  const entries = await Promise.all(
+    PERFORMANCE_PERIODS.map(
+      async (period) =>
+        [period, await load(PERFORMANCE_PERIOD_DAYS[period])] as const,
+    ),
+  );
+  return Object.fromEntries(entries) as ByPeriod<T>;
 }
 
-/** Count + total amountVnd per bookingType, across all statuses. */
-export async function getBookingMix(): Promise<BookingMixEntry[]> {
+// --- Booking mix -------------------------------------------------------------
+
+async function bookingMixForDays(days: number): Promise<BookingMixEntry[]> {
+  const rows = await prisma.$queryRaw<BookingMixEntry[]>`
+    SELECT
+      booking_type AS "bookingType",
+      count(*)::int AS count,
+      coalesce(sum(amount_vnd), 0)::float8 AS "amountVnd"
+    FROM trip_bookings
+    WHERE created_at >= now() - (${days}::int * interval '1 day')
+    GROUP BY booking_type
+  `;
+  return fillBookingMix(rows);
+}
+
+/** Count + total amountVnd per bookingType (all statuses), bookings created in each window. */
+export async function getBookingMixByPeriod(): Promise<ByPeriod<BookingMixEntry[]>> {
   "use cache";
   cacheLife(DASHBOARD_CACHE_LIFE);
-
-  const grouped = await prisma.tripBooking.groupBy({
-    by: ["bookingType"],
-    _count: true,
-    _sum: { amountVnd: true },
-  });
-
-  return grouped.map((g) => ({
-    bookingType: g.bookingType,
-    count: g._count,
-    amountVnd: Number(g._sum.amountVnd ?? BigInt(0)),
-  }));
+  return forEachPeriod(bookingMixForDays);
 }
 
-// --- Destination ranking (replaces Top Destinations) -------------------------
+// --- Moderation, per window --------------------------------------------------
 
-export interface DestinationUsageItem {
-  location: string;
-  tripCount: number;
-  featured: boolean;
+async function moderationForDays(days: number): Promise<ModerationStats> {
+  const rows = await prisma.$queryRaw<ModerationStatsRow[]>`
+    SELECT
+      count(*)::int AS "totalListings",
+      count(*) FILTER (WHERE verification_status = 'verified')::int AS "verifiedCount",
+      count(*) FILTER (WHERE verification_status = 'pending')::int AS "pendingCount",
+      avg(extract(epoch FROM (verified_at - created_at)))
+        FILTER (WHERE verification_status = 'verified' AND verified_at IS NOT NULL)::float8 AS "avgTurnaroundSeconds"
+    FROM (
+      SELECT verification_status, verified_at, created_at
+      FROM attractions
+      WHERE deleted_at IS NULL AND created_at >= now() - (${days}::int * interval '1 day')
+      UNION ALL
+      SELECT verification_status, verified_at, created_at
+      FROM restaurants
+      WHERE deleted_at IS NULL AND created_at >= now() - (${days}::int * interval '1 day')
+    ) listings
+  `;
+  return toModerationStats(rows[0]!);
 }
 
-export interface DestinationEditorialItem {
-  title: string;
+/** Verification stats for listings created in each window (the header pill stays all-time). */
+export async function getModerationByPeriod(): Promise<ByPeriod<ModerationStats>> {
+  "use cache";
+  cacheLife(DASHBOARD_CACHE_LIFE);
+  return forEachPeriod(moderationForDays);
 }
 
-export type DestinationRanking =
-  | { mode: "usage"; items: DestinationUsageItem[] }
-  | { mode: "editorial"; items: DestinationEditorialItem[] };
+// --- Destination ranking -----------------------------------------------------
 
 interface DestinationUsageRow {
   location: string;
@@ -366,14 +474,23 @@ interface DestinationUsageRow {
  * Rows are case-preserving (`trim(location)`, not lowercased) specifically
  * so that popularity contest is meaningful.
  */
-function mergeByNormalizedDestination(rows: DestinationUsageRow[]): DestinationUsageRow[] {
-  const merged = new Map<string, { label: string; labelCount: number; tripCount: number }>();
+function mergeByNormalizedDestination(
+  rows: DestinationUsageRow[],
+): DestinationUsageRow[] {
+  const merged = new Map<
+    string,
+    { label: string; labelCount: number; tripCount: number }
+  >();
 
   for (const row of rows) {
     const key = normalizeDestination(row.location);
     const existing = merged.get(key);
     if (!existing) {
-      merged.set(key, { label: row.location, labelCount: row.tripCount, tripCount: row.tripCount });
+      merged.set(key, {
+        label: row.location,
+        labelCount: row.tripCount,
+        tripCount: row.tripCount,
+      });
       continue;
     }
     existing.tripCount += row.tripCount;
@@ -385,54 +502,70 @@ function mergeByNormalizedDestination(rows: DestinationUsageRow[]): DestinationU
 
   return [...merged.values()]
     .map(({ label, tripCount }) => ({ location: label, tripCount }))
-    .sort((a, b) => b.tripCount - a.tripCount || a.location.localeCompare(b.location));
+    .sort(
+      (a, b) =>
+        b.tripCount - a.tripCount || a.location.localeCompare(b.location),
+    );
+}
+
+function destinationUsageForDays(days: number): Promise<DestinationUsageRow[]> {
+  return prisma.$queryRaw<DestinationUsageRow[]>`
+    SELECT trim(location) AS location, count(*)::int AS "tripCount"
+    FROM trips
+    WHERE created_at >= now() - (${days}::int * interval '1 day')
+    GROUP BY 1
+  `;
 }
 
 /**
- * Usage-ranked by `Trip.location`, merged across spellings that share a
- * `normalizeDestination` key over the last 90 days of trip creation, and
- * cross-referenced against `CuratedCollection.scopeValue` for a "Featured"
- * badge via the same normalizer. `CuratedCollection` has no FK to
- * `Trip`/`TripStop` at all, so this cross-reference is always a fuzzy
- * string match, not a real join. Falls back to the editorial
- * `CuratedCollection` ranking (labeled "Featured Destinations" by the
- * caller) when there's no usage data at all, e.g. a fresh environment.
+ * Usage-ranked by `Trip.location` per window (trips created in the last 30 /
+ * 90 / 365 days), merged across spellings that share a `normalizeDestination`
+ * key, top 6, and cross-referenced against `CuratedCollection.scopeValue` for a
+ * "Featured" badge via the same normalizer. `CuratedCollection` has no FK to
+ * `Trip`/`TripStop` at all, so that cross-reference is always a fuzzy string
+ * match, not a real join. A window with no trips is an honest empty list; only
+ * a fresh environment with no trips in the whole year falls back to the
+ * editorial `CuratedCollection` ranking (labelled "Featured Destinations" by
+ * the caller) for every window.
  */
-export async function getDestinationRanking(): Promise<DestinationRanking> {
+export async function getDestinationRankingByPeriod(): Promise<ByPeriod<DestinationRanking>> {
   "use cache";
   cacheLife(DASHBOARD_CACHE_LIFE);
 
-  const usageRows = await prisma.$queryRaw<DestinationUsageRow[]>`
-    SELECT trim(location) AS location, count(*)::int AS "tripCount"
-    FROM trips
-    WHERE created_at >= now() - interval '90 days'
-    GROUP BY 1
-  `;
-
-  if (usageRows.length > 0) {
-    const topDestinations = mergeByNormalizedDestination(usageRows).slice(0, 6);
-
-    const destinations = await prisma.curatedCollection.findMany({
+  const [usage, collections] = await Promise.all([
+    forEachPeriod(destinationUsageForDays),
+    prisma.curatedCollection.findMany({
       where: { isDestination: true },
-      select: { scopeValue: true },
-    });
-    const featuredScopes = new Set(destinations.map((d) => normalizeDestination(d.scopeValue)));
+      orderBy: { sortOrder: "asc" },
+      select: { title: true, scopeValue: true },
+    }),
+  ]);
 
-    return {
-      mode: "usage",
-      items: topDestinations.map((row) => ({
+  if (usage.year.length === 0) {
+    const editorial: DestinationRanking = {
+      mode: "editorial",
+      items: collections.slice(0, 6).map((c) => ({ title: c.title })),
+    };
+    return { month: editorial, quarter: editorial, year: editorial };
+  }
+
+  const featuredScopes = new Set(
+    collections.map((c) => normalizeDestination(c.scopeValue)),
+  );
+  const toRanking = (rows: DestinationUsageRow[]): DestinationRanking => ({
+    mode: "usage",
+    items: mergeByNormalizedDestination(rows)
+      .slice(0, 6)
+      .map((row) => ({
         location: row.location,
         tripCount: row.tripCount,
         featured: featuredScopes.has(normalizeDestination(row.location)),
       })),
-    };
-  }
-
-  const editorial = await prisma.curatedCollection.findMany({
-    where: { isDestination: true },
-    orderBy: { sortOrder: "asc" },
-    take: 6,
-    select: { title: true },
   });
-  return { mode: "editorial", items: editorial };
+
+  return {
+    month: toRanking(usage.month),
+    quarter: toRanking(usage.quarter),
+    year: toRanking(usage.year),
+  };
 }

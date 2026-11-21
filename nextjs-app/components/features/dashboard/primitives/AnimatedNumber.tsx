@@ -1,17 +1,30 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { animate, useReducedMotion } from "framer-motion";
+import { animate } from "framer-motion";
 import { formatCompactVnd } from "@/lib/format/vnd";
+import { useMediaQuery } from "@/lib/hooks/use-media-query";
 
 export type AnimatedNumberFormat = "integer" | "compact-vnd";
 
+// A string option (not a function) on purpose: Server Components can't pass
+// functions to Client Components, so the formatting lives here.
 function formatValue(n: number, format?: AnimatedNumberFormat): string {
-  if (format === "compact-vnd") return `${formatCompactVnd(n)} ₫`;
+  if (format === "compact-vnd") return formatCompactVnd(n);
   return n.toLocaleString("en-US");
 }
 
-/** Counts up from 0 to `value` on mount. Skips the animation (renders the final value immediately) when the OS prefers reduced motion. */
+/**
+ * Counts up from 0 to `value` on mount. Skips the animation (shows the final
+ * value) when the OS prefers reduced motion.
+ *
+ * The preference comes from the repo's `useMediaQuery`, not framer-motion's
+ * `useReducedMotion`: that one reads `matchMedia` during the very first client
+ * render, so for a reduced-motion user hydration saw the final number where the
+ * server had rendered 0 — a hydration-mismatch error in the console. With
+ * `useMediaQuery` the first client render still assumes "no preference" (so it
+ * matches the server's 0) and then switches to the real value straight after.
+ */
 export function AnimatedNumber({
   value,
   format,
@@ -21,7 +34,7 @@ export function AnimatedNumber({
   format?: AnimatedNumberFormat;
   durationSeconds?: number;
 }) {
-  const prefersReducedMotion = useReducedMotion();
+  const prefersReducedMotion = useMediaQuery("(prefers-reduced-motion: reduce)");
   const [animatedDisplay, setAnimatedDisplay] = useState(0);
 
   useEffect(() => {

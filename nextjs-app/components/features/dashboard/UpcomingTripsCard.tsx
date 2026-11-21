@@ -1,27 +1,53 @@
 import { CalendarClock } from "lucide-react";
-import type { UpcomingTripItem } from "@/lib/server/admin-dashboard";
+import { monthDayShort } from "@/lib/dashboard/booking-trends";
+import type { Section } from "@/lib/dashboard/section";
+import type { UpcomingWeek } from "@/lib/dashboard/types";
 import { CardHeader } from "./primitives/CardHeader";
+import { CardEmpty, CardError } from "./primitives/CardNotice";
 import { GlassCard } from "./primitives/GlassCard";
-import { WeekTimeline } from "./primitives/WeekTimeline";
+import { WeekStrip } from "./primitives/WeekStrip";
 
-function shortDate(iso: string): string {
-  return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+/** This week (Mon–Sun, Vietnam) with each trip drawn from its start day to its end day. */
+export function UpcomingTripsCard({
+  section,
+  index = 0,
+}: {
+  section: Section<UpcomingWeek>;
+  index?: number;
+}) {
+  return (
+    <GlassCard index={index} testId="card-upcoming-trips">
+      <CardHeader label="Upcoming Trips" icon={CalendarClock} />
+      {section.status === "error" ? (
+        <CardError label="Couldn't load upcoming trips" />
+      ) : (
+        <UpcomingTripsBody week={section.data} />
+      )}
+    </GlassCard>
+  );
 }
 
-export function UpcomingTripsCard({ trips }: { trips: UpcomingTripItem[] }) {
+function UpcomingTripsBody({ week }: { week: UpcomingWeek }) {
+  const { trips, nextTrip } = week;
+
   return (
-    <GlassCard>
-      <CardHeader label="Upcoming Trips" icon={CalendarClock} />
-      <WeekTimeline
-        items={trips.map((trip) => ({
-          id: trip.id,
-          title: trip.name,
-          subtitle: trip.location,
-          startLabel: shortDate(trip.startDate),
-          endLabel: shortDate(trip.endDate),
-        }))}
-        emptyLabel="No upcoming trips"
-      />
-    </GlassCard>
+    <>
+      <WeekStrip weekStart={week.weekStart} today={week.today} trips={trips} />
+      {trips.length === 0 && (
+        <div className="mt-3">
+          <CardEmpty
+            message="No trips this week"
+            hint={nextTrip ? undefined : "Trips appear here from the day they start."}
+          />
+        </div>
+      )}
+      {nextTrip && (
+        <p className="mt-3 truncate text-xs text-white/80">
+          <span className="text-white/70">Next up:</span>{" "}
+          <span className="font-medium text-white">{nextTrip.name}</span> · {monthDayShort(nextTrip.startDate)} →{" "}
+          {monthDayShort(nextTrip.endDate)}
+        </p>
+      )}
+    </>
   );
 }

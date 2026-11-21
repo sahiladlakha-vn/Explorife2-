@@ -2,7 +2,7 @@
 
 import { useSyncExternalStore } from "react";
 
-/** Vietnam has a fixed UTC+7 offset — same constant-offset trick as lib/server/admin-dashboard.ts, kept local since this is copy, not data. */
+/** Vietnam has a fixed UTC+7 offset — same constant-offset trick as lib/server/admin-dashboard.ts used to need, kept local since this is copy, not data. */
 function vietnamGreeting(date: Date): string {
   const vietnamHour = (date.getUTCHours() + 7) % 24;
   if (vietnamHour < 12) return "Good morning";
@@ -22,5 +22,9 @@ const getSnapshot = () => vietnamGreeting(new Date());
  */
 export function Greeting() {
   const greeting = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
-  return <p className="text-ink/60 text-sm">{greeting}</p>;
+  return (
+    <p data-testid="greeting" className="text-sm text-white/70">
+      {greeting}
+    </p>
+  );
 }

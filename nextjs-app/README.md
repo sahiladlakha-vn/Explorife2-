@@ -52,7 +52,10 @@ npm run dev
 ## Testing
 
 - `npm run test` (or `npm run test:watch`) — Vitest unit tests for
-  `lib/server/`, `lib/auth/`, `lib/format/`.
+  `lib/server/`, `lib/auth/`, `lib/format/`, `lib/dashboard/`, plus markup
+  tests for the admin dashboard components (`*.test.tsx`, rendered with
+  `react-dom/server` — there is no DOM environment, so anything interactive
+  is covered by the Playwright suite instead).
 - `npm run typecheck` — `next typegen && tsc --noEmit`. `next typegen`
   (Next 16.4+) generates the ambient route types (`LayoutProps`,
   `PageProps`, etc.) into `.next/types` without doing a full build, so this
@@ -72,12 +75,17 @@ npm run dev
     layout shift when switching tabs, the original bug this feature was
     built to fix), `TripSwitcher`'s popover/bottom-sheet responsive variants
     and `Escape` handling, `/auth` page rendering, `requireRealUserOrRedirect`
-    (the no-session-protected-page-redirect test), and the `/profile/overview`
-    guest view. These either drive `/dev-preview/trips/[tripId]/*` —
-    fixture-data routes (`lib/dev-preview/fixtures.ts`) that bypass auth/DB
-    entirely and 404 outside `NODE_ENV=development`/`test`, see
-    `lib/dev-preview/guard.ts` — or hit routes that, for a session-less
-    visit, never make a network call to Supabase at all (`supabase.auth.getUser()`
+    (the no-session-protected-page-redirect test), the `/profile/overview`
+    guest view, and the admin dashboard (`e2e/admin-dashboard.spec.ts`: the
+    Month/Quarter/Year toggle, inert placeholders, empty/error states,
+    mobile layout, reduced motion). These either drive
+    `/dev-preview/trips/[tripId]/*` and `/dev-preview/admin/dashboard`
+    (+ `/empty`, `/errors`) — fixture-data routes
+    (`lib/dev-preview/fixtures.ts`, `lib/dev-preview/admin-dashboard-fixtures.ts`)
+    that bypass auth/DB entirely and 404 outside
+    `NODE_ENV=development`/`test`, see `lib/dev-preview/guard.ts` — or hit
+    routes that, for a session-less visit, never make a network call to
+    Supabase at all (`supabase.auth.getUser()`
     returns `AuthSessionMissingError` synchronously with no session cookie to
     validate, empirically confirmed — elapsed ms: 0-1 against an unreachable
     placeholder host — for both `@supabase/supabase-js` and `@supabase/ssr`'s
